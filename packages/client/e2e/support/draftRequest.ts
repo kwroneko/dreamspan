@@ -52,6 +52,80 @@ export function draftRequestTests() {
     await provider.stop()
   })
 
+  // The request opened in a browser tab of its own (a middle click on View request): that tab
+  // has no tab of the new chat, so the link opens one beside the request, which stays.
+  test("a first request in a new browser tab opens the new chat beside it", async ({ page, context }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetGenerationDefaults({ defaults: { model: originalModel, preset: null } })
+    )
+    await page.goto(`${server().url}/cards/${entityId}/chat`)
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill("The bell rings twice.")
+    await page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ }).click()
+    const opened = context.waitForEvent("page")
+    await page
+      .getByRole("dialog", { name: "Context" })
+      .getByRole("link", { name: "View request" })
+      .click({ button: "middle" })
+    const other = await opened
+    await other.setViewportSize({ width: 1440, height: 900 })
+    const heading = other.getByRole("heading", { name: "Your first request" })
+    await expect(heading).toBeVisible()
+    const strip = other.getByRole("tablist", { name: "Open tabs", exact: true })
+    await expect(strip).toHaveCount(0)
+
+    await other.getByRole("link", { name: "← Go to the new chat", exact: true }).click()
+    const tabs = strip.getByRole("tab")
+    await expect(tabs).toHaveCount(2)
+    const requestTab = strip.getByRole("tab", { name: /Your first request/ })
+    await expect(requestTab).toHaveAttribute("aria-selected", "false")
+    await expect(tabs.filter({ hasNotText: "Your first request" })).toHaveAttribute("aria-selected", "true")
+    await expect(other.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
+    await requestTab.click()
+    await expect(heading).toBeVisible()
+    await other.close()
+  })
+
+  // The request beside the chat (Open beside), then a reload, which makes the tabs' ids afresh
+  // (a deploy reloads the page too): the link still switches to the chat's own tab, in its own
+  // frame, and opens no second new chat where the request is.
+  test("after a reload, the link switches to the new chat's tab beside the request", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetGenerationDefaults({ defaults: { model: originalModel, preset: null } })
+    )
+    await page.goto(`${server().url}/cards/${entityId}/chat`)
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill("The tide is out.")
+    await page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ }).click()
+    await page
+      .getByRole("dialog", { name: "Context" })
+      .getByRole("link", { name: "View request" })
+      .click({ button: "right" })
+    await page.getByRole("menuitem", { name: /beside/i }).click()
+    const heading = page.getByRole("heading", { name: "Your first request" })
+    await expect(heading).toBeVisible()
+    const frames = page.locator("section[data-frame]")
+    await expect(frames).toHaveCount(2)
+    await page.reload()
+    await expect(heading).toBeVisible()
+    await expect(frames).toHaveCount(2)
+
+    await page.getByRole("link", { name: "← Go to the new chat", exact: true }).click()
+    const tabs = page.getByRole("tablist", { name: "Open tabs", exact: true }).getByRole("tab")
+    const chatTabs = tabs.filter({ hasNotText: "Your first request" })
+    const requestTab = tabs.filter({ hasText: "Your first request" })
+    await expect(chatTabs).toHaveCount(1)
+    await expect(requestTab).toHaveCount(1)
+    await expect(tabs).toHaveCount(2)
+    const focused = page.locator("section[data-frame][data-focused]")
+    await expect(focused.getByRole("tab", { selected: true })).toHaveCount(1)
+    await expect(focused.getByRole("tab", { selected: true })).not.toContainText("Your first request")
+    await expect(focused).not.toContainText("Your first request")
+    await expect(heading).toBeVisible()
+  })
+
   test("the first request's link switches to the new chat's own tab", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
