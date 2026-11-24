@@ -178,6 +178,42 @@ for (const width of [1440, 390])
     })
   }
 
+test("tag revert uses defaults only when the saved reply sections setting is absent", async ({ page }) => {
+  const preset = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreatePreset({ label: "Revert reply tags" })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${preset.id}`)
+  const section = page.locator('[data-preset-section="reply-sections"]')
+  const pairs = section.locator("[data-section-pair]")
+  const opening = pairs.first().getByRole("textbox", { name: "Opening tag" })
+  const closing = pairs.first().getByRole("textbox", { name: "Closing tag" })
+  const reverts = pairs.first().getByRole("button", { name: "Revert to last revision", exact: true })
+
+  await expect(pairs).toHaveCount(2)
+  await opening.fill("<plan>")
+  await closing.fill("</plan>")
+  await reverts.first().click()
+  await expect(opening).toHaveValue("<think>")
+  await reverts.last().click()
+  await expect(closing).toHaveValue("</think>")
+
+  const remove = section.getByRole("button", { name: "Remove this pair" })
+  await remove.last().click()
+  await remove.last().click()
+  await saveRevision(page)
+  await section.getByRole("button", { name: "Add another tag pair" }).click()
+  await expect(pairs).toHaveCount(1)
+  await expect.soft(reverts.first()).toBeDisabled({ timeout: 1000 })
+  await expect.soft(reverts.last()).toBeDisabled({ timeout: 1000 })
+  await opening.fill("<plan>")
+  await closing.fill("</plan>")
+  await reverts.first().click()
+  await expect.soft(opening).toHaveValue("", { timeout: 1000 })
+  await reverts.last().click()
+  await expect(closing).toHaveValue("")
+})
+
 // A focused geometry audit of the settings, independent of reply generation.
 for (const width of [390, 1024, 1440])
   for (const theme of ["light", "dark"] as const) {
