@@ -23,8 +23,7 @@ export const registerCharacterPanels = () =>
       const cast = view.cast
       const tab = (card: CastCard): PanelTabEntry => ({
         value: `card:${card.entityId}`,
-        label: cardChoiceLabel(card),
-        keepLabel: cast!.cards.some((other) => other.entityId !== card.entityId && other.name === card.name),
+        label: card.name,
         avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop },
         ...(cast!.playedByMe.includes(card.entityId) ? { note: "you" } : {})
       })
@@ -47,7 +46,15 @@ export const registerCharacterPanels = () =>
             avatar: { id: selected.slice(5), name: "Character", mediaId: null }
           })
       }
-      return tabs
+      // A tab says the character's name only. The persona's tab has its "you"; two other tabs that
+      // would read alike tell their cards apart on hover, by the card's version.
+      return tabs.map((entry, index) => {
+        const card = cast?.cards.find((c) => `card:${c.entityId}` === entry.value)
+        const twin =
+          entry.note === undefined &&
+          tabs.some((other, at) => at !== index && other.note === undefined && other.label === entry.label)
+        return card && twin ? { ...entry, hint: cardChoiceLabel(card) } : entry
+      })
     },
     component: lazyPanel(
       () => import("../chat/CharacterTab.tsx").then((module) => ({ default: module.CharacterTab })),
