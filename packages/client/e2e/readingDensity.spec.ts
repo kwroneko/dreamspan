@@ -178,11 +178,13 @@ for (const width of [1440, 390] as const)
       await open(page, width, theme, `${server().url}/chats/${chat.chatId}`)
       await expect.poll(() => release !== undefined).toBe(true)
       await expect(article(page, COUNT)).toBeInViewport()
-      // Take over from following before moving into the history. A synthetic scroll
-      // during initial end-positioning can otherwise be replaced by that end scroll.
-      await list(page).hover()
-      await page.mouse.wheel(0, -600)
-      await expect.poll(() => fromEnd(page)).toBeGreaterThan(100)
+      // Wait for the bottom position, then take over before placing the reading anchor.
+      await expect.poll(() => fromEnd(page)).toBeLessThanOrEqual(1)
+      await expect(async () => {
+        await list(page).hover()
+        await page.mouse.wheel(0, -600)
+        await expect.poll(() => fromEnd(page), { timeout: 1000 }).toBeGreaterThan(100)
+      }).toPass({ timeout: 10_000 })
       await list(page).evaluate((el) => {
         el.scrollTop = Math.round(el.scrollHeight * 0.45) + 37
       })
@@ -244,6 +246,9 @@ for (const width of [1440, 390] as const)
       await closePanel(page)
 
       // Reading in the middle of the chat: the text at the top of the view stays put both ways.
+      await list(page).hover()
+      await page.mouse.wheel(0, -600)
+      await expect.poll(() => fromEnd(page)).toBeGreaterThan(100)
       await list(page).evaluate((el) => {
         el.scrollTop = Math.round(el.scrollHeight * 0.45) + 37
       })

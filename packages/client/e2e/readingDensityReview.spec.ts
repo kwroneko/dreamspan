@@ -216,8 +216,9 @@ for (const width of [1440, 390])
           return { path, slots, versioned, forkId: chat.currentForkId! }
         })
       )
-      await page.goto(`${server().url}/chats/${chatId}?fork=${data.forkId}`)
+      const base = `${server().url}/chats/${chatId}?fork=${data.forkId}`
       for (const slot of data.slots) {
+        await page.goto(`${base}&slot=${slot}`)
         const row = page.locator(`article[data-slot="${slot}"]`)
         await row.scrollIntoViewIfNeeded()
         if (width === 390) await row.locator("header").tap()
@@ -249,10 +250,7 @@ for (const width of [1440, 390])
             path: join(process.env.SCREENSHOT_DIR, `compact-media-${data.slots.indexOf(slot)}-${width}-${theme}.png`)
           })
       }
-      await page.goto(`${server().url}/chats/${chatId}?fork=${data.forkId}`)
-      await page.getByTestId("messages").evaluate((el) => {
-        el.scrollTop = 0
-      })
+      await page.goto(`${base}&slot=${data.versioned.slotId}`)
       const versioned = page.locator(`article[data-slot="${data.versioned.slotId}"]`)
       await versioned.scrollIntoViewIfNeeded()
       if (width === 390) await versioned.locator(".markdown").tap()
