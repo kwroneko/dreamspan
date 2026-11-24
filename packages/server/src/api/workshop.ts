@@ -3,7 +3,7 @@ import { PluginHost } from "../plugins/Host.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { HostFolderRefusal } from "../files/hostFolders.ts"
 import { FILES_TOP } from "@dreamspan/shared/files.ts"
-import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
+import { FILE_UNDO_ON_HOST, groupCreationUndos } from "../db/workshopEffects.ts"
 import { changedUnits, docOfUnits } from "@dreamspan/shared/changeReversal.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { EffectUndoRefused, HostFolderRefused } from "@dreamspan/shared/workshopApi.ts"
@@ -522,24 +522,20 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           // Revert all of this reply (spec/WORKSHOP-CARDS.md §8.1): an item's edits are reverted
           // as its row's Revert does, three-way; everything else is undone as before.
           // An item the reply made goes to the bin with its edits, by the built undo.
-          const made = new Set(rows.filter((e) => e.kind === "library.create").map((e) => e.targetId))
+          const groups = groupCreationUndos(rows, (e) => e.targetId)
           const itemOf = (e: RolloutEffect) =>
-            e.kind === "library.revise" && !made.has(e.targetId)
-              ? `entity:${e.targetId}`
-              : cardEdit(e)
-                ? `file:${e.targetId}`
-                : null
+            e.kind === "library.revise" ? `entity:${e.targetId}` : cardEdit(e) ? `file:${e.targetId}` : null
           const reverted = (e: RolloutEffect) =>
             e.reversion !== undefined && e.reversion.fields.length >= e.reversion.of.length
-          if (!rows.some((e) => e.kind.startsWith("plugin.") || itemOf(e) !== null)) {
+          if (!groups.some(({ effect }) => effect.kind.startsWith("plugin.") || itemOf(effect) !== null)) {
             const result = yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
             yield* notifyUndo(user.id, result.undone)
             return result
           }
           const undone: Array<(typeof rows)[number]> = []
           const items = new Set<string>()
-          for (const [at, row] of rows.entries()) {
-            if (row.kind === "library.revise" && made.has(row.targetId)) continue
+          const leftAfter = (at: number) => groups.slice(at + 1).flatMap(({ effect, edits }) => [effect, ...edits])
+          for (const [at, { effect: row, edits }] of groups.entries()) {
             const item = itemOf(row)
             if (item !== null) {
               if (items.has(item) || reverted(row)) continue
@@ -560,7 +556,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                 return {
                   undone,
                   refused: { effect: row, reason },
-                  left: rows.slice(at + 1).filter((e) => !group.includes(e))
+                  left: leftAfter(at).filter((e) => !group.includes(e))
                 }
               undone.push(...group)
               continue
@@ -577,15 +573,13 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                       ? error.message
                       : "This change couldn't be undone. Undo newer changes first."
                 },
-                left: rows.slice(at + 1)
+                left: leftAfter(at)
               }
             }
             undone.push(result.value)
-            if (row.kind === "library.create") {
-              for (const edit of rows.filter((e) => e.kind === "library.revise" && e.targetId === row.targetId)) {
-                const covered = yield* reader.RolloutEffectFor({ ...keyOf(edit), userId: user.id })
-                if (covered.undoneAt !== null) undone.push(covered)
-              }
+            for (const edit of edits) {
+              const covered = yield* reader.RolloutEffectFor({ ...keyOf(edit), userId: user.id })
+              if (covered.undoneAt !== null) undone.push(covered)
             }
           }
           return { undone, refused: null, left: [] }

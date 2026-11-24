@@ -480,6 +480,35 @@ describe("redo", () => {
 })
 
 describe("revert all of this reply", () => {
+  for (const threeWay of [false, true]) {
+    it.live(`tries a made item at its newest edit before older items (three-way: ${threeWay})`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        if (threeWay) yield* agentEdit(f, [{ field: "description", text: "An older edit." }], "c0")
+        const first = yield* f.run("create_card", { name: "Keeper A" }, "c1")
+        yield* f.run("create_card", { name: "Keeper B" }, "c2")
+        const refId = JSON.parse(first.text).id as RefId
+        yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Expanded." }] }, "c3")
+        yield* userEdit(api, refId, "personality", "Changed by hand.")
+        const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+        assert.strictEqual(report.refused?.effect.toolCallId, "c1")
+        assert.deepStrictEqual(
+          report.left.map((e) => e.toolCallId),
+          threeWay ? ["c2", "c0"] : ["c2"]
+        )
+        assert.isEmpty(report.undone)
+        const library = yield* api.ListLibrary({ kind: "card" })
+        assert.include(
+          library.map((r) => r.label),
+          "Keeper B"
+        )
+        if (threeWay) assert.strictEqual((yield* f.doc()).description, "An older edit.")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+  }
+
   it.live("reverts an edited item three-way, keeping the user's later edit, and bins what the reply made", () => {
     const config = testConfig()
     return Effect.gen(function* () {

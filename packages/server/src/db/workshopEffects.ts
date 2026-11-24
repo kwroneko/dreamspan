@@ -113,6 +113,33 @@ export const toRolloutEffect = (row: EffectRow): RolloutEffect => ({
   createdAt: row.created_at
 })
 
+/** From effects already ordered newest first, schedule each creation at its newest standing effect. */
+export const groupCreationUndos = <A extends { kind: string }>(
+  rows: ReadonlyArray<A>,
+  targetId: (row: A) => string
+) => {
+  type Group = { effect: A; edits: Array<A> }
+  const made = new Map<string, Group>()
+  for (const row of rows) {
+    if (row.kind === "library.create") made.set(targetId(row), { effect: row, edits: [] })
+  }
+  const groups: Array<Group> = []
+  const scheduled = new Set<Group>()
+  for (const row of rows) {
+    const group = row.kind === "library.create" || row.kind === "library.revise" ? made.get(targetId(row)) : undefined
+    if (!group) {
+      groups.push({ effect: row, edits: [] })
+      continue
+    }
+    if (!scheduled.has(group)) {
+      groups.push(group)
+      scheduled.add(group)
+    }
+    if (row.kind === "library.revise") group.edits.push(row)
+  }
+  return groups
+}
+
 // Undo policies are replaceable worker registrations; the transaction/ownership boundary is kernel.
 interface Undoer {
   readonly id: string
@@ -1429,7 +1456,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 OR rollout_id IN (SELECT id FROM rollouts WHERE spawned_by_rollout_id = ${input.rolloutId}))
               AND undone_at IS NULL
             ORDER BY created_at DESC, rollout_id DESC, tool_call_id DESC, seq DESC`
-          const created = new Set(rows.filter((row) => row.kind === "library.create").map((row) => row.target_id))
+          const groups = groupCreationUndos(rows, (row) => row.target_id)
           const completed = new Map<string, RolloutEffect>()
           const key = (rollout: string, call: string, seq: number) => JSON.stringify([rollout, call, seq])
           const undone = () =>
@@ -1437,8 +1464,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               const done = completed.get(key(row.rollout_id, row.tool_call_id, row.seq))
               return done ? [done] : []
             })
-          for (const [at, row] of rows.entries()) {
-            if (row.kind === "library.revise" && created.has(row.target_id)) continue
+          for (const [at, { effect: row }] of groups.entries()) {
             const outcome = yield* sql.withTransaction(undoRow(input.userId, row)).pipe(
               Effect.map((effect) => ({ effect }) as const),
               Effect.catchTag(["EffectUndoRefused", "NotFound"], (error) =>
@@ -1455,7 +1481,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             return {
               undone: undone(),
               refused: { effect: toRolloutEffect(row), reason: outcome.reason },
-              left: rows.slice(at + 1).map(toRolloutEffect)
+              left: groups.slice(at + 1).flatMap(({ effect, edits }) => [effect, ...edits].map(toRolloutEffect))
             }
           }
           return { undone: undone(), refused: null, left: [] }
