@@ -359,7 +359,7 @@ export function EditControls({
       </div>
       <span className="flex-1" />
       <EditTokens text={text} session={session} />
-      {selection && <EditorTextActions text={text} selection={selected} shown size="row" />}
+      {selection && <EditorTextActions text={text} selection={selected} shown size="row" keepSelection />}
       {tools}
     </div>
   )
