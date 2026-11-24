@@ -20,6 +20,24 @@ const stateOf = (api: Api, chat: Chat) =>
   })
 
 describe("workshop card and persona", () => {
+  it.live("keeps an archived default persona through workshop creation", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const ana = yield* api.CreateCard({ label: "Ana", name: "Ana", persona: true })
+      yield* api.SetWorkshopPersona({ persona: ana.entityId })
+      yield* api.SetRefArchived({ refId: ana.id, archived: true })
+      const without = yield* api.CreateWorkshop({})
+      assert.isEmpty((yield* stateOf(api, without)).playedByMe)
+      assert.isNull((yield* api.GetWorkshopDefaults({})).persona)
+
+      yield* api.SetRefArchived({ refId: ana.id, archived: false })
+      assert.strictEqual((yield* api.GetWorkshopDefaults({})).persona, ana.entityId)
+      const withAna = yield* api.CreateWorkshop({})
+      assert.deepStrictEqual((yield* stateOf(api, withAna)).playedByMe, [ana.entityId])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("rolls back first-workshop seeds on failure and never recreates a deleted persona", () => {
     const config = testConfig()
     return Effect.gen(function* () {
