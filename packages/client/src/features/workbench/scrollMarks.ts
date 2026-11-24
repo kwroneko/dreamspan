@@ -8,23 +8,24 @@ const MAX_MARKS = 20
 const PATIENCE_MS = 3000
 /** Frames a restored element's length must hold still before it's left alone. */
 const SETTLED_FRAMES = 20
+const PAGE_SCROLL = "data-page-scroll"
 
-/** An element's tag and attribute names: not its classes or values, which change while it loads. */
+/** An element's tag and stable attribute names, also matching scroll marks saved before `PAGE_SCROLL`. */
 const whatOf = (element: Element) =>
   [
     element.tagName.toLowerCase(),
     ...element
       .getAttributeNames()
-      .filter((name) => name !== "class" && name !== "style" && !name.startsWith("aria-"))
+      .filter((name) => name !== "class" && name !== "style" && name !== PAGE_SCROLL && !name.startsWith("aria-"))
       .sort()
   ].join(" ")
 
-/** The scrolled elements under `root`, outermost first. */
+/** The scrolled elements and the shared page scroller under `root`, outermost first. */
 export const scrollMarks = (root: HTMLElement): Array<ScrollMark> => {
   const marks: Array<ScrollMark> = []
   const walk = (element: Element, path: Array<number>) => {
     if (marks.length >= MAX_MARKS) return
-    if (element !== root && (element.scrollTop !== 0 || element.scrollLeft !== 0))
+    if (element !== root && (element.scrollTop !== 0 || element.scrollLeft !== 0 || element.hasAttribute(PAGE_SCROLL)))
       marks.push({ path, what: whatOf(element), top: element.scrollTop, left: element.scrollLeft })
     Array.from(element.children).forEach((child, i) => walk(child, [...path, i]))
   }

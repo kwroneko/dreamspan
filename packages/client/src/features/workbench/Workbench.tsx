@@ -279,20 +279,17 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
   const [history] = useState(() => store.createHistory(tab.id, () => scrollMarks(container)))
   const [router] = useState(() => buildRouter({ history, layouts: { app: CenterPage } }))
   useLayoutEffect(() => store.attach(tab.id, history), [store, tab.id, history])
-  // Back or forward to an entry: its scroll comes back, unless its view keeps its own place in
-  // its history state (a chat's reading place).
+  // Back or forward to an entry: its scroll comes back unless a chat restores its reading place.
   useEffect(() => {
     let stop = () => {}
     const unsubscribe = history.subscribe(({ action }) => {
       stop()
       if (action.type !== "GO" && action.type !== "BACK" && action.type !== "FORWARD") return
       const entry = store.shownEntry(tab.id)
-      // TanStack's own keys (`key`, `__TSR_…`, `__hashScrollIntoViewOptions`) aren't the view's.
-      const own = Object.keys(entry?.state ?? {}).some((key) => key !== "key" && !key.startsWith("__"))
-      const key = history.location.state.__TSR_key
+      const { chatReading, __TSR_key: key } = history.location.state
       // Once the router has rendered that entry's page, not the one that left.
       const ready = () => router.state.status === "idle" && router.state.resolvedLocation?.state.__TSR_key === key
-      if (entry?.scroll && !own) stop = restoreScroll(container, entry.scroll, ready)
+      if (entry?.scroll && chatReading === undefined) stop = restoreScroll(container, entry.scroll, ready)
     })
     return () => {
       unsubscribe()

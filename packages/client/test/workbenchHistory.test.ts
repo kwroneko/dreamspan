@@ -3,6 +3,7 @@
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  besideAt,
   decodeHistory,
   decodeOrder,
   destination,
@@ -15,6 +16,7 @@ import {
   replace,
   type TabHistory
 } from "../src/features/workbench/history.ts"
+import { shellSearchKeys } from "../src/features/workbench/kinds.ts"
 import { allTabs, findTab, focusedTab, frameOfTab, saveLayout } from "../src/features/workbench/model.ts"
 import { WorkbenchStore } from "../src/features/workbench/store.ts"
 
@@ -48,6 +50,12 @@ describe("the model", () => {
   it("a step to the URL shown replaces it rather than adding a second entry", () => {
     const h = push(freshHistory("/a"), { href: "/a", state: { reading: 1 } })
     expect(h.entries).toEqual([{ href: "/a", state: { reading: 1 } }])
+  })
+
+  it("keeps a literal question mark in a query key when matching adjacent entries", () => {
+    const h = push(freshHistory("/??key=value&other=1"), { href: "/b" })
+    expect(besideAt(h, "/?other=1&%3Fkey=value", -1)).toBe(-1)
+    expect(besideAt(h, "/?key=value&other=1", -1)).toBe(0)
   })
 
   it(`keeps at most ${MAX_ENTRIES} entries, the oldest dropped`, () => {
@@ -185,6 +193,25 @@ const startStore = (href: string, saved: unknown = null, save: (layout: unknown)
 }
 
 describe("the store", () => {
+  it("the browser's Back finds the tab entry when the mirrored URL reorders sidebar params", async () => {
+    const unregister = shellSearchKeys.register({ id: "test.sidebar", keys: ["sideShow"] })
+    const initial = "/?sideShow=groups&show=src.cardex"
+    const { browser, store, stop } = startStore(initial)
+    const tab = focusedTab(store.layout)!.id
+    const view = mount(store, tab)
+    try {
+      expect(browser.location.href).toBe("/?show=src.cardex&sideShow=groups")
+      await pushIn(view.history, "/sources/cardex/cards/1")
+      browser.back()
+      expect(view.history.location.href).toBe(initial)
+      expect(store.stepLabel(tab, 1)).not.toBeNull()
+    } finally {
+      view.stop()
+      stop()
+      unregister()
+    }
+  })
+
   it("a preview tab following a link to another item takes a step; ← and → walk it", async () => {
     const { browser, store, stop } = startStore("/")
     const tab = focusedTab(store.layout)!.id
@@ -301,6 +328,28 @@ describe("the store", () => {
     expect(store.stepLabel(tab, -1)).not.toBeNull()
     view.stop()
     stop()
+  })
+
+  it.each(["forward", "go"] as const)("browser %s restores the later visit to the same URL", async (action) => {
+    const cardex = "/?show=src.cardex"
+    const { browser, store, stop } = startStore(cardex)
+    const tab = focusedTab(store.layout)!.id
+    const view = mount(store, tab)
+    try {
+      await pushIn(view.history, "/")
+      view.history.push(cardex, { visit: 2 })
+      await settle()
+      browser.back()
+      expect(view.history.location.href).toBe("/")
+      if (action === "forward") browser.forward()
+      else browser.go(1)
+      expect(view.history.location.href).toBe(cardex)
+      expect(store.shownEntry(tab)?.state?.visit).toBe(2)
+      expect(store.stepLabel(tab, 1)).toBeNull()
+    } finally {
+      view.stop()
+      stop()
+    }
   })
 
   it("a reload gives each tab its history back from session storage; closing a tab drops it", async () => {

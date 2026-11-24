@@ -239,12 +239,9 @@ export class WorkbenchStore {
   start() {
     this.unsubscribe = this.browser.subscribe(({ location, action }) => {
       if (this.mirroring) return
-      this.fromBrowser(
-        location.href,
-        clean(location.state),
-        action.type === "PUSH" ? "PUSH" : "REPLACE",
-        action.type === "BACK" || action.type === "FORWARD" || action.type === "GO"
-      )
+      const traversal =
+        action.type === "GO" ? action.index : action.type === "BACK" ? -1 : action.type === "FORWARD" ? 1 : 0
+      this.fromBrowser(location.href, clean(location.state), action.type === "PUSH" ? "PUSH" : "REPLACE", traversal)
     })
     // The focused tab's URL, as its view settled it: the browser shows the same.
     this.mirror("REPLACE")
@@ -463,10 +460,10 @@ export class WorkbenchStore {
    * The browser went back or forward to `href`: when that's the entry right beside the one the
    * tab shows, the tab moves there instead of writing over the entry it shows.
    */
-  private traverse(tabId: string, href: string) {
+  private traverse(tabId: string, href: string, traversal: number) {
     const history = this.tabHistories.get(tabId)
     const router = this.histories.get(tabId)
-    const delta = history ? besideAt(history, href) : 0
+    const delta = history ? besideAt(history, href, traversal) : 0
     if (!router || delta === 0) return false
     this.applying = true
     try {
@@ -545,12 +542,12 @@ export class WorkbenchStore {
     if (focused) this.mirror(action)
   }
 
-  private fromBrowser(browserHref: string, state: HistoryState, action: Action, traversal = false) {
+  private fromBrowser(browserHref: string, state: HistoryState, action: Action, traversal: number) {
     const href = withoutLayoutParams(browserHref)
     const focused = focusedTab(this.layout)
     if (focused && itemKey(focused.href) === itemKey(href)) {
       // The tab first, so the browser's URL (Back's place) isn't copied back over it.
-      if (!traversal || !this.traverse(focused.id, href)) this.apply(focused.id, href, state, action)
+      if (!traversal || !this.traverse(focused.id, href, traversal)) this.apply(focused.id, href, state, action)
       this.set(setTabHref(this.layout, focused.id, href))
       return
     }
@@ -618,12 +615,12 @@ export class WorkbenchStore {
       state?: HistoryState
       mirror?: Action
       affinity?: boolean
-      /** The browser went back or forward here: a tab whose entry beside is this moves there. */
-      traversal?: boolean
+      /** The browser's history delta: a tab whose entry beside is this moves there. */
+      traversal?: number
     } = {}
   ) {
     const href = withoutLayoutParams(link)
-    const { state, mirror = "PUSH", affinity = true, near, traversal = false, ...rest } = options
+    const { state, mirror = "PUSH", affinity = true, near, traversal = 0, ...rest } = options
     const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, {
       ...rest,
       ...(affinity && this.wide() ? { affinity: affinityOf } : {}),
@@ -633,7 +630,7 @@ export class WorkbenchStore {
     })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.
     if (findTab(this.layout, tabId)) {
-      if (!traversal || !this.traverse(tabId, href)) this.apply(tabId, href, state ?? {}, "PUSH")
+      if (!traversal || !this.traverse(tabId, href, traversal)) this.apply(tabId, href, state ?? {}, "PUSH")
     } else {
       if (state && Object.keys(state).length > 0) this.initialState.set(tabId, state)
       // Back inside the new tab (an Import page's own Back) returns to where it was opened.
