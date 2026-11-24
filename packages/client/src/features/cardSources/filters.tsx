@@ -1074,8 +1074,9 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
       </Field>
       <ul
         aria-label="Creators"
-        // Name, site and count in columns shared by every row (a subgrid), the mark last.
-        className={`grid grid-cols-[minmax(0,1fr)_auto_auto_1rem] content-start gap-x-3 ${
+        // Each row: the name filling and truncating, then the site, the count in a fixed
+        // right-aligned column and the mark, with one gap between them however wide the list.
+        className={`flex flex-col ${
           popover
             ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${chosen.length ? "border-b" : "-mb-3"}`
             : ""
@@ -1084,7 +1085,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
         {suggestions.items.map((item) => {
           const on = chosen.includes(item.value)
           return (
-            <li key={item.value} className="col-span-4 grid grid-cols-subgrid">
+            <li key={item.value} className="flex min-w-0">
               <button
                 type="button"
                 aria-pressed={on}
@@ -1093,20 +1094,20 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
                   creatorNames.set(item.value, item.label)
                   write(mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value])
                 }}
-                className={`col-span-4 grid h-8 grid-cols-subgrid items-center rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-[1.125rem]" : "px-3"}`}
+                className={`flex h-8 min-w-0 flex-1 items-center gap-3 rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-[1.125rem]" : "px-3"}`}
               >
                 <span
-                  className={`min-w-0 truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
+                  className={`min-w-0 flex-1 truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
                 >
                   {item.label}
                 </span>
-                <span className="justify-self-end rounded border border-border px-1.5 text-xs leading-5 text-muted">
+                <span className="shrink-0 rounded border border-border px-1.5 text-xs leading-5 text-muted">
                   {siteName(item.value.slice(0, item.value.indexOf("/")))}
                 </span>
-                <span className="justify-self-end text-xs text-muted tabular-nums">
+                <span className="w-14 shrink-0 text-right text-xs text-muted tabular-nums">
                   {item.count !== undefined ? count(item.count) : ""}
                 </span>
-                <span aria-hidden="true" className={`inline-flex size-4 items-center justify-center ${tone}`}>
+                <span aria-hidden="true" className={`inline-flex size-4 shrink-0 items-center justify-center ${tone}`}>
                   {on && <Icon name={mode === "not" ? "minus" : "check"} />}
                 </span>
               </button>
@@ -1114,11 +1115,9 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
           )
         })}
         {!suggestions.loading && !suggestions.problem && suggestions.items.length === 0 && (
-          <li className="col-span-4 px-3 py-1.5 text-sm text-muted">
-            {text.trim() ? "No creators match" : "No creators listed"}
-          </li>
+          <li className="px-3 py-1.5 text-sm text-muted">{text.trim() ? "No creators match" : "No creators listed"}</li>
         )}
-        <li className="col-span-4">
+        <li>
           <LoadMore suggestions={suggestions} />
         </li>
       </ul>
