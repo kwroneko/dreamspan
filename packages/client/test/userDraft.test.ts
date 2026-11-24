@@ -583,6 +583,39 @@ it("a deletion that wins during a save does not let a stale form commit its text
   expect(store.snapshot().recovered).toBe(1)
 })
 
+it("a queued Save cannot commit a form snapshot its autosave refused", async () => {
+  const initial = JSON.stringify({ temperature: 0.55, topP: 1 })
+  const local = JSON.stringify({ temperature: 0.55, topP: 0.8 })
+  const remote = JSON.stringify({ temperature: 0.65, topP: 1 })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const held = deferred<Draft>()
+  const persist = handlers.SaveUserDraft
+  let started = false
+  handlers.SaveUserDraft = () => {
+    started = true
+    handlers.SaveUserDraft = persist
+    return held.promise
+  }
+  store.type(local, initial)
+  await until(() => started)
+  const save = vi.fn(async () => true)
+  const queued = store.commit(local, save)
+  held.resolve(new Draft({ ...draft(remote, 2), refused: { at: 2, content: local } }))
+
+  expect(await queued).toBe(false)
+  expect(save).not.toHaveBeenCalled()
+  expect(saves).toEqual([])
+  expect(store.snapshot().text).toBe(remote)
+  expect(store.snapshot().refused?.content).toBe(local)
+
+  store.type(local, remote)
+  expect(await store.commit(local, save)).toBe(true)
+  expect(saves[0]).toMatchObject({ content: local, expectedRowVersion: 2 })
+  expect(save).toHaveBeenCalledOnce()
+})
+
 it("typing into the empty field before its tombstone read finishes starts from that deletion", async () => {
   const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
   const { store, handlers, saves } = harness(tombstone, "First message")

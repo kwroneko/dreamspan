@@ -62,6 +62,7 @@ export class UserDraftStore {
   private lastPersistAcknowledged = false
   /** The last save was a form's, refused as out of date (`Draft.refused`). */
   private lastPersistRefused = false
+  private refusedEdit: { edit: number; content: string } | null = null
   private edits = 0
   private acknowledgedEdit = -1
   private pendingTypes = new Set<{
@@ -162,6 +163,7 @@ export class UserDraftStore {
     }
     this.lastPersistAcknowledged = true
     this.lastPersistRefused = result.value.refused !== undefined
+    if (this.lastPersistRefused && !seed) this.refusedEdit = { edit, content }
     this.draft = result.value
     // A deletion may have won while this request was in flight. Recovery acknowledges
     // the copy into the bin, not as new field text; never rebase later typing onto it unseen.
@@ -511,6 +513,8 @@ export class UserDraftStore {
     const edit = this.edits
     const editingFrom = this.editingFrom
     const operation = this.queue.then(async () => {
+      // An autosave can replace the displayed form and base while this Save is queued.
+      if (this.refusedEdit?.edit === edit && this.refusedEdit.content === content) return false
       if (!(await this.persist(content, false, editingFrom, edit))) return false
       const draft = this.draft!
       if (!(await save())) return false
