@@ -167,6 +167,7 @@ export function RangeField({
 }) {
   const shown = value ?? fallback
   const format = (n: number) => (whole ? numberText(n) : String(n))
+  const sliderStep = max > min ? Math.min(step, max - min) : step
   return (
     <div className="flex max-w-xl min-w-0 flex-col gap-1.5" data-range={field}>
       <Field
@@ -213,10 +214,13 @@ export function RangeField({
         label={`${label} slider`}
         value={shown}
         min={min}
-        max={Math.max(min + step, max)}
-        step={step}
-        largeStep={whole ? Math.max(step, Math.round((max - min) / 20 / step) * step) : step * 10}
+        max={max}
+        step={sliderStep}
+        largeStep={
+          whole ? Math.max(sliderStep, Math.round((max - min) / 20 / sliderStep) * sliderStep) : sliderStep * 10
+        }
         valueText={format}
+        disabled={min === max}
         scale={scale}
         onValueChange={onSlide}
       />
