@@ -5,9 +5,10 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
-import { useEffect, useId, useRef, useSyncExternalStore } from "react"
+import { useContext, useEffect, useId, useRef, useSyncExternalStore } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "../chat/chatPlace.ts"
+import { CloseChatPanelSheet } from "../chat/panels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -202,15 +203,18 @@ function AutoRunDialog({
   onClose: () => void
 }) {
   const [, store] = useRun(context.session)
+  const closeSheet = useContext(CloseChatPanelSheet)
   const [turns = "5", tokens = ""] = value.split(":")
   const form = useId()
   const bounds = parseBounds(turns, tokens)
   const problem = blocked(context)
   const tools = context.view.cast?.agentEnabled === true
-  const start = () => {
+  const start = async () => {
     if (bounds.turns === null || bounds.tokenLimit === undefined || problem !== null) return
-    store.set(newRun(context.view.forkId, bounds.turns, bounds.tokenLimit, tipOf(context)))
+    const run = newRun(context.view.forkId, bounds.turns, bounds.tokenLimit, tipOf(context))
     onClose()
+    if (closeSheet !== null) await closeSheet()
+    store.set(run)
   }
   return (
     <Dialog
@@ -224,7 +228,7 @@ function AutoRunDialog({
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
-          start()
+          void start()
         }}
       >
         <Field

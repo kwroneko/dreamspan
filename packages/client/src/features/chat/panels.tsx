@@ -3,7 +3,7 @@ import type { EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
 import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
+import { Component, createContext, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { kindHides } from "./kindLooks.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -12,6 +12,9 @@ import { Loading } from "../../ui/Spinner.tsx"
 import { isChunkLoadError, reportChunkFailure, StalePart, useStaleBuild } from "../../staleBuild.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, ChatView } from "./session.ts"
+
+/** Actions that return to the composer can dismiss the sheet that covers it. */
+export const CloseChatPanelSheet = createContext<(() => void | Promise<void>) | null>(null)
 
 export interface PanelProps {
   readonly tab: string

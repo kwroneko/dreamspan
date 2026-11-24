@@ -21,6 +21,7 @@ import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 import {
   chatPanels,
+  CloseChatPanelSheet,
   isPanelTab,
   PanelContent,
   PendingPanelContent,
@@ -189,7 +190,7 @@ export function ChatSidePanel({
   /** The chat's title, so a phone's sheet says which chat it's about. */
   title: string
   onTab: (tab: PanelTab) => void
-  onClose: () => void
+  onClose: () => void | Promise<void>
   /** Beside the workbench's frames rather than beside the chat (features/workbench). */
   host?: HTMLElement | null
 } & SidePanelContent) {
@@ -346,7 +347,9 @@ export function ChatSidePanel({
     return (
       <Sheet
         open
-        onOpenChange={(open) => !open && onClose()}
+        onOpenChange={(open) => {
+          if (!open) void onClose()
+        }}
         title={kindTitle(title, content.view.chat?.kind)}
         dedupeLabels={false}
         container={document.getElementById("content")}
@@ -356,10 +359,12 @@ export function ChatSidePanel({
             : undefined
         }
       >
-        <div {...kindRoot} className="flex min-h-0 flex-1 flex-col">
-          {nav}
-          {panels}
-        </div>
+        <CloseChatPanelSheet value={onClose}>
+          <div {...kindRoot} className="flex min-h-0 flex-1 flex-col">
+            {nav}
+            {panels}
+          </div>
+        </CloseChatPanelSheet>
       </Sheet>
     )
   const aside = (
@@ -530,7 +535,7 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
       if (next === latest.current.panel || (next !== null && !isPanelTab(next, latest.current.view))) return
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
-      void navigate({
+      return navigate({
         to: ".",
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
           next === null ? prev : { ...prev, panel: next },
