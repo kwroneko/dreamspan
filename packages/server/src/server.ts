@@ -84,6 +84,7 @@ import {
   HttpIncomingMessage,
   HttpRouter,
   HttpServerRequest,
+  HttpServerRespondable,
   HttpServerResponse,
   HttpStaticServer
 } from "effect/http"
@@ -635,8 +636,49 @@ const AuthRoutes = Layer.mergeAll(
   )
 )
 
+/** The client build's content-hashed files: a new build gives them new names. */
+const HASHED_ASSETS = "/assets/"
+
+/**
+ * Whether a request path names a hashed asset as the static server will read it: decoded once
+ * and normalized, so `/assets/..%2findex.html` is not, and no HTML page is.
+ */
+const hashedAsset = (path: string) => {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {
+    return false
+  }
+  const normalized = posix.normalize(decoded)
+  return !decoded.includes("\0") && normalized.startsWith(HASHED_ASSETS) && !/\.html?$/i.test(normalized)
+}
+
+/**
+ * The client build. Hashed assets are kept for a year; everything else (index.html, the SPA
+ * fallback, unhashed files) is revalidated by its ETag on every load, so a deploy shows at once.
+ */
 const StaticRoutes = Layer.unwrap(
-  Effect.map(AppConfig, (config) => HttpStaticServer.layer({ root: config.clientDist, spa: true }))
+  Effect.map(AppConfig, (config) =>
+    Layer.effectDiscard(
+      Effect.gen(function* () {
+        const router = yield* HttpRouter.HttpRouter
+        const pages = yield* HttpStaticServer.make({ root: config.clientDist, spa: true, cacheControl: "no-cache" })
+        const assets = yield* HttpStaticServer.make({
+          root: config.clientDist,
+          index: undefined,
+          cacheControl: "public, max-age=31536000, immutable"
+        })
+        yield* router.add(
+          "GET",
+          "/*",
+          Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+            hashedAsset(request.url.split("?")[0]!) ? assets : pages
+          ).pipe(Effect.catch(HttpServerRespondable.toResponse))
+        )
+      })
+    )
+  )
 )
 
 const DatabaseLive = Layer.unwrap(
