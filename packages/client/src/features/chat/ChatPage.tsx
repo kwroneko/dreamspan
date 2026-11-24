@@ -231,17 +231,38 @@ export function MessageList({
     [rows, metrics.estimate]
   )
   const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
+  /** Holds the list at the end, or lets go of it, for us and TanStack Virtual alike. */
+  const setFollow = useCallback(
+    (instance: Virtualizer<HTMLDivElement, Element>, on: boolean) => {
+      follow.stuck = on
+      instance.options.scrollEndThreshold = on ? 1 : -1
+    },
+    [follow]
+  )
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, changed: (offset: number, isScrolling: boolean) => void) => {
-      offsetChanged.current = changed
-      const stop = observeElementOffset(instance, changed)
+      const report = (offset: number, isScrolling: boolean) => {
+        const list = instance.scrollElement
+        // The observer's idle callback can see a native jump before its scroll event.
+        // Release bottom-follow before the observer replaces the previous offset.
+        if (
+          follow.stuck &&
+          list !== null &&
+          offset < (instance.scrollOffset ?? 0) &&
+          list.scrollHeight - offset - list.clientHeight > END_PX
+        )
+          setFollow(instance, false)
+        changed(offset, isScrolling)
+      }
+      offsetChanged.current = report
+      const stop = observeElementOffset(instance, report)
       return () => {
         offsetChanged.current = null
         stop?.()
       }
     },
-    []
+    [follow, setFollow]
   )
   // While the list scrolls, TanStack Virtual measures newly mounted rows only in its resize
   // observer, before the browser paints, but re-renders for a size that moves nothing above the
@@ -295,16 +316,9 @@ export function MessageList({
     // it mustn't (below).
     scrollEndThreshold: follow.stuck ? 1 : -1
   })
-  /** Holds the list at the end, or lets go of it, for this component and TanStack Virtual alike. */
-  const hold = useCallback(
-    (on: boolean) => {
-      follow.stuck = on
-      virtualizer.options.scrollEndThreshold = on ? 1 : -1
-    },
-    [follow, virtualizer]
-  )
+  const hold = useCallback((on: boolean) => setFollow(virtualizer, on), [setFollow, virtualizer])
 
-  // The virtualizer learns the list's offset only from scroll events. When the browser clamps
+  // The virtualizer learns the list's offset through its scroll observer. When the browser clamps
   // an offset it set to where the list already is (the estimated start in a history too short
   // to scroll, a destination at the top, a row kept in place as rows above it change), none
   // fires, and the rows between the real offset and its own would never mount.
@@ -316,11 +330,8 @@ export function MessageList({
     const actual = list.scrollTop
     const expected = virtualizer.scrollOffset ?? 0
     if (Math.abs(expected - actual) < 1) return
-    // A native jump can precede its deferred scroll event. Let go before a render's
-    // follow effect can pull it back; a clamp at the end still keeps following.
-    if (actual < expected && list.scrollHeight - actual - list.clientHeight > END_PX) hold(false)
     offsetChanged.current?.(actual, false)
-  }, [virtualizer, hold])
+  }, [virtualizer])
   useLayoutEffect(syncOffset)
 
   // Contributions can grow below a partly visible earlier row whose text is already
