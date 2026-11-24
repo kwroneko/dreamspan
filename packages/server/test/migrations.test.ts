@@ -285,11 +285,11 @@ describe("0018_pending_chats", () => {
   )
 })
 
-describe("0021_recovered_label_owner", () => {
+describe("0022_recovered_label_owner", () => {
   it.effect("names an old new chat's recovered text by its card only when the card is the account's", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* migrate(upTo(20))
+      yield* migrate(upTo(21))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES
         ('u', 'u', 'Owner', 'user', 0), ('v', 'v', 'Other', 'user', 0)`
       yield* sql`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', 'u', 'card', 0), ('theirs', 'v', 'card', 0)`
@@ -525,7 +525,7 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0018_pending_chats",
       "0019_queue_library_revisions",
       "0020_retained_library_attachments",
-      "0021_recovered_label_owner"
+      "0022_recovered_label_owner"
     ])
   }).pipe(Effect.provide(layer()))
 )

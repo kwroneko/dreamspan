@@ -182,7 +182,7 @@ export const migrationDefinitions = {
   },
   // 0018 named the old new-chat pages' recovered texts by the card their draft's key named, whoever
   // owned it: a card that isn't the account's own names nothing of its (rev-draftchats3b #10).
-  "0021_recovered_label_owner": {
+  "0022_recovered_label_owner": {
     statements: [
       `UPDATE recovered_texts SET source_label = 'New chat'
         WHERE source_kind = 'user_field' AND source_id LIKE 'pending-chat:%'
