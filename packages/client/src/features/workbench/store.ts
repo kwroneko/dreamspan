@@ -250,7 +250,13 @@ export class WorkbenchStore {
     const twin = frame.tabs.some((t) => itemKey(t.href) === itemKey(href))
     // An item whose kind is showing in another frame opens there; this tab stays as it is.
     const affine = this.wide() ? affinityFrame(this.layout, href, itemKey, affinityOf) : undefined
-    if (tab.preview && !twin && (!affine || affine.id === frame.id)) return false
+    // An item of a kind that opens where it's shown (the request inspector) never takes over a
+    // tab of another kind (owner, 2026-11-23: the inspector opens in a new tab beside the chat):
+    // an italic opener is kept first, so the item opens beside it or in the frame's other preview.
+    const group = this.wide() ? affinityOf(href) : null
+    const besideOpener = group !== null && affinityOf(tab.href) !== group
+    if (tab.preview && !twin && !besideOpener && (!affine || affine.id === frame.id)) return false
+    if (besideOpener && tab.preview && !twin && !affine) this.layout = pinTab(this.layout, tabId)
     // The view navigated to that URL whole: its sidebar keys are what the sidebar shows next.
     this.shellChange = shellDiff(null, href)
     this.open(href, { state: clean(state), frame: frame.id })
