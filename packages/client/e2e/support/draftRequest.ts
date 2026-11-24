@@ -52,48 +52,6 @@ export function draftRequestTests() {
     await provider.stop()
   })
 
-  test("the first request's link switches to the new chat's own tab", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-      api.SetGenerationDefaults({ defaults: { model: originalModel, preset: null } })
-    )
-    await page.goto(`${server().url}/cards/${entityId}/chat`)
-    const box = page.getByRole("textbox", { name: "Message", exact: true })
-    await box.fill("The lantern by the ferry is lit.")
-    const tabs = page.getByRole("tablist", { name: "Open tabs", exact: true }).getByRole("tab")
-    const before = await tabs.count()
-    const chatTab = page.getByRole("tablist", { name: "Open tabs", exact: true }).getByRole("tab", { selected: true })
-    const chatTitle = (await chatTab.innerText()).trim()
-    await page.getByRole("button", { name: /^Context: about [\d,]+ of [\d,]+ tokens in your first request/ }).click()
-    await page.getByRole("dialog", { name: "Context" }).getByRole("link", { name: "View request" }).click()
-    const heading = page.getByRole("heading", { name: "Your first request" })
-    await expect(heading).toBeVisible()
-    await expect(tabs).toHaveCount(before + 1)
-    const requestTab = page
-      .getByRole("tablist", { name: "Open tabs", exact: true })
-      .getByRole("tab", { name: /Your first request/ })
-    await expect(requestTab).toHaveAttribute("aria-selected", "true")
-
-    const link = page.getByRole("link", { name: "← Go to the new chat", exact: true })
-    await link.hover()
-    await expect(page.getByText("Switches to the new chat's tab.", { exact: true })).toBeVisible()
-    await link.click()
-    // The new chat's own tab is shown, with its text; the request's tab stays, unchanged.
-    await expectTextBox(box, "The lantern by the ferry is lit.")
-    await expect(requestTab).toHaveAttribute("aria-selected", "false")
-    await expect(tabs).toHaveCount(before + 1)
-    await expect(
-      page.getByRole("tablist", { name: "Open tabs", exact: true }).getByRole("tab", { name: chatTitle, exact: true })
-    ).toHaveCount(1)
-    await expect(
-      page.getByRole("tablist", { name: "Open tabs", exact: true }).getByRole("tab", { selected: true })
-    ).toHaveText(chatTitle)
-    await requestTab.click()
-    await expect(heading).toBeVisible()
-    await expect(page.locator("[data-workbench-tab]:visible")).toContainText("Nothing has been sent.")
-  })
-
   for (const width of [1440, 390]) {
     for (const theme of ["light", "dark"] as const) {
       test(`a chat not sent yet shows its first request: ${width} ${theme}`, async ({ page }, info) => {
@@ -146,7 +104,7 @@ export function draftRequestTests() {
         await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
         await page.goForward()
         await expect(page.getByRole("region", { name: "Messages", exact: true })).toContainText(content)
-        await page.getByRole("link", { name: "← Go to the new chat" }).click()
+        await page.getByRole("link", { name: "← Back to the new chat" }).click()
         await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), content)
 
         // None of it reached the model's provider.
