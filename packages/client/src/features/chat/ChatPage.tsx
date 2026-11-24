@@ -63,6 +63,7 @@ import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { ANCHORED_POPUP } from "../../ui/anchorScroll.ts"
 import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
@@ -666,13 +667,44 @@ export function MessageList({
   // scrollbar or a middle-button autoscroll. Reaching the end again holds on once the user
   // has stopped for a moment. (A scroll up with none of these, like find in page, lets go
   // only once it's 48 px from the end.)
+  //
+  // A menu open on a message pauses the hold until it closes (anchorScroll.ts): following a
+  // streaming reply carried the menu up with its row, then closed it as the row left the view.
+  // It holds on again after, unless the user scrolled away meanwhile.
   const intent = useRef(0)
+  const menus = useRef({ open: new Set<EventTarget>(), resume: false, since: 0 })
+  /** Whether a menu opened from a row in the list is open (a row gone takes its menu with it). */
+  const menuOpen = () => {
+    for (const anchor of menus.current.open)
+      if (anchor instanceof Node && !anchor.isConnected) menus.current.open.delete(anchor)
+    return menus.current.open.size > 0
+  }
   useEffect(() => {
     const list = parent.current
     if (list === null) return
     const letGo = () => {
       intent.current = performance.now()
       hold(false)
+    }
+    const onMenu = (event: Event) => {
+      const anchor = event.target
+      if (!(event instanceof CustomEvent) || anchor === null) return
+      const state = menus.current
+      if (event.detail === true) {
+        if (state.open.size === 0) {
+          state.resume = follow.stuck
+          state.since = performance.now()
+          hold(false)
+        }
+        state.open.add(anchor)
+        return
+      }
+      state.open.delete(anchor)
+      if (menuOpen() || !state.resume) return
+      state.resume = false
+      if (intent.current >= state.since) return
+      hold(true)
+      virtualizer.scrollToEnd()
     }
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) letGo()
@@ -696,8 +728,10 @@ export function MessageList({
       }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
       // Their corrected estimates can grow the list beyond END_PX in that same commit.
-      else if (spacing === "compact" && !revealing.current && performance.now() - intent.current > 300) hold(true)
+      else if (spacing === "compact" && !revealing.current && !menuOpen() && performance.now() - intent.current > 300)
+        hold(true)
     }
+    list.addEventListener(ANCHORED_POPUP, onMenu)
     list.addEventListener("wheel", onWheel, { passive: true })
     list.addEventListener("touchmove", letGo, { passive: true })
     // A control inside asks, before its action changes the length of what's above it (composition.ts).
@@ -706,6 +740,7 @@ export function MessageList({
     list.addEventListener("pointerdown", onPointerDown)
     list.addEventListener("scroll", onScroll, { passive: true, capture: true })
     return () => {
+      list.removeEventListener(ANCHORED_POPUP, onMenu)
       list.removeEventListener("wheel", onWheel)
       list.removeEventListener("touchmove", letGo)
       list.removeEventListener(LET_GO, letGo)
@@ -741,7 +776,14 @@ export function MessageList({
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
     const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
-    if (!follow.stuck && !revealing.current && fromEnd <= END_PX && performance.now() - intent.current > 300) hold(true)
+    if (
+      !follow.stuck &&
+      !revealing.current &&
+      !menuOpen() &&
+      fromEnd <= END_PX &&
+      performance.now() - intent.current > 300
+    )
+      hold(true)
     if (follow.stuck && fromEnd > 1) virtualizer.scrollToEnd()
   })
 
