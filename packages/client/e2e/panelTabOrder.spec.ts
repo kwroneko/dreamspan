@@ -212,7 +212,12 @@ test("the open tool past the row shows as a guest before More, and goes when ano
   expect(await moreValues(page)).toContain(target)
   await expect(moreMenu(page).locator(`[data-tab-value="${target}"]`)).toHaveAttribute("data-shown-above")
   await expect(moreMenu(page).locator(`[data-tab-value="${target}"]`)).toContainText("Shown above")
+  const moving = (await moreValues(page)).find((value) => value !== target)!
+  await moreMenu(page).locator(`[data-tab-value="${moving}"]`).click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Move out of More", exact: true }).click()
   await closeMore(page)
+  await expect.poll(() => rowValues(page)).toContain(moving)
+  await expect(guest(page)).toHaveAttribute("data-tab-value", target)
   // Another tool: the guest goes.
   await tool(page, "chat").click()
   await expect(guest(page)).toHaveCount(0)
