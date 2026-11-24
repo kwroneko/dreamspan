@@ -262,24 +262,28 @@ const toSse = (body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const next = await messages.next()
-        if (next.done) return controller.close()
-        const { headers, payload } = next.value
-        if (headers[":message-type"] === "exception" || headers[":message-type"] === "error") {
-          const exception = String(headers[":exception-type"] ?? headers[":error-code"] ?? "")
-          const message = messageOf(text.decode(payload)) || exception
-          controller.enqueue(
-            encoder.encode(sse("error", { type: "error", error: { type: errorType(exception), message } }))
-          )
-          return controller.close()
+        while (true) {
+          const next = await messages.next()
+          if (next.done) return controller.close()
+          const { headers, payload } = next.value
+          if (headers[":message-type"] === "exception" || headers[":message-type"] === "error") {
+            const exception = String(headers[":exception-type"] ?? headers[":error-code"] ?? "")
+            const message = messageOf(text.decode(payload)) || exception
+            controller.enqueue(
+              encoder.encode(sse("error", { type: "error", error: { type: errorType(exception), message } }))
+            )
+            return controller.close()
+          }
+          if (headers[":event-type"] !== "chunk") continue
+          const chunk = JSON.parse(text.decode(payload)) as { bytes?: unknown } | null
+          if (typeof chunk?.bytes !== "string") throw new Error("Bedrock's chunk envelope is missing a bytes string")
+          const event = JSON.parse(Buffer.from(chunk.bytes, "base64").toString("utf8")) as { type?: string }
+          controller.enqueue(encoder.encode(sse(event.type ?? "message", event)))
+          return
         }
-        if (headers[":event-type"] !== "chunk") return
-        const chunk = JSON.parse(text.decode(payload)) as { bytes?: string }
-        if (typeof chunk.bytes !== "string") return
-        const event = JSON.parse(Buffer.from(chunk.bytes, "base64").toString("utf8")) as { type?: string }
-        controller.enqueue(encoder.encode(sse(event.type ?? "message", event)))
       } catch (error) {
         controller.error(error)
+        await messages.return(undefined).catch(() => undefined)
       }
     },
     cancel: (reason) => messages.return(undefined).then(() => body.cancel(reason).catch(() => undefined))
