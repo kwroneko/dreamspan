@@ -232,4 +232,86 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  /** A story on two branches, and the side workshop draft of its second with this typed, then cleared. */
+  const storyWithSideDraft = Effect.gen(function* () {
+    const api = yield* client()
+    const userId = (yield* api.Whoami()).id as UserId
+    const story = yield* api.CreateChat({ title: "Harbor" })
+    yield* api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "The tide turns." })
+    const shown = yield* api.GetChat({ chatId: story.id })
+    const main = shown.currentForkId!
+    const { fork } = yield* api.CreateFork({ chatId: story.id, fromForkId: main, atSlotId: shown.activeLeafSlotId })
+    const draft = yield* api.OpenDraftChat({ draftFor: `side:${story.id}:${fork.id}` })
+    const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+    const save = (rowVersion: number, session: number, content: string) =>
+      api.SaveComposer({
+        chatId: draft.id,
+        draftId: composer.id,
+        rowVersion,
+        session,
+        next: false,
+        operationId: crypto.randomUUID(),
+        content
+      })
+    const cleared = "Ask the keeper which boats came home before the storm broke."
+    const typed = yield* save(composer.rowVersion, composer.session, cleared)
+    // Select all and clear it: that text is only in the draft's history now.
+    const empty = yield* save(typed.draft!.rowVersion, typed.draft!.session, "")
+    const unsent = "And who rang the bell at midnight?"
+    yield* save(empty.draft!.rowVersion, empty.draft!.session, unsent)
+    const recovered = () =>
+      Effect.map(api.ListRecoveredTexts({ limit: 50, before: null }), (texts) => texts.map((text) => text.content))
+    return { api, userId, story, main, fork: fork.id, draft, cleared, unsent, recovered }
+  })
+
+  it.live("deleting the story branch a pending side workshop is beside files its typing, and its purge keeps it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, fork, draft, cleared, unsent, recovered } = yield* storyWithSideDraft
+        const item = yield* api.DeleteFork({ forkId: fork })
+        yield* api.PurgeBinItem({ itemId: item.id })
+        const texts = yield* recovered()
+        assert.include(texts, cleared)
+        assert.include(texts, unsent)
+        // Filed once, as a sweep files it, and the pending workshop is gone, not in the bin.
+        assert.strictEqual(texts.filter((text) => text === unsent).length, 1)
+        assert.strictEqual(
+          yield* api.GetChat({ chatId: draft.id }).pipe(
+            Effect.flip,
+            Effect.map((e) => e._tag)
+          ),
+          "NotFound"
+        )
+        assert.deepStrictEqual(
+          (yield* api.ListBin({ limit: 50, before: null })).filter((binned) => binned.origin.chatId === draft.id),
+          []
+        )
+      })
+    )
+  )
+
+  it.live("deleting the story files a pending side workshop's typing, and its purge keeps it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, story, cleared, unsent, recovered } = yield* storyWithSideDraft
+        const item = yield* api.DeleteChat({ chatId: story.id })
+        yield* api.PurgeBinItem({ itemId: item.id })
+        const texts = yield* recovered()
+        assert.include(texts, cleared)
+        assert.strictEqual(texts.filter((text) => text === unsent).length, 1)
+      })
+    )
+  )
+
+  it.live("branching the story doesn't branch a pending side workshop", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, story, fork, draft } = yield* storyWithSideDraft
+        yield* api.CreateFork({ chatId: story.id, fromForkId: fork, atSlotId: null })
+        const branches = yield* (yield* Reader).WorkshopBranches({ userId, chatId: draft.id })
+        assert.lengthOf(branches, 1)
+      })
+    )
+  )
 })
