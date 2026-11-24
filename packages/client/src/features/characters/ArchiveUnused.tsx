@@ -1,6 +1,6 @@
 import { useDurableForm, useOpenPlace } from "../editor/durable.tsx"
 import { useAtomValue } from "@effect/atom-react"
-import { useState } from "react"
+import { useRef, useState, type RefObject } from "react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@dreamspan/shared/cardArchive.ts"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
@@ -141,7 +141,7 @@ function Selection({
   )
 }
 
-function ArchiveDialog({ close }: { close: () => void }) {
+function ArchiveDialog({ close, trigger }: { close: () => void; trigger: RefObject<HTMLButtonElement | null> }) {
   const sourceNames = useSourceNames()
   // A criterion for card sources shows only while one is on.
   const entries = cardArchiveCriteria.list().filter((entry) => !entry.forCardSources || sourceNames.length > 0)
@@ -174,6 +174,7 @@ function ArchiveDialog({ close }: { close: () => void }) {
       title="Archive unused cards"
       description="Matches any checked rule. Favourites stay."
       placement="top"
+      centerOnColumnOf={trigger}
     >
       <div className="flex flex-col gap-3">
         {entries.map((entry) => {
@@ -229,12 +230,14 @@ export function ArchiveUnused({ place }: { place: string }) {
   // Per host: Home and the sidebar can both show the Archived view, and one shared place opened
   // two modal dialogs, each hiding the other from assistive technology.
   const [open, setOpen] = useOpenPlace(`archive-unused:${place}`)
+  const trigger = useRef<HTMLButtonElement>(null)
   return (
     // A link-styled action, as an empty list's next step is everywhere in the app; it sits in the
     // empty Archived view or after the archived tiles, never on a row of its own above them.
     <>
       <Tooltip label="Review older unused cards to archive together.">
         <button
+          ref={trigger}
           type="button"
           aria-haspopup="dialog"
           aria-expanded={open}
@@ -244,7 +247,7 @@ export function ArchiveUnused({ place }: { place: string }) {
           Archive unused cards…
         </button>
       </Tooltip>
-      {open && <ArchiveDialog close={() => setOpen(false)} />}
+      {open && <ArchiveDialog close={() => setOpen(false)} trigger={trigger} />}
     </>
   )
 }
