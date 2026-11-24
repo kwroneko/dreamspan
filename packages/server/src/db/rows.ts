@@ -160,6 +160,8 @@ export interface VersionRow {
   readonly rollout_id: string | null
   /** Ordered image references (`versionExtras`); absent on a row just inserted without images. */
   readonly images_json?: string
+  /** Its library items as recorded at send (`libraryJson`); absent on a row just inserted. */
+  readonly library_json?: string
   /** How often a user-written version was amended (`versionExtras`); absent on a row just inserted. */
   readonly amend_count?: number
   /** Its rollout's context issues as JSON (`versionExtras`); absent on a row just inserted. */
@@ -187,10 +189,16 @@ export const attachmentJson = (alias: string) =>
     ELSE json_patch(json_object('mediaId', ${alias}.media_id, 'altText', coalesce(${alias}.alt_text, '')),
       json_object('kind', CASE WHEN ${alias}.kind = 'file' THEN 'file' END, 'name', ${alias}.name, 'path', ${alias}.path)) END)`
 
+/** A version's library items (`version_library`) as `VersionLibrary` holds them, in their sent order. */
+export const libraryJson = (alias: string) =>
+  `(SELECT json_group_array(json_object('kind', l.kind, 'refId', l.ref_id, 'name', l.name) ORDER BY l.ordinal)
+    FROM version_library l WHERE l.version_id = ${alias}.id)`
+
 /** The columns `toVersion` reads beyond the version's own: its row version, its context's issues and its model's name. */
 export const versionExtras = (alias: string) =>
   `(SELECT json_group_array(${attachmentJson("a")})
     FROM (SELECT * FROM version_attachments WHERE version_id = ${alias}.id ORDER BY ordinal) a) AS images_json,
+  ${libraryJson(alias)} AS library_json,
   (SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count,
   (SELECT r.context_issues_json FROM rollouts r WHERE r.id = ${alias}.rollout_id) AS context_issues,
   EXISTS (SELECT 1 FROM rollout_payloads p WHERE p.rollout_id = ${alias}.rollout_id
@@ -315,6 +323,7 @@ export const toVersion = (row: VersionRow) =>
     writer: row.writer,
     content: row.content,
     ...(row.images_json ? { images: JSON.parse(row.images_json) } : {}),
+    ...(row.library_json && row.library_json !== "[]" ? { library: JSON.parse(row.library_json) } : {}),
     macroMode: row.macro_mode,
     origin: row.origin,
     sourceVersionId: row.source_version_id as VersionId | null,

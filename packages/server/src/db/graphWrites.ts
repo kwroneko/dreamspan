@@ -31,7 +31,7 @@ import {
   type VersionRow
 } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
-import { attachmentJson } from "./rows.ts"
+import { attachmentJson, libraryJson } from "./rows.ts"
 import { attachmentFieldsFit } from "./composerImages.ts"
 import { attachedFrom, mediaHeldBy } from "./media.ts"
 import { recordStoryAt } from "./workshopPairing.ts"
@@ -190,14 +190,22 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       } else if (version.library === undefined && version.sourceVersionId) {
         yield* copyLibrary(sql, version.sourceVersionId, inserted.id)
       }
+      const withLibrary =
+        version.libraryPins !== undefined || version.library?.length || version.sourceVersionId
+          ? {
+              ...inserted,
+              library_json: (yield* sql<{ library_json: string }>`SELECT ${sql.literal(libraryJson("v"))} AS library_json
+                FROM versions v WHERE v.id = ${inserted.id}`)[0]!.library_json
+            }
+          : inserted
       if (version.images !== undefined || version.sourceVersionId) {
         const [attachments] = yield* sql<{
           images_json: string
         }>`SELECT json_group_array(${sql.literal(attachmentJson("a"))}) AS images_json
           FROM (SELECT * FROM version_attachments WHERE version_id=${inserted.id} ORDER BY ordinal) a`
-        return { ...inserted, images_json: attachments!.images_json }
+        return { ...withLibrary, images_json: attachments!.images_json }
       }
-      return inserted
+      return withLibrary
     })
 
   /**

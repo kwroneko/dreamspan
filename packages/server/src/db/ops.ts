@@ -185,6 +185,8 @@ import {
   ComposerImageKey,
   AttachmentComposer,
   SetComposerImageFields,
+  ComposerLibraryItem,
+  SetComposerLibraryFields,
   ComposerChoice,
   ComposerSaveResult
 } from "@dreamspan/shared/composerApi.ts"
@@ -1575,6 +1577,12 @@ const WriteOpsChatOwn = RpcGroup.make(
   Rpc.make("SetComposerImage", {
     payload: { userId: UserId, ...SetComposerImageFields },
     success: ComposerImage,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A workshop composer's attached library items: removes, then adds (composerLibrary.ts). */
+  Rpc.make("SetComposerLibrary", {
+    payload: { userId: UserId, ...SetComposerLibraryFields },
+    success: Schema.Array(ComposerLibraryItem),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetComposerChoice", {
@@ -5089,6 +5097,11 @@ const ReadOpsOwn = RpcGroup.make(
   Rpc.make("GetComposerImages", {
     payload: { userId: UserId, ...ComposerImageKey, ids: ComposerImageIds },
     success: Schema.Array(ComposerImage),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("GetComposerLibrary", {
+    payload: { userId: UserId, ...ComposerImageKey },
+    success: Schema.Array(ComposerLibraryItem),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetComposerChoice", {
