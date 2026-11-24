@@ -195,26 +195,33 @@ test("scrollbars are thin and quiet, stronger on hover, with a gap before the si
   const list = tile.locator("xpath=ancestor::div[contains(@class,'overflow-y-auto')][1]")
   const bars = await list.evaluate((element) => {
     const style = getComputedStyle(element)
+    // Chromium and WebKit use pseudo-elements to remove the step arrows (6c0ceb608).
+    const webkit = CSS.supports("selector(::-webkit-scrollbar)")
     const grid = element.firstElementChild!.getBoundingClientRect()
     const box = element.getBoundingClientRect()
     return {
-      width: style.scrollbarWidth,
-      color: style.scrollbarColor,
+      width: webkit ? getComputedStyle(element, "::-webkit-scrollbar").width : style.scrollbarWidth,
+      stepButtons: webkit ? getComputedStyle(element, "::-webkit-scrollbar-button").display : null,
+      webkit,
       gutter: style.scrollbarGutter,
       scrolls: element.scrollHeight > element.clientHeight,
       // From the cards' right edge to the scrollbar's left edge.
       gap: box.left + element.clientLeft + element.clientWidth - grid.right
     }
   })
-  expect(bars.width).toBe("thin")
+  expect(bars.width).toBe(bars.webkit ? "8px" : "thin")
+  if (bars.webkit) expect(bars.stepButtons).toBe("none")
   expect(bars.gutter).toContain("stable")
   expect(bars.scrolls).toBe(true)
   expect(bars.gap).toBeGreaterThanOrEqual(4)
+  const thumbColor = (element: Element) =>
+    CSS.supports("selector(::-webkit-scrollbar)")
+      ? getComputedStyle(element, "::-webkit-scrollbar-thumb").backgroundColor
+      : getComputedStyle(element).scrollbarColor
   await page.mouse.move(0, 0)
-  const quiet = await list.evaluate((element) => getComputedStyle(element).scrollbarColor)
+  const quiet = await list.evaluate(thumbColor)
   await list.hover()
-  const strong = await list.evaluate((element) => getComputedStyle(element).scrollbarColor)
-  expect(strong).not.toBe(quiet)
+  await expect.poll(() => list.evaluate(thumbColor)).not.toBe(quiet)
 })
 
 for (const theme of ["light", "dark"] as const)

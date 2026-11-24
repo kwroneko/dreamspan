@@ -52,10 +52,11 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("Click to show personas", { exact: true }).filter({ visible: true })).toBeVisible()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
 
-    // The Personas tab: the persona folder alone, unmarked, without the toggle.
+    // Personas shows the folder alone, with its toggle kept in place and disabled (03580791d).
     await show(page, "Personas").click()
     await expect.poll(() => tiles(page)).toEqual(["Open Pia"])
-    await expect(include(page)).toHaveCount(0)
+    await expect(include(page)).toBeDisabled()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "false")
     await expect(main(page).locator("[data-persona-badge]")).toHaveCount(0)
 
     // On: mixed in, marked "Persona", with the badge's explanation.

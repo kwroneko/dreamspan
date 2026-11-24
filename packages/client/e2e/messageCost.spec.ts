@@ -134,6 +134,12 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
     })
   )
   await upload("group chats/Party ledger.jsonl", jsonl(group))
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      yield* api.FinishStImport({ importId, notSent: [] })
+      yield* api.SeenStImport({ importId })
+    })
+  )
   const list = () => asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListChats({ limit: 20, before: null }))
   await expect.poll(async () => (await list()).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2)
   const chats = await list()
@@ -184,7 +190,9 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
     ["Priced by", "the provider's charge"],
     ["Input tokens", "120 (20 uncached, 100 cache read, 0 cache write)"],
     ["Cached", "83% of input"],
-    ["Output tokens", "6, reasoning included"]
+    // The Generation panel reports reasoning separately when it occurs (972e6a189).
+    ["Output tokens", "6"],
+    ["Reasoning", "none"]
   ] as const)
     await expect(panel.locator("dt", { hasText: label }).locator("+ dd")).toHaveText(value)
   await expect(panel).not.toContainText("Provider charged")
@@ -222,9 +230,12 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
             if (theme === "light") measured.push(await heights(page))
             // The header keeps one line for the time, the cost and the model at any width.
             const row = lastReply(page).locator("header")
-            const at = await box(row.locator("time"))
-            const c = await box(costOf(lastReply(page)))
-            expect(Math.abs(c.y - at.y)).toBeLessThan(2)
+            const offset = await row.evaluate((header) => {
+              const at = header.querySelector("time")!.getBoundingClientRect()
+              const cost = header.querySelector('button[aria-label^="Cost: "]')!.getBoundingClientRect()
+              return Math.abs(cost.y - at.y)
+            })
+            expect(offset, `${which} ${density} ${width} ${theme}: cost is on the time's line`).toBeLessThan(2)
             expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
             const name = `${which}-${density}-${width}-${theme}`
             await shoot(page, name)

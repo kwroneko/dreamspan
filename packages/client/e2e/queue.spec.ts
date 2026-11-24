@@ -79,7 +79,10 @@ for (const width of [1440, 390]) {
       canvas.getContext("2d")!.fillRect(0, 0, 32, 32)
       return canvas.toDataURL("image/png").split(",")[1]!
     })
-    await page.getByLabel("Choose images").setInputFiles({
+    const picker = page.getByLabel("Choose images")
+    // The saved composer enables attachments once it has opened the draft from the handoff.
+    await expect(picker).toBeEnabled()
+    await picker.setInputFiles({
       name: "queued.png",
       mimeType: "image/png",
       buffer: Buffer.from(image, "base64")

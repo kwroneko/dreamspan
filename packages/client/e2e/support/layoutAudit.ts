@@ -764,9 +764,9 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           if (p === document.body || rect(p).height >= r.height * 2) break
           if (field && !field.contains(p)) break
           row = p
-          // A box drawn around buttons (a pane, a card, joined controls) is their row: the
-          // buttons outside it aren't their neighbours.
-          if (boxed(p)) break
+          // A pane, joined controls or a horizontal scrollport has its own row.
+          // Outside controls aren't neighbours of the buttons clipped by the scrollport.
+          if (boxed(p) || /^(auto|scroll)$/.test(css(p).overflowX)) break
         }
         // A button laid over its text entry (not inside it in the DOM) is the entry's.
         if (field && !(row && field.contains(row))) row = field

@@ -30,8 +30,9 @@ const LINES = [
   "The ferryman shakes his head and points north, towards the marsh villages and the long causeway that floods at every spring tide, and says the road is closed until the bell rings twice.",
   "Rain again."
 ]
+const branchLine = (index: number) => `Branch ${index}: ${LINES[index % LINES.length]}`
 
-let fixtures: { branchy: string; plain: string; branches: number }
+let fixtures: { branchy: string; branchTip: string; plain: string; branches: number }
 
 test.beforeAll(async () => {
   fixtures = await admin((api) =>
@@ -62,7 +63,7 @@ test.beforeAll(async () => {
         const at = parentPath[cut - 1]!
         const { fork } = yield* api.CreateFork({ chatId: made.id, fromForkId: parent, atSlotId: at })
         const path = parentPath.slice(0, cut)
-        path.push(yield* send(made.id, fork.id, at, `Branch ${i}: ${LINES[i % LINES.length]}`))
+        path.push(yield* send(made.id, fork.id, at, branchLine(i)))
         paths.set(fork.id, path)
         forks.push(fork.id)
       }
@@ -71,7 +72,13 @@ test.beforeAll(async () => {
       // The chat opens on the last branch made; show another, so "Back to…" links appear.
       const plain = yield* api.CreateChat({ title: "Lighthouse night" })
       yield* send(plain.id, plain.currentForkId!, null, "The lamp turns, and the stairs go up forever.")
-      return { branchy: `${made.id}?fork=${forks[9]}`, plain: plain.id, branches: forks.length }
+      const selected = 8
+      return {
+        branchy: `${made.id}?fork=${forks[selected + 1]}`,
+        branchTip: branchLine(selected),
+        plain: plain.id,
+        branches: forks.length
+      }
     })
   )
 })
@@ -94,7 +101,8 @@ const open = async (page: Page, width: number, theme: "light" | "dark", half: bo
   await page.emulateMedia({ colorScheme: theme })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${fixtures.branchy}`)
-  await expect(page.getByText(/^Branch 3[0-3]:|^11:/).first()).toBeAttached()
+  // Wait for the selected fork's tip in the windowed timeline (6753bbfa7).
+  await expect(page.getByRole("article").getByText(fixtures.branchTip, { exact: true })).toBeVisible()
   let scope: Page | Locator = page
   if (half) {
     await page.getByRole("button", { name: "Split right" }).click()

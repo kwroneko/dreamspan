@@ -46,6 +46,7 @@ for (const width of [1440, 390])
       await page.screenshot({ path: info.outputPath("pending-new-persona.png") })
       await dialog.getByRole("button", { name: "Create", exact: true }).click()
       await expect(dialog).toHaveCount(0)
+      // A unique card gets its name alone in the tab strip (89c3c57ce).
       const editor = page.getByRole("tabpanel", { name, exact: true })
       await expect(editor.locator('.cm-content[aria-label="Description"]')).toBeVisible()
       await expect(editor.getByRole("button", { name: "Picture", exact: true }).first()).toBeVisible()

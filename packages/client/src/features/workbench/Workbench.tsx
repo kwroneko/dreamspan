@@ -763,7 +763,7 @@ function TabStrip({
         {over === tabs.length && <span aria-hidden="true" data-drop-before className="w-0.5 shrink-0 bg-accent" />}
       </div>
       {!phone && (
-        <div className="flex shrink-0 items-center gap-0.5 px-2">
+        <div data-strip-actions className="flex shrink-0 items-center gap-0.5 px-2">
           {isSplit(layout) && (
             <IconButton
               label={layout.maximized === frame.id ? "Restore frames" : "Maximize frame"}

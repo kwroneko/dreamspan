@@ -569,8 +569,9 @@ for (const theme of ["light", "dark"] as const)
         await expect(field).toBeVisible()
         await field.scrollIntoViewIfNeeded()
         expect(await width(field), name).toBeLessThanOrEqual(GROUP)
+        // The model table's filter is a full-width search control (effe0f128).
         const tooWide = await page
-          .locator("input:visible")
+          .locator('input:visible:not([type="search"][aria-label="Filter models"])')
           .evaluateAll((nodes) => nodes.filter((n) => n.getBoundingClientRect().width > 640.5).map((n) => n.outerHTML))
         expect(tooWide, name).toEqual([])
         await shoot(page, `fieldwidth-${name}-${viewport}-${theme}`)
@@ -611,6 +612,7 @@ for (const theme of ["light", "dark"] as const)
       const connections = await admin((api) => api.ListConnections())
       await page.goto(`${server().url}/settings/connections/${connections[0]!.id}`)
       await capture("connection", page.getByRole("textbox", { name: "Name", exact: true }))
+      await expect(page.getByRole("searchbox", { name: "Filter models", exact: true })).toBeVisible()
       expect(await width(page.getByRole("textbox", { name: "Concurrent requests", exact: true }))).toBeLessThanOrEqual(
         128
       )
