@@ -95,7 +95,12 @@ interface SweptDraft {
  * greetings, state and drafts go with it by cascade). An untouched one files nothing. Nothing
  * for a chat that isn't pending. True when it was swept.
  */
-export const sweepPendingChat = (sql: SqlClient.SqlClient, bin: Bin, userId: UserId, chatId: string) =>
+export const sweepPendingChat = (
+  sql: SqlClient.SqlClient,
+  bin: Pick<Bin, "drafts" | "recover">,
+  userId: UserId,
+  chatId: string
+) =>
   Effect.gen(function* () {
     const chat = yield* pendingRow(sql, chatId)
     if (chat === null || chat.owner_user_id !== userId) return false

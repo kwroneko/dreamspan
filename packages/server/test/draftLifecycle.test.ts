@@ -356,6 +356,39 @@ describe("a pending chat's names", () => {
   )
 })
 
+describe("a pending chat's card purged", () => {
+  it.live("sweeps the drafts that name it, their typing filed, and tells their tabs", () =>
+    withHub((hub) =>
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Ask about the lantern."
+        })
+        const queue = yield* hub.subscribe(draft.id, () => ({ _tag: "Hello", live: [] }))
+        const item = yield* (yield* Writer).DeleteEntity({ userId, entityId: mira })
+        // Binned only: the draft stays.
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+        yield* api.PurgeBinItem({ itemId: item.id })
+        assert.strictEqual((yield* Effect.flip(api.GetChat({ chatId: draft.id })))._tag, "NotFound")
+        const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          ["Ask about the lantern.", "New chat with Mira"]
+        )
+        assert.deepStrictEqual((yield* Queue.takeAll(queue)).flat().at(-1), { _tag: "Deleted" })
+      })
+    )
+  )
+})
+
 describe("what a pending chat can't own", () => {
   it.live("no note or snippet of its own: the library would list it and the sweep would strand it", () =>
     run(
