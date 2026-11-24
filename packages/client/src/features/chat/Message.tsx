@@ -45,7 +45,7 @@ import { Markdown } from "../../ui/Markdown.tsx"
 import { type CaretSpot, caretSpotAt, type EditCaret, locateEditCaret } from "../../ui/editCaret.ts"
 import { MessageBody } from "../../ui/messageCopy.tsx"
 import { HtmlMessageContext } from "../../ui/html/messageHtml.ts"
-import { openThinking, thinkingKey, thinkingPanel } from "./editThinking.tsx"
+import { openThinking, thinkingKey, thinkingPanel, useThinkingEditor } from "./editThinking.tsx"
 import { HtmlTextField } from "./htmlTextField.tsx"
 import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -824,6 +824,12 @@ export const Message = memo(function Message({
         : null
 
   const actionContext = { entry, session, branchFork, generated, generating, hidden, report, toast }
+  const thinkingEditor = useThinkingEditor(session, version.id)
+  const actionsLocked = inPlace
+    ? "Finish or cancel the edit first."
+    : thinkingEditor
+      ? "Finish or cancel the thinking's edit first."
+      : undefined
   const details = useMessageDetails()
   const detailProps = { entry, session, generating, reply: model }
 
@@ -1091,17 +1097,17 @@ export const Message = memo(function Message({
             <span className="flex-1" />
           ) : (
             // The rest of the header's width: the pinned buttons that fit, then More actions. While
-            // the message is edited they keep their room, unseen, so the header stays as it was.
+            // the message or its thinking is edited they stay shown in place, disabled, saying why
+            // (owner, 2026-11-24: they disappeared from the message being worked on).
             <MessageActions
               context={actionContext}
+              locked={actionsLocked}
               // In a narrow column it keeps room for More actions, on a line of its own if need be.
               // Compact, with a mouse: the buttons are as tall as the slimmer name row (24 px).
               className={`hidden justify-end transition-opacity duration-100 sm:flex @max-[30rem]/chat:min-w-8 compact:sm:pointer-fine:[&_a]:size-6 compact:sm:pointer-fine:[&_button]:size-6 ${
-                inPlace
-                  ? "invisible"
-                  : revealed
-                    ? "opacity-100"
-                    : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
+                revealed || actionsLocked !== undefined
+                  ? "opacity-100"
+                  : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 has-[[data-held]]:opacity-100 [@media(hover:none)]:opacity-100"
               }`}
             />
           )}
