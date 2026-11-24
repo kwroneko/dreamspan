@@ -139,18 +139,28 @@ function ChatTitle({
   }, [request])
   /** Escape keeps the name: the blur that follows mustn't save. */
   const kept = useRef(false)
+  const submitting = useRef(false)
+  const [saving, setSaving] = useState(false)
   const save = async (event?: FormEvent) => {
     event?.preventDefault()
-    if (write.pending || kept.current) return
+    if (submitting.current || kept.current) return
     if (draft.trim() === shown) {
       if (draft !== initial) void typed.discard()
       return setEditing(false)
     }
-    const ok = await typed.commit(async (text) => (await write.run(() => session.rename(text))).ok)
-    if (ok) setEditing(false)
-    else input.current?.focus()
+    submitting.current = true
+    setSaving(true)
+    try {
+      const ok = await typed.commit(async (text) => (await write.run(() => session.rename(text))).ok)
+      if (ok) setEditing(false)
+      else input.current?.focus()
+    } finally {
+      submitting.current = false
+      setSaving(false)
+    }
   }
   const cancel = () => {
+    if (submitting.current) return
     kept.current = true
     // Kept the name: what was typed goes to the bin, recoverable.
     if (draft !== initial) void typed.discard()
@@ -192,13 +202,14 @@ function ChatTitle({
               value={draft}
               maxLength={200}
               autoFocus
-              disabled={write.pending}
-              readOnly={!typed.ready}
+              readOnly={saving || !typed.ready}
               onFocus={(event) => {
                 kept.current = false
                 event.currentTarget.select()
               }}
-              onChange={(event) => typed.setText(event.currentTarget.value)}
+              onChange={(event) => {
+                if (!submitting.current) typed.setText(event.currentTarget.value)
+              }}
               className="h-8 min-w-0 flex-1 text-base font-semibold"
             />
             <IconButton
@@ -206,12 +217,13 @@ function ChatTitle({
               label="Save the name"
               hint="Save the name (Enter)"
               icon="check"
-              disabled={write.pending}
+              disabled={saving}
             />
             <IconButton
               label="Cancel renaming"
               hint="Cancel (Escape)"
               icon="close"
+              disabled={saving}
               onMouseDown={(event) => event.preventDefault()}
               onClick={cancel}
             />

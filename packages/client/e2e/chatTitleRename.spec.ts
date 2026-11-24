@@ -102,3 +102,54 @@ for (const width of [1340, 600, 390])
     await field.press("Enter")
     await expect(title).toHaveText(`Entered ${width}`)
   })
+
+test("rename handles focus leaving its actions and guards a pending save", async ({ page }) => {
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: "Original" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const held: { release?: () => void } = {}
+  let renames = 0
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && JSON.parse(data).tag === "RenameChat" && ++renames === 2)
+        held.release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const title = page.getByRole("heading", { level: 1 }).getByRole("button")
+  const field = page.getByRole("textbox", { name: "Chat name", exact: true })
+  const save = page.getByRole("button", { name: "Save the name" })
+  const cancel = page.getByRole("button", { name: "Cancel renaming" })
+
+  await title.click()
+  await field.fill("Escaped from Save")
+  await field.press("Tab")
+  await expect(save).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(title).toHaveText("Original")
+
+  await title.click()
+  await field.fill("Saved on blur")
+  await field.press("Tab")
+  await page.keyboard.press("Tab")
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(title).toHaveText("Saved on blur")
+
+  await title.click()
+  await field.fill("Submitted")
+  await save.click()
+  try {
+    await expect.poll(() => held.release !== undefined).toBe(true)
+    await expect(cancel).toBeDisabled()
+    await field.press("Escape")
+    await expect(field).toHaveValue("Submitted")
+    await field.press("Tab")
+    await expect(field).toBeVisible()
+  } finally {
+    held.release?.()
+  }
+  await expect(title).toHaveText("Submitted")
+  expect(renames).toBe(2)
+})
