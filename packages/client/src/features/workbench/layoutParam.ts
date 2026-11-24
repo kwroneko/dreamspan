@@ -8,6 +8,7 @@
 // and `^` for a pinned one; the focused tab is `=` (with the same marks): the browser's own URL,
 // so the focused tab's navigation never changes the param. Ids are made afresh on reading.
 import { allTabs, type Layout, newId, type Node } from "./model.ts"
+import { compactHref } from "./kinds.ts"
 
 export const WORKBENCH_PARAM = "wb"
 
@@ -26,7 +27,7 @@ export const encodeLayout = (
 ): string | null => {
   if (allTabs(layout).length <= 1) return null
   const focused = focusedId(layout)
-  // Tabs whose place params (`?…`) are left out, so the param fits `limit` encoded.
+  // Tabs whose presentation params are left out, so the param fits `limit` encoded.
   const bare = new Set<string>()
   const text = () => JSON.stringify(node(layout.root))
   const node = (n: Node): unknown => {
@@ -41,7 +42,7 @@ export const encodeLayout = (
       const href = persist(t.href)
       if (href === null) return []
       const kept = strip(href)
-      return [{ id: t.id, text: `${mark(t)}${bare.has(t.id) ? kept.replace(/[?#].*$/, "") : kept}` }]
+      return [{ id: t.id, text: `${mark(t)}${bare.has(t.id) ? compactHref(kept) : kept}` }]
     })
     const active = Math.max(
       0,

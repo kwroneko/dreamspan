@@ -94,7 +94,12 @@ export const register = () => [
   tabKinds.register({
     id: "files",
     order: 800,
-    match: (url) => (url.pathname === FILES_PAGE ? (url.searchParams.get("file") === null ? "" : url.search) : null),
+    match: (url) => {
+      if (url.pathname !== FILES_PAGE) return null
+      const file = url.searchParams.get("file")
+      return file === null ? "" : filesHref(url.searchParams.get("path") ?? FILES_TOP, file)
+    },
+    essentialSearch: ["path", "file"],
     title: (url) => url.searchParams.get("file") ?? "Files",
     icon: "folder"
   })

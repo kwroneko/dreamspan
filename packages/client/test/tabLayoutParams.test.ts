@@ -18,6 +18,9 @@ import { decodeOpen, encodeOpen, OPEN_LIMIT } from "../src/features/editor/loreb
 import { decodeWeights, keptWeights, MAX_WEIGHTS } from "../src/features/chat/ChatPortraitProvider.tsx"
 import { decodeLayout, encodeLayout, WB_LIMIT } from "../src/features/workbench/layoutParam.ts"
 import { initialLayout, openTab, restoreLayout, splitFrame, allTabs, frames } from "../src/features/workbench/model.ts"
+import { register as registerFiles } from "../src/features/files/index.tsx"
+import { filesHref } from "../src/features/files/href.ts"
+import { itemKey } from "../src/features/workbench/kinds.ts"
 
 const off: Array<() => void> = []
 afterEach(() => {
@@ -230,6 +233,20 @@ it("keeps the workbench param under its budget, dropping the place params of the
   // A focused frame too big alone: its hidden tabs go too, after the other frame's.
   for (let i = 3; i < 40; i++) layout = openTab(layout, `/chats/right-${i}${place}`, key, { preview: false })
   expect(fits(encodeLayout(layout, (href) => href)!)).toBe(true)
+})
+
+it("keeps Files folders and open filenames when compacting hidden tabs", () => {
+  off.push(...registerFiles())
+  const folder = `/files/${Array.from({ length: 5 }, () => "雪".repeat(15)).join("/")}`
+  const hrefs = [filesHref(folder), filesHref(folder, "first.txt"), filesHref(folder, "second.txt")]
+  let layout = initialLayout(hrefs[0]!)
+  for (const href of hrefs)
+    layout = openTab(layout, `${href}&presentation=${"p".repeat(WB_LIMIT)}`, itemKey, { preview: false })
+  layout = openTab(layout, "/chats/current", itemKey, { preview: false })
+  const encoded = encodeLayout(layout, (href) => href)!
+  expect(new URLSearchParams({ wb: encoded }).toString().length).toBeLessThanOrEqual(WB_LIMIT)
+  const restored = restoreLayout(decodeLayout(encoded, "/chats/current"))!
+  expect(allTabs(restored).map((t) => t.href)).toEqual([...hrefs, "/chats/current"])
 })
 
 it("writes portrait shares as it reads them back: the same cap, rounding and bounds", () => {
