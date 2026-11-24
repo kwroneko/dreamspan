@@ -106,30 +106,37 @@ const targetOf = (
   visible: Doc,
   args: Readonly<Record<string, unknown>>
 ): { readonly text: string; readonly what: string; readonly stem: string; readonly ext: string } => {
-  const field = typeof args.field === "string" ? args.field : undefined
-  if (field !== undefined) {
+  const { greeting, entry, prompt } = args
+  if (greeting !== undefined && args.field !== "alternate_greetings")
+    throw new ToolInputRefused('Give field "alternate_greetings" with greeting.')
+  if (args.field !== undefined) {
+    if (entry !== undefined || prompt !== undefined)
+      throw new ToolInputRefused("Choose a field, entry or prompt to export.")
     if (kind !== "card")
       throw new ToolInputRefused(
         `A ${kind} is written by ${kind === "preset" ? "prompt" : "entry"}, or whole: give ${kind === "preset" ? "prompt" : "entry"}, or nothing.`
       )
+    const field = String(args.field)
     if (field === "alternate_greetings") {
       const greetings = Array.isArray(visible.alternate_greetings) ? visible.alternate_greetings : []
-      const n = typeof args.greeting === "number" ? args.greeting : 0
-      const greeting = greetings[n - 1]
-      if (typeof greeting !== "string")
+      const n = typeof greeting === "number" ? greeting : 0
+      const text = greetings[n - 1]
+      if (typeof text !== "string")
         throw new ToolInputRefused(
           greetings.length === 0
             ? "This card has no alternate greetings."
             : `Give greeting, from 1 to ${greetings.length}.`
         )
-      return { text: greeting, what: `alternate greeting ${n}`, stem: `alternate greeting ${n}`, ext: ".txt" }
+      return { text, what: `alternate greeting ${n}`, stem: `alternate greeting ${n}`, ext: ".txt" }
     }
     const value = visible[field]
     if (!CARD_TEXT_FIELDS.includes(field as (typeof CARD_TEXT_FIELDS)[number]) || typeof value !== "string")
       throw new ToolInputRefused(`Give field, one of ${[...CARD_TEXT_FIELDS, "alternate_greetings"].join(", ")}.`)
     return { text: value, what: field, stem: field, ext: ".txt" }
   }
-  const wanted = kind === "preset" ? args.prompt : args.entry
+  if (kind === "preset" ? entry !== undefined : prompt !== undefined)
+    throw new ToolInputRefused(kind === "preset" ? "A preset has prompts: give prompt." : "Give entry, a uid.")
+  const wanted = kind === "preset" ? prompt : entry
   if (wanted !== undefined) {
     if (kind === "card" && visible.character_book === undefined)
       throw new ToolInputRefused("This card has no lorebook.")
@@ -146,8 +153,6 @@ const targetOf = (
       ext: ".txt"
     }
   }
-  if (kind === "preset" ? args.entry !== undefined : args.prompt !== undefined)
-    throw new ToolInputRefused(kind === "preset" ? "A preset has prompts: give prompt." : "Give entry, a uid.")
   return { text: `${JSON.stringify(visible, null, 2)}\n`, what: `the whole ${kind}`, stem: "", ext: ".json" }
 }
 

@@ -170,6 +170,15 @@ describe("export_to_file", () => {
         assert.include((yield* run("read_file", { path: "/files/notes/old.txt", limit: 20_000 })).text, "Shelf 3000")
 
         // Wrong targets name the choices; nothing is written.
+        for (const selectors of [{ greeting: 1 }, { field: "description", greeting: 1 }]) {
+          const incomplete = yield* run("export_to_file", { kind: "card", item: card.id, ...selectors })
+          assert.isTrue(incomplete.isError, incomplete.text)
+          assert.include(incomplete.text, "alternate_greetings")
+          assert.isUndefined(incomplete.effects)
+        }
+        const ambiguous = yield* run("export_to_file", { kind: "card", item: card.id, field: "description", entry: 7 })
+        assert.isTrue(ambiguous.isError, ambiguous.text)
+        assert.isUndefined(ambiguous.effects)
         assert.include(
           (yield* run("export_to_file", { kind: "card", item: card.id, field: "nope" })).text,
           "Give field, one of"
