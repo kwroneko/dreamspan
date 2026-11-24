@@ -21,7 +21,8 @@ const page = (
   owner: string,
   time: BigInt64Array,
   /** Runs after each OpenComposer is answered, before the page goes on: a race laid out by hand. */
-  afterOpen: () => Promise<unknown> = async () => {}
+  afterOpen: () => Promise<unknown> = async () => {},
+  beforeSave: (payload: Parameters<Api["SaveComposer"]>[0]) => Promise<unknown> = async () => {}
 ) => {
   /** What this page's keepalive requests wait for before they reach the server (`hold`). */
   let network: Promise<unknown> = Promise.resolve()
@@ -38,6 +39,8 @@ const page = (
         const value = await Effect.runPromise(
           fn((tag, p) => {
             opened ||= tag === "OpenComposer"
+            if (tag === "SaveComposer")
+              return Effect.promise(() => beforeSave(p)).pipe(Effect.andThen(api.SaveComposer(p)))
             return (api as never as Record<string, (p: never) => Effect.Effect<unknown, unknown>>)[tag]!(p)
           })
         )
@@ -131,6 +134,42 @@ const scenarios = [
   "reload",
   "a late copy of text already sent"
 ] as const
+
+for (const receipt of ["none", "accepted before send", "rejected after send"] as const)
+  it.live(`stops a pre-send save after another tab sends the turn (${receipt})`, () =>
+    Effect.gen(function* () {
+      idb.clear()
+      const api = yield* client()
+      const owner = (yield* api.Whoami()).id
+      const chat = yield* api.CreateChat({ title: "Synthetic concurrent send" })
+      const time = new BigInt64Array(new SharedArrayBuffer(8))
+      const text = "One turn"
+      const other = page(api, chat.id, owner, time)
+      let tip: string | null = null
+      const first = page(api, chat.id, owner, time, undefined, async (payload) => {
+        if (receipt === "accepted before send") await Effect.runPromise(api.SaveComposer(payload))
+        tip = await send(api, other, null)
+        if (receipt === "rejected after send") await Effect.runPromise(api.SaveComposer(payload))
+      })
+      yield* Effect.promise(async () => {
+        await open(other.store)
+        await open(first.store)
+        other.store.type(text)
+        await other.store.flush()
+        first.store.type(text)
+        let submitted = false
+        await first.store.submit(async () => {
+          submitted = true
+          return { sent: false }
+        })
+        assert.isNotNull(tip)
+        assert.isFalse(submitted)
+        assert.strictEqual(first.store.snapshot().text, "")
+        assert.deepStrictEqual(await Effect.runPromise(api.ListRecoveredTexts({ limit: 100, before: null })), [])
+      })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
 for (const scenario of scenarios)
   it.live(`${scenario}, sending and reopening the chat moves no text to the bin and shows no notice`, () => {
     const clock = new SharedArrayBuffer(8)

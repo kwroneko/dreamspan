@@ -755,7 +755,7 @@ export const makeDraftStore = (
           !held &&
           !(ended && draft.target_kind === "composer" && (yield* sentInChat(draft.target_id, content)))
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
-        return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
+        return { draft: toDraft(draft, recovered ? 1 : 0), recovered, accepted: false }
       }
       let recoveredInput = false
       if (reconciled.changed || formEdit?.changed) {
@@ -812,7 +812,8 @@ export const makeDraftStore = (
       )
       return {
         draft: toDraft((yield* byId(draft.id))!, recovered + Number(recoveredInput), displaced),
-        recovered: recovered > 0 || recoveredInput
+        recovered: recovered > 0 || recoveredInput,
+        accepted: true
       }
     })
 
@@ -1314,7 +1315,8 @@ export const makeDraftStore = (
         const [receipt] = yield* sql<{
           recovered: number
           displaced_json: string | null
-        }>`SELECT recovered, displaced_json FROM composer_save_receipts
+          accepted_session: number | null
+        }>`SELECT recovered, displaced_json, accepted_session FROM composer_save_receipts
           WHERE chat_id = ${chatId} AND operation_id = ${base.operationId}`
         if (receipt !== undefined) {
           let displaced: DraftDisplacement | null = null
@@ -1327,7 +1329,8 @@ export const makeDraftStore = (
           }
           return {
             draft: draft === null ? null : toDraft(draft, receipt.recovered, displaced),
-            recovered: receipt.recovered === 1
+            recovered: receipt.recovered === 1,
+            accepted: draft !== null && receipt.accepted_session === draft.session
           }
         }
       }
@@ -1335,7 +1338,7 @@ export const makeDraftStore = (
       if (draft === null) {
         const recovered = content.trim() !== ""
         if (recovered) yield* recover(userId, composerKey(chatId, null), [content], "discard")
-        saved = { draft: null, recovered }
+        saved = { draft: null, recovered, accepted: false }
       } else {
         const next = base.next && draft.session <= base.session + 1
         saved = yield* saveOnto(draft, base, content, { baseRevision: null, ended: "recover", next })
@@ -1350,6 +1353,7 @@ export const makeDraftStore = (
           chat_id: chatId,
           operation_id: base.operationId,
           recovered: saved.recovered ? 1 : 0,
+          accepted_session: saved.accepted ? saved.draft!.session : null,
           displaced_json:
             displaced == null || entry === undefined
               ? null

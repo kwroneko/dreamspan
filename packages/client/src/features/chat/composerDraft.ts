@@ -500,7 +500,7 @@ export class ComposerDraft {
       this.conflict = { ...saved.value.draft.displaced, typedAt: this.replayedAt }
     this.replayedAt = null
     const now = saved.value.draft ?? (await this.reopen())
-    if (now !== null && shown(now) === sent && (unchanged || descendant)) {
+    if (saved.value.accepted && now !== null && shown(now) === sent && (unchanged || descendant)) {
       // The draft holds this tab's text: it's the base now, and what's typed since was typed
       // from it.
       this.base = now
@@ -555,7 +555,7 @@ export class ComposerDraft {
         }
         this.acknowledge(copy!)
         sending.saved = true
-        if (result.value.recovered || result.value.draft === null) {
+        if (!result.value.accepted || result.value.recovered || result.value.draft === null) {
           // Its session ended meanwhile (sent from another tab): the text is in the recovered
           // texts unless it was sent already, rather than sent from a draft it wasn't typed in.
           return this.settleSend(result.value.draft ?? (await this.reopen()))
