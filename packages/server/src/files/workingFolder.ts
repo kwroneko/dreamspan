@@ -26,7 +26,7 @@ export interface FolderMove {
 }
 
 /** `path` after the app's own moves, oldest first; null when none applies to it. */
-export const pathAfterMoves = (path: string, moves: ReadonlyArray<FolderMove>): string | null => {
+const pathAfterMoves = (path: string, moves: ReadonlyArray<FolderMove>): string | null => {
   let now = path
   for (const move of moves)
     if (now === move.from || now.startsWith(`${move.from}/`)) now = `${move.to}${now.slice(move.from.length)}`
@@ -58,14 +58,19 @@ export const locateFolder = async (
   const info = await statPath(root, segments).catch(() => null)
   if (info?.isDirectory()) return `${FILES_TOP}/${segments.join("/")}`
   if (stored.inode === null) return null
-  const moved = pathAfterMoves(`${FILES_TOP}/${segments.join("/")}`, moves)
-  if (moved !== null) {
+  const path = `${FILES_TOP}/${segments.join("/")}`
+  const tried = new Set<string>()
+  for (const [index, move] of moves.entries()) {
+    if (path !== move.from && !path.startsWith(`${move.from}/`)) continue
+    const moved = pathAfterMoves(path, moves.slice(index))
+    if (moved === null || tried.has(moved)) continue
+    tried.add(moved)
     try {
       const at = resolveFilesPath(moved, FILES_TOP).segments
       const there = await statPath(root, at).catch(() => null)
       if (there?.isDirectory() && there.ino === stored.inode) return `${FILES_TOP}/${at.join("/")}`
     } catch {
-      // A recorded move to a path that can't be read now: fall through to the search.
+      // A recorded move to a path that can't be read now: try the next chain of moves.
     }
   }
   const name = segments.at(-1)!

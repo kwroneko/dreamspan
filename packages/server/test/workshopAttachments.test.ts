@@ -49,11 +49,40 @@ describe("workshop attachments", () => {
       const config = testConfig()
       return Effect.gen(function* () {
         const requests: Array<{ messages: Array<{ role: string; content?: unknown }> }> = []
+        let readOnRegenerate = false
         const mock = yield* Effect.acquireRelease(
           Effect.promise(() =>
             startMockProvider((r, res) => {
               const body = r.body as unknown as { messages: Array<{ role: string; content?: unknown }> }
-              if (JSON.stringify(body.messages).includes("ATTACH TURN")) requests.push(body)
+              const attached = body.messages.find((message) => text(message).includes("notes.txt"))
+              if (attached) requests.push(body)
+              const path = /filename=\\"notes\.txt\\"[^>]*?path=\\"([^"\\]+)/.exec(text(attached ?? {}))?.[1]
+              if (readOnRegenerate && path && !body.messages.some((message) => message.role === "tool")) {
+                const call = { name: "read_file", arguments: JSON.stringify({ path }) }
+                return sse(res, [
+                  {
+                    id: "cmpl-attachment",
+                    object: "chat.completion.chunk",
+                    model: "mock",
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {
+                          role: "assistant",
+                          tool_calls: [{ index: 0, id: "read-copy", type: "function", function: call }]
+                        },
+                        finish_reason: null
+                      }
+                    ]
+                  },
+                  {
+                    id: "cmpl-attachment",
+                    object: "chat.completion.chunk",
+                    model: "mock",
+                    choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+                  }
+                ])
+              }
               sse(res, completionChunks(["Read it."], {}))
             })
           ),
@@ -123,7 +152,7 @@ describe("workshop attachments", () => {
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
-            content: "ATTACH TURN: read my notes.",
+            content: "[Image]",
             images: [asImage(notes), asImage(picture)],
             imageDraftIds: ["n", "p"],
             composer: { draftId: draft.id, session: draft.session }
@@ -139,13 +168,14 @@ describe("workshop attachments", () => {
         const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
         yield* eventually(() => finished(events, reply.entry.version.id) !== undefined, 60_000)
         assert.strictEqual(finished(events, reply.entry.version.id)!.status, "complete")
-        const user = requests[0]!.messages.find((m) => text(m).includes("ATTACH TURN"))!
+        const user = requests[0]!.messages.find((m) => text(m).includes("notes.txt"))!
         const content = text(user)
+        assert.include(content, "[Image]\\n<attachment")
         assert.include(
           content,
-          '<attachment filename=\\"notes.txt\\" type=\\"text/plain\\" size=\\"9 B\\" path=\\"/files/thesis/Attachments/notes.txt\\"/>'
+          `<attachment filename=\\"notes.txt\\" type=\\"text/plain\\" size=\\"9 B\\" path=\\"/attachments/${notes.mediaId}\\"/>`
         )
-        assert.include(content, 'path=\\"/files/thesis/Attachments/map.png\\" image_block=\\"true\\"/>')
+        assert.include(content, `path=\\"/attachments/${picture.mediaId}\\" image_block=\\"true\\"/>`)
         // The image goes as a block as well; the text file only by its path.
         assert.strictEqual(content.split('"type":"image_url"').length - 1, 1)
         assert.notInclude(JSON.stringify(requests[0]), "Draft one")
@@ -169,6 +199,18 @@ describe("workshop attachments", () => {
           read.version.images?.map((i) => i.path),
           ["/files/thesis/Attachments/notes.txt", "/files/thesis/Attachments/map.png"]
         )
+
+        // Regeneration reads the path the model was given, even after the live file changed.
+        const generated = path.entries.find((entry) => entry.slotId === reply.entry.slotId)!
+        readOnRegenerate = true
+        const againReply = yield* api.Regenerate({ slotId: generated.slotId, expectedRowVersion: generated.rowVersion })
+        yield* eventually(() => finished(events, againReply.version.id) !== undefined, 60_000)
+        const transcript = yield* api.GetRunTranscript({ versionId: againReply.version.id })
+        const result = transcript.entries.find((entry) => entry.role === "toolResult" && entry.tool === "read_file")
+        if (result?.role !== "toolResult") return yield* Effect.die("regeneration did not read the attachment")
+        assert.isFalse(result.isError)
+        assert.include(result.text, "Draft one")
+        assert.notInclude(result.text, "Changed later")
 
         // A story chat takes images only.
         const story = yield* api.CreateChat({ title: "Story" })
@@ -239,7 +281,7 @@ describe("workshop attachments", () => {
         )
         const body = JSON.stringify(requests[0])
         assert.notInclude(body, "image_url")
-        assert.include(body, `path=\\"/files/Attachments/map.png\\" note=\\"This model can't see images.\\"/>`)
+        assert.include(body, `path=\\"/attachments/${picture.mediaId}\\" note=\\"This model can't see images.\\"/>`)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
     120_000
   )

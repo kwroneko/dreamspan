@@ -810,9 +810,11 @@ const placeAgain = (ctx: ToolContext, host: Host, workspace: SubagentWorkspaceRe
     if (!workspace?.copy) return workspace
     const places = yield* workspacesHere()
     if (!places) return "Its copy can't be used here."
-    const copy = yield* places.ensureCopy(ctx, workspace.copy, approveCopy(ctx, host)).pipe(Effect.result)
-    if (Result.isFailure(copy)) return `Its copy can't be used: ${reason(copy.failure)}`
-    return { ...workspace, copy: copy.success } satisfies SubagentWorkspaceRecord
+    const placed = yield* places
+      .ensureCopy(ctx, workspace.copy, approveCopy(ctx, host), workspace.start)
+      .pipe(Effect.result)
+    if (Result.isFailure(placed)) return `Its copy can't be used: ${reason(placed.failure)}`
+    return { ...workspace, ...placed.success } satisfies SubagentWorkspaceRecord
   })
 
 /**

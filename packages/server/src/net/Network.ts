@@ -7,7 +7,7 @@ import { isIP } from "node:net"
 import { InvalidNetworkSettings } from "@dreamspan/shared/api.ts"
 import { ServerError } from "@dreamspan/shared/errors.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
-import { Agent, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
+import { Agent, DecoratorHandler, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
 import { makeDispatcherPool } from "./dispatcherPool.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Secrets } from "../secrets.ts"
@@ -253,6 +253,11 @@ export const layer = Layer.effect(
               throw new Error("target has no allowed addresses")
             if (input instanceof Request) throw new Error("address pinning requires a URL request")
           }
+          const candidates = addresses ?? [undefined]
+          const readOnly = ["GET", "HEAD"].includes(request.init.method?.toUpperCase() ?? "GET")
+          const body = request.init.body
+          const canRetryConnect = candidates.length > 1 && !readOnly && !(body instanceof ReadableStream)
+          let started = false
           const send = (address: string | undefined) => {
             let pinnedTarget: URL | undefined
             let servername: string | undefined
@@ -264,22 +269,38 @@ export const layer = Layer.effect(
               const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
               servername = isIP(hostname) === 0 ? hostname : undefined
             }
+            const dispatcher = dispatcherFor(
+              route,
+              selected,
+              pinnedTarget,
+              servername,
+              pinnedTarget ? target.host : undefined
+            )
             return undiciFetch((pinnedTarget?.href ?? request.input) as Parameters<typeof undiciFetch>[0], {
               ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
               redirect: "manual",
-              dispatcher: dispatcherFor(
-                route,
-                selected,
-                pinnedTarget,
-                servername,
-                pinnedTarget ? target.host : undefined
-              )
+              dispatcher: canRetryConnect
+                ? dispatcher.compose(
+                    (dispatch) => (options, handler) =>
+                      dispatch(
+                        options,
+                        Object.assign(new DecoratorHandler(handler), {
+                          // Undici calls this after connecting (including tunnels and TLS), just
+                          // before sending the origin request. A write may have happened after it.
+                          onRequestStart: (
+                            ...args: Parameters<NonNullable<Dispatcher.DispatchHandler["onRequestStart"]>>
+                          ) => {
+                            started = true
+                            handler.onRequestStart?.(...args)
+                          }
+                        })
+                      )
+                  )
+                : dispatcher
             })
           }
-          // A public DNS answer may be unreachable (for example IPv6 without a working
-          // route). Read-only source requests can try the other checked answers, never DNS
-          // afresh. Status responses and cancelled requests are not retried.
-          const candidates = addresses ?? [undefined]
+          // Try only checked addresses. For writes, fail over only before an origin request
+          // could have been sent and only if its body can be used in a new fetch.
           let response: Awaited<ReturnType<typeof undiciFetch>> | undefined
           for (let attempt = 0; attempt < candidates.length; attempt++) {
             try {
@@ -289,7 +310,7 @@ export const layer = Layer.effect(
               if (
                 attempt === candidates.length - 1 ||
                 request.init.signal?.aborted ||
-                !["GET", "HEAD"].includes(request.init.method?.toUpperCase() ?? "GET")
+                (!readOnly && (!canRetryConnect || started))
               )
                 throw error
             }
@@ -309,7 +330,6 @@ export const layer = Layer.effect(
           const toGet =
             response.status === 303 ||
             ((response.status === 301 || response.status === 302) && request.init.method === "POST")
-          const body = request.init.body
           if (!toGet && body != null && typeof body !== "string" && !(body instanceof Uint8Array)) {
             throw new Error("a redirect would need the request body sent again")
           }

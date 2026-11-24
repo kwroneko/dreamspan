@@ -85,6 +85,26 @@ describe("attachment copies", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
+  it.live("an unrelated purge between attachment copy and client sync keeps the composer file", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateWorkshop({ title: "Pending attachment" })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+      const composer = { chatId: chat.id, draftId: draft.id, id: "pending-file" }
+      yield* upload("/files/unrelated.txt", "Unrelated.")
+      yield* json("/files/delete", { path: "/files/unrelated.txt" })
+      const [item] = yield* api.ListBin({ limit: 50, before: null })
+      yield* upload("/files/document.txt", "Draft content.")
+      const response = yield* json("/files/attach", { path: "/files/document.txt", composer })
+      assert.strictEqual(response.status, 200)
+      const doc = (yield* Effect.promise(() => response.json())) as AttachedFile
+      yield* api.PurgeBinItem({ itemId: item!.id })
+      const saved = yield* api.SetComposerImage({ ...composer, ...asAttachment(doc) })
+      assert.deepInclude(saved, { mediaId: doc.mediaId, status: "active" })
+      assert.strictEqual((yield* call(`/files/attachment?id=${doc.mediaId}`)).status, 200)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("are refused past the Files quota", () =>
     Effect.gen(function* () {
       yield* upload("/files/big.bin", new Uint8Array(600 * 1024))
@@ -94,6 +114,24 @@ describe("attachment copies", () => {
       const refused = yield* json("/files/attach", { path: "/files/big.bin" })
       assert.strictEqual(refused.status, 507)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ filesQuota: "1600K" }), Generator.none)))
+  )
+
+  it.live("charges concurrent and repeated attachments of the same content only once", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const bytes = new Uint8Array(2 * 1024 * 1024)
+      yield* upload("/files/repeat.bin", bytes)
+      const before = yield* api.GetFilesUsage({ fresh: true })
+      const copies = yield* Effect.all(
+        [attach("/files/repeat.bin"), attach("/files/repeat.bin"), attach("/files/repeat.bin")],
+        { concurrency: "unbounded" }
+      )
+      assert.strictEqual(new Set(copies.map((copy) => copy.mediaId)).size, 1)
+      assert.strictEqual((yield* api.GetFilesUsage({})).usedBytes, before.usedBytes + bytes.length)
+      const again = yield* attach("/files/repeat.bin")
+      assert.strictEqual(again.mediaId, copies[0]!.mediaId)
+      assert.strictEqual((yield* api.GetFilesUsage({})).usedBytes, before.usedBytes + bytes.length)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ filesQuota: "5M" }), Generator.none)))
   )
 
   it.live("a file that isn't an image attaches as a plain file, whatever its name", () =>

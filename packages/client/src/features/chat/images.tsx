@@ -661,14 +661,17 @@ function ImageScope({
     if (!entry.file && !entry.path) return
     try {
       const attaching = files.current
+      const composer = draftId.current && { chatId: session.chatId, draftId: draftId.current, id: entry.id }
+      if (attaching && !composer) throw new Error("Wait for the chat to load before attaching.")
       // In a workshop, saved in Files first (or already there) and attached by its path (§6.1).
-      const attached = attaching
-        ? entry.file
-          ? await attaching.upload(entry.file, entry.name)
-          : await attaching.attach(entry.path!)
-        : entry.file
-          ? { mediaId: await uploadImage(entry.file) }
-          : null
+      const attached =
+        attaching && composer
+          ? entry.file
+            ? await attaching.upload(entry.file, entry.name, composer)
+            : await attaching.attach(entry.path!, composer)
+          : entry.file
+            ? { mediaId: await uploadImage(entry.file) }
+            : null
       if (!attached) throw new Error("Files can be attached in a workshop only.")
       const uploaded: ImageDraftEntry = {
         id: entry.id,
@@ -705,16 +708,17 @@ function ImageScope({
           })
         )
         if (!remote.ok) throw new Error(remote.error.message)
-        const tombstones = new Set(remote.value.filter((entry) => entry.status !== "active").map((entry) => entry.id))
+        const known = new Map(remote.value.map((entry) => [entry.id, entry.status]))
         for (const entry of remote.value) {
           if (entry.status === "active") await keepImage(fromServer(entry))
           else await dropImage(entry.id)
         }
         for (const entry of stored) {
-          if (tombstones.has(entry.id)) continue
+          const status = known.get(entry.id)
+          if (status && status !== "active") continue
           if (entry.sending)
             setError("A previous send was not acknowledged. Check the chat before sending these attachments again.")
-          await upload(entry)
+          if (!status) await upload(entry)
         }
       } finally {
         if (live) {
@@ -785,10 +789,10 @@ function ImageScope({
   }
   // The Files tab's Attach to message (§6.1).
   useEffect(
-    () => onAttachRequest(session.chatId, (path) => add([], [path])),
-    // `add` reads its state through refs and the queue; one subscription per chat.
+    () => onAttachRequest(session, view.forkId, (path) => add([], [path])),
+    // `add` reads its state through refs and the queue; one subscription per view and fork.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.chatId, ready]
+    [session, view.forkId, ready]
   )
   const capture = () => {
     const captured = entries.filter((entry) => entry.mediaId && entry.saved && !entry.sending)

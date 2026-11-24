@@ -56,7 +56,8 @@ export const register = () => [
       const target = joinPath(folder.choices?.current ?? FILES_TOP, ATTACHMENTS_FOLDER)
       return {
         folder: target,
-        upload: async (file, name) => source.attach((await source.upload(joinPath(target, name), file, "keep")).path),
+        upload: async (file, name, composer) =>
+          source.attach((await source.upload(joinPath(target, name), file, "keep")).path, composer),
         attach: source.attach,
         copyUrl: source.attachmentUrl,
         showHref: showInFiles

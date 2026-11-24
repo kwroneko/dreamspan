@@ -7,7 +7,7 @@ import type { McpConnectionSettings } from "@dreamspan/shared/mcp.ts"
 import { Effect, Layer } from "effect"
 import { McpConnections } from "../src/mcp/McpConnections.ts"
 import { createServer } from "node:http"
-import type { AddressInfo } from "node:net"
+import { isIPv6, type AddressInfo } from "node:net"
 import { briefSignInError, SIGN_IN_PENDING_PER_USER, signInTargets, typedAsLocal } from "../src/mcp/oauth.ts"
 import * as Database from "../src/db/Database.ts"
 import * as NetworkModule from "../src/net/Network.ts"
@@ -28,10 +28,10 @@ const settings = (url: string): McpConnectionSettings => ({
   timeoutS: 5
 })
 
-const setup = (accessTtlS = 3600) =>
+const setup = (accessTtlS = 3600, address?: Parameters<typeof startFakeAuthServer>[1]) =>
   Effect.gen(function* () {
     const auth = yield* Effect.acquireRelease(
-      Effect.promise(() => startFakeAuthServer({ accessTtlS })),
+      Effect.promise(() => startFakeAuthServer({ accessTtlS }, address)),
       (server) => Effect.promise(() => server.close())
     )
     const server = yield* Effect.acquireRelease(
@@ -108,6 +108,19 @@ describe("signing in with an MCP server", () => {
       const ledger = yield* api.ListMcpCalls({ connectionId, before: null })
       assert.isAtLeast(ledger.filter((row) => row.method === "oauth" && row.status === "complete").length, 2)
       assert.notInclude(JSON.stringify(ledger), used[0]!)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("registers and exchanges a token when the localhost auth server listens only on IPv6", () =>
+    Effect.gen(function* () {
+      const origin = new URL(APP)
+      const addresses = yield* Effect.promise(() => signInTargets(origin)(origin))
+      const bind = addresses?.find(isIPv6)
+      assert.isDefined(bind)
+      const { auth, signIn } = yield* setup(3600, { bind: bind!, advertise: origin.hostname })
+      yield* signIn
+      assert.strictEqual(auth.requests().filter((path) => path === "/register").length, 1)
+      assert.strictEqual(auth.requests().filter((path) => path === "token:authorization_code").length, 1)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -343,6 +356,7 @@ describe("where a sign-in's requests may go", () => {
                 const server = createServer((request, response) => {
                   hits.push(`${host} ${request.method} ${request.url} ${request.headers.host}`)
                   if (request.url === "/start") response.writeHead(302, { location: "/next" }).end()
+                  else if (request.url === "/lost-response") request.socket.destroy()
                   else response.writeHead(200).end("ok")
                 })
                 server.listen(port, host, () => done(server))
@@ -365,11 +379,17 @@ describe("where a sign-in's requests may go", () => {
         const response = yield* Effect.promise(() => fetch(`${base}${path}`, { method: "POST", body: "{}" }))
         assert.strictEqual(response.status, 200)
       }
+      // Even with another checked address, a lost response after a POST must not replay it.
+      const withFallback = network.fetchFor(undefined, async () => ["127.0.0.2", "127.0.0.1"])
+      yield* Effect.tryPromise(() => withFallback(`${base}/lost-response`, { method: "POST", body: "{}" })).pipe(
+        Effect.flip
+      )
       assert.strictEqual(lookups, 1)
       assert.deepStrictEqual(hits, [
         `127.0.0.2 POST /start rebind.example:${port}`,
         `127.0.0.2 GET /next rebind.example:${port}`,
-        `127.0.0.2 POST /register rebind.example:${port}`
+        `127.0.0.2 POST /register rebind.example:${port}`,
+        `127.0.0.2 POST /lost-response rebind.example:${port}`
       ])
     }).pipe(
       Effect.scoped,

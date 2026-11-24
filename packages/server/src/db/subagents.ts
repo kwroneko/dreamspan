@@ -90,6 +90,8 @@ export interface SubagentCopyRecord {
   readonly top?: string
   readonly branch?: string
   readonly base?: string
+  /** The file copy before the subagent started. */
+  readonly fingerprint?: string
   /** When the subagent ended: true, it had changes and stays; false, it was removed. */
   readonly kept?: boolean
 }
