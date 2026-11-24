@@ -180,3 +180,39 @@ for (const width of [1440, 390])
       await server.stop()
     }
   })
+
+// The search's own controls follow the box on its row, and the tag field ends the filter row,
+// never alone on one, at every width the filter bar shows its panels (owner: they had wrapped
+// under the box). Windows with the sidebar open: content widths 900 to 1600, and wider.
+test("the search row and the filter row keep together at every width", async ({ page }) => {
+  test.setTimeout(240_000)
+  const port = await freePort()
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1920, height: 900 })
+    await page.goto(server.url)
+    const main = page.getByRole("main")
+    await main.getByRole("button", { name: "cardex", exact: true }).click()
+    await expect(main.locator("[data-remote-card]").first()).toBeVisible()
+    const box = main.getByRole("searchbox", { name: "Search cardex", exact: true })
+    const within = main.getByRole("button", { name: "Search in: All text", exact: true })
+    const panels = main.locator("[data-filter-panels]")
+    const tag = panels.locator("input")
+    const lastPanel = panels.locator(":scope > button").last()
+    for (const width of [1024, 1252, 1352, 1452, 1602, 1752, 1952, 2560, 3840]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect
+        .poll(
+          async () => {
+            const [b, i, t, l] = await Promise.all([box, within, tag, lastPanel].map((at) => at.boundingBox()))
+            return [Math.round(i!.y - b!.y), Math.round(t!.y - l!.y)]
+          },
+          { message: `window ${width}` }
+        )
+        .toEqual([0, 0])
+    }
+  } finally {
+    await server.stop()
+  }
+})

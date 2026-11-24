@@ -1237,7 +1237,7 @@ function PanelButton({ panel, browse, set }: { panel: Panel; browse: SourceBrows
       side="bottom"
       tall
       fit={!creators}
-      triggerClassName={`${buttonClass("secondary")} max-w-full`}
+      triggerClassName={`${buttonClass("secondary")} max-w-full font-normal!`}
       trigger={
         <span data-filter-panel={panel.key} className="truncate">
           {summary}
@@ -1328,6 +1328,7 @@ function SearchOptions({
               closeButton={false}
               fit
               triggerLabel={`${filter.label}: ${summary}`}
+              triggerClassName={`${buttonClass("secondary")} max-w-full font-normal!`}
               hint={filter.about ?? "The parts of a card the words are looked for in."}
               side="bottom"
               trigger={
@@ -1474,7 +1475,10 @@ export function SourceSearchOptions({ browse, filtersId }: { browse: SourceBrows
   const { search } = layoutOf(caps)
   if (search.length === 0 && filtersId === undefined) return null
   return (
-    <div data-search-options className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+    <div
+      data-search-options
+      className="flex max-w-full min-w-0 flex-wrap items-center gap-2 @xl:shrink-0 @xl:flex-nowrap"
+    >
       <SearchOptions browse={browse} filters={search} set={setterOf(browse)} />
       {filtersId !== undefined && <SourceFiltersButton browse={browse} panelId={filtersId} />}
     </div>
@@ -1512,7 +1516,7 @@ export function SourceFiltersPanel({
           <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
         ))}
         {(caps.tags.include || caps.tags.exclude) && (
-          <div className="max-w-64 min-w-40 flex-1">
+          <div className="min-w-40 flex-1">
             <TagInput browse={browse} />
           </div>
         )}
