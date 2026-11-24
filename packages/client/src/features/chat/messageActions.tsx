@@ -92,6 +92,8 @@ export interface MessageAction {
   readonly disabled?: (context: MessageActionContext) => string | null
   /** Shown on the message as a button until the user unticks it. */
   readonly pinned?: boolean
+  /** Still usable while the message or its thinking is edited: it only reads the saved message. */
+  readonly duringEdit?: boolean
   /** The keyboard's (and a double-click's) way in, where it has one. */
   readonly run?: (context: MessageActionContext, source: "button" | "keyboard") => void | Promise<void>
   /**
@@ -276,7 +278,19 @@ function useFit(pinned: string, count: number) {
   return { root, fit }
 }
 
-export function MessageActions({ context, className = "" }: { context: MessageActionContext; className?: string }) {
+export function MessageActions({
+  context,
+  className = "",
+  locked
+}: {
+  context: MessageActionContext
+  className?: string
+  /**
+   * Why the actions can't be used now (the message or its thinking is edited): each one that
+   * would change the message, and More actions, stays in its place disabled, saying this on hover.
+   */
+  locked?: string | undefined
+}) {
   // Availability can depend on the path tip even when this row's entry stayed identical.
   const readTip = () => {
     const view = context.session.snapshot()
@@ -294,7 +308,19 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const versionId = context.entry.version.id
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)
+  // A menu closed by a press outside it gives focus back to nothing: the press went elsewhere,
+  // and focus coming back to More actions after the closing showed the buttons again once they
+  // had faded with the menu (owner, 2026-11-24). Closed any other way (Escape, an item), focus
+  // goes back, and the buttons are held shown until it is there.
+  const closedOutside = useRef(false)
+  const [held, setHeld] = useState(false)
+  useEffect(() => {
+    if (!held) return
+    const timer = setTimeout(() => setHeld(false), 600)
+    return () => clearTimeout(timer)
+  }, [held])
   const explain = (action: MessageAction, view: MessageActionView): MessageActionView => {
+    if (locked !== undefined && action.duringEdit !== true) return { ...view, disabled: locked }
     const reason = action.disabled?.(context)
     return reason ? { ...view, disabled: reason } : view
   }
@@ -319,56 +345,72 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
         </span>
       ))}
       {actions.length > 0 && (
-        <span data-more className="inline-flex shrink-0">
-          <Menu
-            align="end"
-            label="More actions"
-            trigger={
-              <Tooltip label="More actions: every action on this message, and which show on it as buttons">
-                <button type="button" aria-label="More actions" className={iconButtonClass()}>
-                  <Icon name="more" />
-                </button>
-              </Tooltip>
-            }
-          >
-            {actions.map((action, index) => {
-              const on = isPinned(action, pins.choices)
-              const shown = on && pinned.indexOf(action) < fit
-              return (
-                <Fragment key={action.id}>
-                  {index > 0 && action.group !== actions[index - 1]!.group && <MenuSeparator />}
-                  <action.describe
-                    {...props}
-                    show={(described) => {
-                      const view = explain(action, described)
-                      return (
-                        <MenuItemWithCheckbox
-                          icon={view.icon}
-                          tone={view.tone ?? "default"}
-                          label={view.label}
-                          description={view.disabled ?? view.hint}
-                          {...(view.disabled !== undefined ? { disabled: true, note: view.disabled } : {})}
-                          {...(view.link ? { link: view.link } : {})}
-                          {...(view.onSelect ? { onSelect: () => void view.onSelect?.() } : {})}
-                          checkbox={{
-                            checked: on,
-                            onCheckedChange: (checked) => messageActionPins.choose(action.id, checked),
-                            label: `Show ${view.label} on the message`,
-                            description: pinHint(view.label, on, shown)
-                          }}
-                        />
-                      )
-                    }}
-                  />
-                </Fragment>
-              )
-            })}
-            {pins.error !== null && (
-              <p role="alert" className="px-2.5 py-1.5 text-xs text-danger">
-                Couldn't save which actions show on messages: {pins.error}
-              </p>
-            )}
-          </Menu>
+        <span data-more data-held={held || undefined} className="inline-flex shrink-0" onFocus={() => setHeld(false)}>
+          {locked !== undefined ? (
+            <IconButton
+              label="More actions"
+              hint={locked}
+              icon="more"
+              disabled
+              focusableWhenDisabled
+              onClick={() => {}}
+            />
+          ) : (
+            <Menu
+              align="end"
+              label="More actions"
+              onOpenChange={(open, reason) => {
+                closedOutside.current = !open && reason === "outside-press"
+                setHeld(!open && !closedOutside.current)
+              }}
+              finalFocus={() => !closedOutside.current}
+              trigger={
+                <Tooltip label="More actions: every action on this message, and which show on it as buttons">
+                  <button type="button" aria-label="More actions" className={iconButtonClass()}>
+                    <Icon name="more" />
+                  </button>
+                </Tooltip>
+              }
+            >
+              {actions.map((action, index) => {
+                const on = isPinned(action, pins.choices)
+                const shown = on && pinned.indexOf(action) < fit
+                return (
+                  <Fragment key={action.id}>
+                    {index > 0 && action.group !== actions[index - 1]!.group && <MenuSeparator />}
+                    <action.describe
+                      {...props}
+                      show={(described) => {
+                        const view = explain(action, described)
+                        return (
+                          <MenuItemWithCheckbox
+                            icon={view.icon}
+                            tone={view.tone ?? "default"}
+                            label={view.label}
+                            description={view.disabled ?? view.hint}
+                            {...(view.disabled !== undefined ? { disabled: true, note: view.disabled } : {})}
+                            {...(view.link ? { link: view.link } : {})}
+                            {...(view.onSelect ? { onSelect: () => void view.onSelect?.() } : {})}
+                            checkbox={{
+                              checked: on,
+                              onCheckedChange: (checked) => messageActionPins.choose(action.id, checked),
+                              label: `Show ${view.label} on the message`,
+                              description: pinHint(view.label, on, shown)
+                            }}
+                          />
+                        )
+                      }}
+                    />
+                  </Fragment>
+                )
+              })}
+              {pins.error !== null && (
+                <p role="alert" className="px-2.5 py-1.5 text-xs text-danger">
+                  Couldn't save which actions show on messages: {pins.error}
+                </p>
+              )}
+            </Menu>
+          )}
         </span>
       )}
       {activeDialog?.dialog && <activeDialog.dialog {...props} />}

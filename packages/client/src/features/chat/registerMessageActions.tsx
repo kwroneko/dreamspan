@@ -156,6 +156,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.copy-text",
+    duringEdit: true,
     order: 100,
     group: "copy",
     describe: viewOf(({ session, entry }) => ({
@@ -167,6 +168,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.copy-link",
+    duringEdit: true,
     onMerges: true,
     order: 101,
     group: "copy",
