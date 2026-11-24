@@ -221,8 +221,10 @@ export function stylesheetViolations(css: string, consent: boolean): string[] {
             else selectors[selectors.length - 1]!.push(part)
           for (const selector of selectors.map(text)) {
             const ok = scoped
-              ? /^:scope(?:\.rpfont-[0-9a-f-]+)?\s/.test(selector)
-              : /^\.message-html(?:\.rpfont-[0-9a-f-]+)?\s+(?![+~|])/.test(selector)
+              ? /^:scope(?::where\((?:\.rpfont-[0-9a-f-]+|:not\(\.rpfont-[0-9a-f-]+\))\))?\s/.test(selector)
+              : /^\.message-html(?::where\((?:\.rpfont-[0-9a-f-]+|:not\(\.rpfont-[0-9a-f-]+\))\))?\s+(?![+~|])/.test(
+                  selector
+                )
             if (!ok) found.push(`selector outside the scope: ${selector}`)
           }
           found.push(

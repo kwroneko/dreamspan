@@ -26,7 +26,7 @@ for (const prefixOnly of [false, true]) {
             parentSlotId,
             branch: false,
             reply: false,
-            content: `<style>@font-face{font-family:Inter;src:url("${font}")} .glyph{font:40px Inter;display:inline-block}</style><span class="glyph" data-label="Card ${index}">AAAA</span>`
+            content: `<style>@font-face{font-family:Inter;src:url("${font}")} .glyph{font:80px/2 Inter;font-size:40px;line-height:48px;display:inline-block}</style><span class="glyph" data-label="Card ${index}">AAAA</span>`
           })
           if (sent._tag !== "Posted") throw new Error("Synthetic send queued")
           parentSlotId = sent.entry.slotId
@@ -40,6 +40,10 @@ for (const prefixOnly of [false, true]) {
     })
     await page.goto(`${server().url}/chats/${chat.id}`)
     await expect(page.locator(".custom-glyph")).toHaveCount(2)
+    for (const glyph of await page.locator(".custom-glyph").all()) {
+      await expect(glyph).toHaveCSS("font-size", "40px")
+      await expect(glyph).toHaveCSS("line-height", "48px")
+    }
     await expect
       .poll(() =>
         page.evaluate(async () => {

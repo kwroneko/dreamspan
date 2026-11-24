@@ -397,7 +397,7 @@ describe("embedded font envelopes and message ownership", () => {
       const out = message([face(data)])
       expect(out).toContain(`url("${data}")`)
       expect(out).toContain(`font-family: ${messageFontClass("first")}-inter`)
-      expect(out).toContain(`.message-html.${messageFontClass("first")} .custom-a{font-family:`)
+      expect(out).toContain(`.message-html:where(.${messageFontClass("first")}) .custom-a{font-family:`)
     }
     expect(message([face(NARROW_WOFF2)], "second")).not.toContain(`${messageFontClass("first")}-inter`)
   })
@@ -448,11 +448,11 @@ describe("embedded font envelopes and message ownership", () => {
         "first",
         mode
       )
-      const own =
-        mode === "prefix" ? `.message-html.${messageFontClass("first")}` : `:scope.${messageFontClass("first")}`
+      const root = mode === "prefix" ? ".message-html" : ":scope"
+      const own = `${root}:where(.${messageFontClass("first")})`
       expect(out).toContain(`${own} .custom-b{& > span{font: 20px ${messageFontClass("first")}-inter;}}`)
       expect(out).not.toMatch(/@keyframes[^}]*font-family/)
-      expect(out).toContain(".custom-a{color: red;}")
+      expect(out).toContain(`${root}:where(:not(.${messageFontClass("first")})) .custom-a{color: red;}`)
       expect(stylesheetViolations(out, false)).toEqual([])
     }
   })

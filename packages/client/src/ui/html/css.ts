@@ -850,7 +850,8 @@ function writeSelectors(
   writer: Writer,
   nested: boolean,
   mode: ScopeMode,
-  ownClass?: string
+  messageClass?: string,
+  privateRule = false
 ): boolean {
   let written = 0
   for (const selector of selectorList(prelude)) {
@@ -870,9 +871,18 @@ function writeSelectors(
         writer.delim(".")
         writer.ident(MESSAGE_SCOPE)
       }
-      if (ownClass) {
+      if (messageClass) {
+        // Match either the source body or all other bodies without changing specificity.
+        writer.punct(":")
+        writer.fn("where")
+        if (!privateRule) {
+          writer.punct(":")
+          writer.fn("not")
+        }
         writer.delim(".")
-        writer.ident(ownClass)
+        writer.ident(messageClass)
+        if (!privateRule) writer.punct(")")
+        writer.punct(")")
       }
       writer.space()
     }
@@ -893,7 +903,7 @@ const SIMPLE_NAME = /^-?[_a-zA-Z][-\w]*$/
 interface Context {
   readonly policy: Policy
   readonly mode: ScopeMode
-  readonly declarations?: "shared" | "fonts"
+  readonly declarations?: "shared" | "private"
   readonly generatedText?: boolean
 }
 
@@ -905,14 +915,13 @@ function writeRule(item: Extract<Item, { kind: "rule" }>, writer: Writer, contex
       writer,
       nested,
       context.mode,
-      context.declarations === "fonts" ? context.policy.messageClass : undefined
+      context.declarations ? context.policy.messageClass : undefined,
+      context.declarations === "private"
     )
   )
     return writer.reset(mark)
   writer.punct("{")
-  const bodyFrom = writer.mark()
   writeBlock(blockItems(item.body), writer, { ...context, generatedText: textPseudo(item.prelude) })
-  if (context.declarations === "fonts" && writer.mark() === bodyFrom) return writer.reset(mark)
   writer.punct("}")
 }
 
@@ -921,7 +930,7 @@ function writeBlock(items: ReadonlyArray<Item>, writer: Writer, context: Context
   for (const item of items) {
     if (item.kind === "decl") {
       const font = /^(font|font-family)$/i.test(item.name)
-      if (!context.declarations || (context.declarations === "fonts" ? font : !font))
+      if (context.declarations !== "shared" || !font)
         writeDeclaration(item, writer, context.policy, context.generatedText)
     } else if (item.kind === "rule") writeRule(item, writer, context, true)
     else writeAtRule(item, writer, context, true)
@@ -1141,17 +1150,10 @@ function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode)
     writer.punct("{")
   }
   const rulesFrom = writer.mark()
-  writeRules(
-    items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face")),
-    writer,
-    context
-  )
-  if (policy.messageClass && policy.fonts.size)
-    writeRules(
-      items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face")),
-      writer,
-      { policy, mode, declarations: "fonts" }
-    )
+  const rules = items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face"))
+  writeRules(rules, writer, context)
+  // The source body gets the complete cascade, including shorthand resets and their longhands.
+  if (context.declarations === "shared") writeRules(rules, writer, { ...context, declarations: "private" })
   if (mode === "scope") {
     if (writer.mark() === rulesFrom) writer.reset(scopedFrom)
     else writer.punct("}")
