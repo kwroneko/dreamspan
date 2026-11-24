@@ -11,11 +11,12 @@ import { textField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
 import { cardexAdapter } from "../src/sources/cardex.ts"
-import { makeSourceCache } from "../src/sources/cache.ts"
+import { blobPath, makeSourceCache } from "../src/sources/cache.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
@@ -1889,6 +1890,30 @@ describe("the cache (§4.1)", () => {
       yield* again.scan
       assert.isTrue(again.has(key("b", "image", "x")))
       assert.isFalse(again.has(key("a", "image", "x")))
+    })
+  )
+
+  it.effect("counts a thumbnail once across repeated responses and restarts", () =>
+    Effect.gen(function* () {
+      const { cache, dataDir } = fresh(() => 0)
+      yield* cache.load
+      const entry = yield* cache.put(key("a", "image", "x"), { bytes: new Uint8Array(100) })
+      const path = `${blobPath(entry.blob!)}.thumb-v1-128.webp`
+      const base = cache.usedBytes()
+      yield* Effect.promise(() => writeFile(join(dataDir, path), new Uint8Array(40)))
+      yield* cache.noteDerivative(entry.blob!, path)
+      yield* cache.noteDerivative(entry.blob!, path)
+      assert.strictEqual(cache.usedBytes(), base + 40)
+
+      const restarted = makeSourceCache({ dataDir })
+      yield* restarted.load
+      yield* restarted.noteDerivative(entry.blob!, path)
+      assert.strictEqual(restarted.usedBytes(), base + 40)
+      yield* Effect.promise(() => writeFile(join(dataDir, path), new Uint8Array(50)))
+      yield* restarted.noteDerivative(entry.blob!, path)
+      assert.strictEqual(restarted.usedBytes(), base + 50)
+      yield* restarted.clearUser("a", null)
+      assert.strictEqual(restarted.usedBytes(), 0)
     })
   )
 })

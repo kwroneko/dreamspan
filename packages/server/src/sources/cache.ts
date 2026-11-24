@@ -79,6 +79,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
   /** How many entries name each blob, and the bytes of the blob with its derivatives. */
   const blobRefs = new Map<string, number>()
   const blobBytes = new Map<string, number>()
+  const derivativeBytes = new Map<string, Map<string, number>>()
   const pins = new Map<string, number>()
   /** Entry files' own sizes, roughly: their JSON. */
   const entryBytes = new Map<string, number>()
@@ -114,6 +115,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     }
     blobRefs.delete(sha)
     blobBytes.delete(sha)
+    derivativeBytes.delete(sha)
     await removeBlobFiles(sha)
   }
 
@@ -221,14 +223,27 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
 
   const readBlob = (sha: string) => Effect.promise(() => readFile(join(options.dataDir, blobPath(sha))))
 
+  const countDerivative = (sha: string, path: string, size: number) => {
+    const total = blobBytes.get(sha)
+    if (total === undefined) return
+    const files = derivativeBytes.get(sha) ?? new Map<string, number>()
+    const previous = files.get(path) ?? 0
+    if (size === 0) files.delete(path)
+    else files.set(path, size)
+    if (files.size === 0) derivativeBytes.delete(sha)
+    else derivativeBytes.set(sha, files)
+    blobBytes.set(sha, total + size - previous)
+  }
+
   /** A thumbnail was made beside a blob: it counts towards the cap with it. */
   const noteDerivative = (sha: string, path: string) =>
     Effect.promise(async () => {
-      const size = await stat(join(options.dataDir, path)).then(
+      const fullPath = join(options.dataDir, path)
+      const size = await stat(fullPath).then(
         (s) => s.size,
         () => 0
       )
-      if (blobBytes.has(sha)) blobBytes.set(sha, blobBytes.get(sha)! + size)
+      countDerivative(sha, fullPath, size)
     })
 
   /** Keeps an entry past its age while held; the returned effect lets go. */
@@ -298,8 +313,10 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
       for (const name of await readdir(dir).catch(() => [] as Array<string>)) {
         const sha = name.slice(0, 64)
         if (!BLOB.test(sha) || !blobRefs.has(sha)) await unlink(join(dir, name)).catch(() => undefined)
-        else if (name !== sha && !name.endsWith(".tmp"))
-          blobBytes.set(sha, (blobBytes.get(sha) ?? 0) + (await stat(join(dir, name))).size)
+        else if (name !== sha && !name.endsWith(".tmp")) {
+          const path = join(dir, name)
+          countDerivative(sha, path, (await stat(path)).size)
+        }
         else if (name.endsWith(".tmp")) await unlink(join(dir, name)).catch(() => undefined)
       }
     }
