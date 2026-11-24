@@ -53,7 +53,9 @@ import {
   queuedPreviews,
   type ChatSurfaceProps
 } from "./presentation.tsx"
-import { dropImage, keepImage, readImages, type ImageDraftEntry } from "./imageDraft.ts"
+import { adoptImages, dropImage, keepImage, readImages, type ImageDraftEntry } from "./imageDraft.ts"
+import { draftEntryOf } from "./chatStarted.ts"
+import { pendingChatCopy } from "../editor/backup.ts"
 import { pendingAttachments, PendingAttachmentsContext, type PendingAttachments } from "./pendingComposerControls.tsx"
 import {
   FILE_PATH_MIME,
@@ -704,6 +706,10 @@ function ImageScope({
     let live = true
     void enqueue(async () => {
       try {
+        // A card's new chat: what the page before it kept in this browser for that card (its
+        // pending-chat key, before new chats were pending chats) is this chat's now.
+        const entry = view.chat?.status === "pending" ? draftEntryOf(session.chatId) : null
+        if (entry?.startsWith("card:")) await adoptImages(`${user}:pending:${pendingChatCopy(entry.slice(5))}`, scope)
         const stored = await readImages(scope)
         draftId.current = resolvedDraftId
         const remote = await session.call((client) =>

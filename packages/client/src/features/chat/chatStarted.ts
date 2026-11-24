@@ -17,5 +17,7 @@ export const notStarted = (chat: Pick<Chat, "status"> | null | undefined) => (is
 /** The entry each pending chat opened in this tab is for (DraftChatPage.tsx): a group's or not. */
 const draftEntries = new Map<string, DraftFor>()
 export const rememberDraftFor = (chatId: string, draftFor: DraftFor) => void draftEntries.set(chatId, draftFor)
+/** The entry a pending chat opened in this tab is for, if it was opened here. */
+export const draftEntryOf = (chatId: string) => draftEntries.get(chatId) ?? null
 /** A group's new chat: its persona pickers have no persona lock, which is a single chat's. */
 export const isGroupDraft = (chatId: string) => draftEntries.get(chatId)?.startsWith("group:") ?? false
