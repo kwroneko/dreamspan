@@ -34,7 +34,9 @@ export const registerCompositionActions = () => [
     icon: "versionAddSelection",
     editor: "selection",
     applies,
-    unavailable,
+    // Kept in place without a selection (a code editor's strip, textActions.tsx `keepSelection`).
+    unavailable: (context) =>
+      context.text.length === 0 ? "Select text to add it to your swipe." : unavailable(context),
     available: (context) => context.text.length > 0 && targetOf(context) !== null,
     run: add
   }),
