@@ -101,6 +101,24 @@ test("a reused card field preview binds to the new card's store", async ({ page 
   await expect.poll(() => textBoxValue(panel.getByRole("textbox", { name: "Description", exact: true }))).toBe("")
 })
 
+test("a removed alternate greeting is read-only in its open field tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openCard(page, "Greeting tab")
+  await page.getByRole("tab", { name: "Greetings", exact: true }).click()
+  await page.getByRole("button", { name: "Add a greeting", exact: true }).click()
+  const label = "Alternate greeting 1"
+  const card = page.locator("[data-frame]").first()
+  await card.getByRole("textbox", { name: label, exact: true }).fill("A greeting to remove.")
+  await card.getByRole("link", { name: `Open ${label} in a tab`, exact: true }).click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+  const field = page.locator("[data-field-tab]")
+  const box = field.getByRole("textbox", { name: label, exact: true })
+  await expect.poll(() => textBoxValue(box)).toBe("A greeting to remove.")
+  await card.getByRole("button", { name: "Remove alternate greeting 1", exact: true }).click()
+  await expect(box).not.toBeEditable()
+  await expect(field.getByText("This greeting was removed.", { exact: true })).toBeVisible()
+})
+
 test("1440: the expand button opens the field as a tab beside, the same text live both ways and after a reload", async ({
   page
 }, info) => {
