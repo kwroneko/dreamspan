@@ -2185,9 +2185,10 @@ const WriteOpsChatOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
+      expectedRowVersion: Schema.Int,
       feeds: Schema.Array(Schema.Struct({ key: Schema.String, feed: Schema.NullOr(PriceFeed) }))
     },
-    success: Schema.Struct({ updated: Schema.Int }),
+    success: Schema.Struct({ updated: Schema.Int, stale: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetModelHidden", {

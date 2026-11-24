@@ -283,8 +283,8 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
           updated_at: at
         })} WHERE id = ${connectionId}`
         // The first listing is what the user added the server for: its tools start on.
-        if (row.catalog_revision === 0 && revision === 1)
-          yield* sql`UPDATE mcp_uses SET reviewed_revision = 1, updated_at = ${at}
+        if (row.listed_at === null && changed)
+          yield* sql`UPDATE mcp_uses SET reviewed_revision = ${revision}, updated_at = ${at}
             WHERE connection_id = ${connectionId} AND reviewed_revision = 0`
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SaveMcpCatalog")),

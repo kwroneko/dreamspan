@@ -144,6 +144,8 @@ interface SubagentHost {
 export interface ToolOutput {
   /** App-owned assertion from a result builder, never inferred from returned text. */
   readonly dataOnly?: true
+  /** Re-page the original result so shortening preserves its continuation. */
+  readonly renderPage?: (limit: number) => string
   /** Mechanical metadata prepared by a structured result builder. */
   readonly frame?: string
   /** Already committed bytes: do not reformat on replay. */

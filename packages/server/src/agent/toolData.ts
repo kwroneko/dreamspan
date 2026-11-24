@@ -49,6 +49,8 @@ export const toolDataPage = (
     readonly limit?: number
     readonly frame?: string | undefined
     readonly notice?: boolean
+    /** A continuation must advance even when its framing alone exceeds the budget. */
+    readonly minimumProgress?: boolean
     readonly more: (end: number) => string
   }
 ) => {
@@ -59,8 +61,11 @@ export const toolDataPage = (
     (end < text.length ? `\n${options.more(end)}` : "")
   if (text.length - offset <= limit && render(text.length).length <= limit)
     return { text: render(text.length), end: text.length }
-  if (render(offset).length > limit) return { text: "", end: offset }
-  let low = offset
+  const codePoint = text.codePointAt(offset)
+  const minimum = options.minimumProgress && codePoint !== undefined ? offset + (codePoint > 0xffff ? 2 : 1) : offset
+  const first = render(minimum)
+  if (first.length > limit) return minimum > offset ? { text: first, end: minimum } : { text: "", end: offset }
+  let low = minimum
   let high = Math.min(text.length, offset + limit)
   while (low < high) {
     const middle = Math.ceil((low + high) / 2)

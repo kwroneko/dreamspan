@@ -550,7 +550,8 @@ export const chatStateChange = (
     if (!mapped.lorebooks.includes(ref)) events.push({ key: "lorebook.detach", value: { ref: ref as RefId } })
   }
   for (const [name, value] of mapped.vars) {
-    if (previous?.vars[name] !== state.vars[name]) events.push({ key: "var.set", value: { name, value } })
+    // For a new branch the writer compares against the actual shared prefix after placement.
+    if (inherited || previous?.vars[name] !== state.vars[name]) events.push({ key: "var.set", value: { name, value } })
   }
   // The group's reply strategy, for its chats (ST's `activation_strategy`): only when it isn't
   // the default, or changed since the last import.

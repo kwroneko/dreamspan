@@ -296,7 +296,11 @@ export const resolveReasoning = (
 export const priceCost = (counts: TokenCounts, price: Price): number | null => pricedCost(counts, price)?.amount ?? null
 
 /** `priceCost` with the rates it applied (the request's tier), which the ledger keeps beside the cost. */
-export const pricedCost = (counts: TokenCounts, price: Price): { amount: number; rates: PricedRates } | null => {
+export const pricedCost = (
+  counts: TokenCounts,
+  price: Price,
+  cacheRates?: "explicit" | "table"
+): { amount: number; rates: PricedRates } | null => {
   const { inputUncached, cacheRead, cacheWrite, output } = counts
   if (inputUncached === null || output === null) return null
   const read = cacheRead ?? 0
@@ -310,6 +314,15 @@ export const pricedCost = (counts: TokenCounts, price: Price): { amount: number;
       null
     )
   const chosen = tier ?? price
+  // If an endpoint leaves a billed cache rate unknown, try the next whole price table.
+  // A list or built-in table may use the standard long-write rate derived from its own input.
+  if (
+    cacheRates !== undefined &&
+    ((read > 0 && chosen.cacheRead === undefined) ||
+      (write > long && chosen.cacheWrite === undefined) ||
+      (cacheRates === "explicit" && long > 0 && chosen.cacheWriteLong === undefined))
+  )
+    return null
   const rates: PricedRates = {
     input: chosen.input,
     read: chosen.cacheRead ?? 0,
@@ -330,7 +343,7 @@ export const pricedCost = (counts: TokenCounts, price: Price): { amount: number;
         (output - thinking) * rates.output +
         thinking * (rates.reasoning ?? rates.output)) /
         1e6 +
-      (price.perRequest ?? 0),
+      (chosen.perRequest ?? price.perRequest ?? 0),
     rates
   }
 }
@@ -379,7 +392,8 @@ const tableFormula = (
     },
     cost: (input) => {
       const found = chosen(input, input.capture.upstream)
-      const priced = found === null ? null : pricedCost(input.counts, found.price)
+      const cacheRates = id === "endpoint" ? "explicit" : input.sources?.endpoint ? "table" : undefined
+      const priced = found === null ? null : pricedCost(input.counts, found.price, cacheRates)
       return priced === null
         ? null
         : {

@@ -141,6 +141,7 @@ export { ProviderError } from "./errors.ts"
 /** The last answer of a connection's price endpoint, for the connection as it was then (`key`). */
 interface PriceProbeRecord extends PriceFeedState {
   readonly key: string
+  readonly rowVersion: number
   /** The stored models the last full answer covered (named or absent), so a 304 is only asked for when it speaks for all. */
   readonly covered?: ReadonlySet<string>
 }
@@ -1301,8 +1302,9 @@ export const layer = (options: ProvidersOptions = {}) =>
       const refreshPriceFeeds = (userId: UserId, prepared: Prepared, manual: boolean) =>
         Effect.gen(function* () {
           const connectionId = prepared.connection.id
+          const rowVersion = prepared.connection.rowVersion
           if (prepared.settings.priceEndpoint !== true) {
-            probes.delete(connectionId)
+            if ((probes.get(connectionId)?.rowVersion ?? rowVersion) <= rowVersion) probes.delete(connectionId)
             return
           }
           const key = probeKey(prepared)
@@ -1342,8 +1344,19 @@ export const layer = (options: ProvidersOptions = {}) =>
             nextAt: number | null,
             detail: string | null,
             coveredNow: ReadonlySet<string> | undefined = covered
-          ) =>
-            probes.set(connectionId, { key, state, at, nextAt, detail, ...(coveredNow ? { covered: coveredNow } : {}) })
+          ) => {
+            const current = probes.get(connectionId)
+            if (current === undefined || current.rowVersion <= rowVersion)
+              probes.set(connectionId, {
+                key,
+                rowVersion,
+                state,
+                at,
+                nextAt,
+                detail,
+                ...(coveredNow ? { covered: coveredNow } : {})
+              })
+          }
           if (probe === null || probe.state === "failed") {
             const detail = probe === null ? "No answer in time." : prepared.scrub(probe.detail)
             yield* Effect.logInfo(`price list of ${connectionId}: ${detail}`)
@@ -1390,10 +1403,15 @@ export const layer = (options: ProvidersOptions = {}) =>
               ? (feeds[0]?.feed?.validUntil ?? null)
               : (fresh.list.validUntil ?? (fresh.maxAgeMs === null ? null : at + fresh.maxAgeMs))
           const coveredNow = fresh === null ? covered : new Set(stored.map((m) => m.key))
-          const stored_ = yield* fromStorage(writer.SetModelPriceFeeds({ userId, connectionId, feeds })).pipe(
-            Effect.as(true),
-            Effect.catch((e) => Effect.as(Effect.logWarning("could not store a price list", e), false))
-          )
+          const stored_ = yield* fromStorage(
+            writer.SetModelPriceFeeds({
+              userId,
+              connectionId,
+              expectedRowVersion: rowVersion,
+              feeds
+            })
+          ).pipe(Effect.catch((e) => Effect.as(Effect.logWarning("could not store a price list", e), null)))
+          if (stored_?.stale) return
           // A failed store is asked about again at the failure interval, not an hour later.
           if (stored_) record("supported", nextPriceFetch(at, validUntil), null, coveredNow)
           else record("failed", at + PRICE_RETRY_MS, "Could not store the price list.", covered)
@@ -1433,13 +1451,16 @@ export const layer = (options: ProvidersOptions = {}) =>
               Effect.catch((error) => {
                 // Retry the same unusable connection after the backoff, or immediately after an edit.
                 const at = now()
-                probes.set(connectionId, {
-                  key,
-                  state: "failed",
-                  at,
-                  nextAt: at + PRICE_RETRY_MS,
-                  detail: "The connection could not be prepared."
-                })
+                const rowVersion = resolved.connection.rowVersion
+                if ((probes.get(connectionId)?.rowVersion ?? rowVersion) <= rowVersion)
+                  probes.set(connectionId, {
+                    key,
+                    rowVersion,
+                    state: "failed",
+                    at,
+                    nextAt: at + PRICE_RETRY_MS,
+                    detail: "The connection could not be prepared."
+                  })
                 return Effect.as(Effect.logInfo(`price timer skipped ${connectionId}`, error), null)
               })
             )

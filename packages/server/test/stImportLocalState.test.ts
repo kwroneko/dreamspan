@@ -62,6 +62,50 @@ const setup = Effect.fnUntraced(function* (tag: string, count = 2) {
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seconds" })(
   "ST re-import preserves local fork state",
   (it) => {
+    it.effect("a confirmed branch compares variables at its split before a later ancestor import", () =>
+      Effect.gen(function* () {
+        const root = "chats/Alice/main.jsonl"
+        const parent = "chats/Alice/parent.jsonl"
+        const branch = "chats/Alice/child.jsonl"
+        const say = (minute: number, mes: string) => message({ name: "Alice", minute, mes })
+        const shared = [...lines, say(2, "Still shared"), say(3, "Shared again"), say(4, "Last shared")]
+        const files = new Map([
+          ["characters/Alice.png", card("Alice", "Synthetic greeting")],
+          [root, jsonl([header({ variables: { color: "red" } }), ...shared])],
+          [
+            parent,
+            jsonl([header({ main_chat: "main", variables: { color: "green" } }), ...shared, say(5, "Parent turn")])
+          ]
+        ])
+        yield* importStFolder(files)
+        files.set(root, jsonl([header({ variables: { color: "blue" } }), ...shared, say(6, "New root turn")]))
+        files.set(
+          branch,
+          jsonl([
+            header({ main_chat: "parent", variables: { color: "blue" } }),
+            ...shared.slice(0, 3),
+            say(7, "Child turn")
+          ])
+        )
+        const { api, answers } = yield* importStFolder(files, { checked: true })
+        assert.strictEqual(answers.get(root)?.outcome, "updated")
+        assert.strictEqual(answers.get(branch)?.outcome, "updated")
+        const userId = (yield* api.Whoami()).id
+        const reader = yield* Reader
+        for (const [source, color] of [
+          [root, "blue"],
+          [parent, "green"],
+          [branch, "blue"]
+        ] as const) {
+          const { chatId, forkId, end } = (yield* reader.StImportSources({ userId })).chats.find(
+            (r) => r.source === source
+          )!
+          const state = foldState(yield* reader.StateEventsAt({ userId, chatId, forkId, slotId: end }))
+          assert.strictEqual(state.vars.color, color, source)
+        }
+      })
+    )
+
     it.effect("a changed card file merges only into its imported card, leaving its fork alone", () =>
       Effect.gen(function* () {
         const { api, userId, cardPath } = yield* setup("card-fork-reimport")

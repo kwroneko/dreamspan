@@ -1022,10 +1022,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             if ((await textTokens(sentText)) > remaining) {
               let marker = `\n${recovery}`
               if ((await textTokens(marker)) > remaining) marker = ""
-              const page = (limit: number) =>
-                quote
-                  ? toolDataPage(pageSource, { limit, frame: raw.frame, more: () => recovery }).text
-                  : fullText.slice(0, limit) + marker
+              const page =
+                raw.renderPage ??
+                ((limit: number) =>
+                  quote
+                    ? toolDataPage(pageSource, { limit, frame: raw.frame, more: () => recovery }).text
+                    : fullText.slice(0, limit) + marker)
               let lo = 0,
                 hi = Math.min(TOOL_RESULT_CHARS, sentText.length)
               while (lo < hi) {
