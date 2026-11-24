@@ -15,7 +15,7 @@ import type { FrozenTool } from "../agent/tools.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { rolloutUsage } from "./inspectorReads.ts"
-import { resumeLineage } from "./subagentEffects.ts"
+import { retainedChildRuns, resumeLineage } from "./subagentEffects.ts"
 import { LIMIT_STOP } from "@dreamspan/shared/subagents.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
@@ -160,12 +160,6 @@ const causal = (children: ReadonlyArray<ChildRecord>, rolloutId: string, calls: 
   })
 }
 
-/** The tool calls a transcript's model turns made. */
-const callIds = (json: string | null | undefined) =>
-  parse<ReadonlyArray<AgentMessage>>(json ?? null, []).flatMap((m) =>
-    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
-  )
-
 /**
  * A reply's subagents so far (§6.2: the counts are per reply, not per run): those its run
  * started, and those of the runs it was resumed from (resumeLineage) whose calls it kept, so a
@@ -176,16 +170,21 @@ const callIds = (json: string | null | undefined) =>
 export const replySubagents = (sql: SqlClient.SqlClient, rolloutId: string) =>
   Effect.gen(function* () {
     const runs = (yield* resumeLineage(sql, rolloutId)).map((r) => r.id)
-    const rows = yield* sql<{ id: string; spawned_by_rollout_id: string; spawned_by_call_id: string; resumed: number }>`
-      SELECT r.id, r.spawned_by_rollout_id, r.spawned_by_call_id,
+    const rows = yield* sql<{
+      id: string
+      spawned_by_rollout_id: string
+      spawned_by_call_id: string
+      parent_rollout_id: string | null
+      resumed: number
+    }>`
+      SELECT r.id, r.spawned_by_rollout_id, r.spawned_by_call_id, r.parent_rollout_id,
         EXISTS (SELECT 1 FROM rollouts s WHERE s.id = r.parent_rollout_id
           AND s.spawned_by_call_id = r.spawned_by_call_id) AS resumed
       FROM rollouts r WHERE r.spawned_by_rollout_id IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`
     if (runs.length <= 1 || rows.every((r) => r.spawned_by_rollout_id === rolloutId)) return rows
     const [own] = yield* sql<{ transcript: string | null }>`
       SELECT transcript_json AS transcript FROM rollout_payloads WHERE rollout_id = ${rolloutId}`
-    const kept = new Set(callIds(own?.transcript))
-    return rows.filter((r) => r.spawned_by_rollout_id === rolloutId || kept.has(r.spawned_by_call_id))
+    return yield* retainedChildRuns(sql, runs, rows, parse<ReadonlyArray<AgentMessage>>(own?.transcript ?? null, []))
   })
 
 /** What these subagents' requests cost together; `finished`: only requests that have ended. */
