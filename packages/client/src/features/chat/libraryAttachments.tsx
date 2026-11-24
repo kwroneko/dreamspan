@@ -84,6 +84,58 @@ export interface ComposerLibrary {
 const MAX = 16
 
 /**
+ * A workshop composer mounted in this browser tab (every workbench tab's view stays mounted):
+ * what "Work on in a workshop" lists and puts an item into (spec/WORKSHOP-CARDS.md §4.1 point 3).
+ */
+export interface LiveLibraryComposer {
+  readonly chatId: string
+  readonly title: string
+  /** Its workbench tab, null outside a workbench. */
+  readonly tabId: string | null
+  readonly add: (refIds: ReadonlyArray<string>) => void
+  readonly focus: () => void
+}
+
+const live = new Set<LiveLibraryComposer>()
+let liveSnapshot: ReadonlyArray<LiveLibraryComposer> = []
+const liveListeners = new Set<() => void>()
+const liveChanged = () => {
+  liveSnapshot = [...live]
+  for (const listener of liveListeners) listener()
+}
+const subscribeLive = (listener: () => void) => {
+  liveListeners.add(listener)
+  return () => void liveListeners.delete(listener)
+}
+/** The workshop composers mounted now, in the order they mounted. */
+export const useLiveLibraryComposers = () => useSyncExternalStore(subscribeLive, () => liveSnapshot)
+
+/** Lists this composer while it's mounted and takes library items (`composer` null: it takes none). */
+export function useLiveLibraryComposer(composer: Omit<LiveLibraryComposer, "add" | "focus"> | null) {
+  const handle = useRef<Pick<LiveLibraryComposer, "add" | "focus">>({ add: () => {}, focus: () => {} })
+  const chatId = composer?.chatId
+  const title = composer?.title
+  const tabId = composer?.tabId
+  useEffect(() => {
+    if (chatId === undefined) return
+    const entry: LiveLibraryComposer = {
+      chatId,
+      title: title ?? "",
+      tabId: tabId ?? null,
+      add: (refIds) => handle.current.add(refIds),
+      focus: () => handle.current.focus()
+    }
+    live.add(entry)
+    liveChanged()
+    return () => {
+      live.delete(entry)
+      liveChanged()
+    }
+  }, [chatId, title, tabId])
+  return handle
+}
+
+/**
  * A composer draft's library items, or null where the chat takes none. Every change goes to the
  * server in turn; the list shown is the server's answer.
  */
@@ -373,7 +425,7 @@ function LibraryTile({
 }
 
 /** The composer's attached items, as list rows beside its files and images, each with its X. */
-export function ComposerLibraryTiles({ library }: { library: ComposerLibrary }) {
+export function ComposerLibraryTiles({ library }: { library: Pick<ComposerLibrary, "items" | "remove"> }) {
   return library.items.map((item) => (
     <li key={item.refId} className="flex flex-col items-center gap-1">
       <LibraryTile
@@ -396,6 +448,16 @@ export function ComposerLibraryTiles({ library }: { library: ComposerLibrary }) 
       />
     </li>
   ))
+}
+
+/** A workshop not made yet: its first message's items, as the saved composer shows them. */
+export function PendingLibraryTiles({ library }: { library: Pick<ComposerLibrary, "items" | "remove"> }) {
+  return (
+    // Room above and to the right for the X, as the saved composer's list has.
+    <ul className="flex flex-wrap gap-3 pt-5 pr-3" aria-label="Attachments">
+      <ComposerLibraryTiles library={library} />
+    </ul>
+  )
 }
 
 /** A sent message's items (§4.2): the same tiles, by the names they had when sent. */

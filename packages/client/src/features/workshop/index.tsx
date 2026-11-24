@@ -34,6 +34,7 @@ import { characterChatActions, sidebarChatStarts } from "../characters/homeSlots
 import { ConvertPresetButton } from "./ConvertPreset.tsx"
 import { registerWorkshopPersona } from "./workshopPersona.tsx"
 import { registerWorkshopWithCard } from "./workshopWithCard.tsx"
+import { registerWorkOnInWorkshop } from "./workOnInWorkshop.tsx"
 import { registerLibraryAttach } from "./libraryAttach.tsx"
 import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
@@ -87,6 +88,7 @@ export const register = () => [
   branchControlParts.register({ id: "workshop.story-branch", order: 20, RowNote: WorkshopBranchNote }),
   ...registerWorkshopPersona(),
   ...registerWorkshopWithCard(),
+  ...registerWorkOnInWorkshop(),
   ...registerLibraryAttach(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
   sidebarChatStarts.register({ id: "workshop.sidebar-start", order: 20, component: NewWorkshopStart }),

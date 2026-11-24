@@ -277,6 +277,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
                 content: first.content,
                 status: "complete",
                 origin: "user_written",
+                ...(first.library?.length ? { library: first.library } : {}),
                 ...(rewrite === undefined ? {} : { rewrite })
               }
             : {

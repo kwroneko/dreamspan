@@ -55,6 +55,7 @@ import { newCapabilitiesAtom, offeredPendingGrants, type PendingGrants } from ".
 import { pendingWorkshopCopy, SIDE_CHATS_KEY } from "./sideChat.ts"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
 import { NO_PERSONA } from "./workshopStart.ts"
+import { type ComposerLibrary, PendingLibraryTiles } from "../chat/libraryAttachments.tsx"
 
 /** Who a new workshop starts with: "" the workshop default; the persona's `NO_PERSONA` for none. */
 export interface WorkshopStart {
@@ -188,8 +189,11 @@ export function PendingWorkshop({
   copyKey,
   portraitWidth = 48,
   onCreated,
-  onTitleSent
+  onTitleSent,
+  library
 }: {
+  /** Cards, lorebooks and presets its first message carries, shown as the composer's tiles. */
+  library?: Pick<ComposerLibrary, "items" | "remove">
   /** The story it's beside: a side chat (spec/WORKSHOP.md §4). */
   attachTo?: ChatId | null
   /** The story branch shown: the workshop's first branch goes with it (spec/WORKSHOP-BRANCHES.md §8.1). */
@@ -288,7 +292,13 @@ export function PendingWorkshop({
             requestId,
             first:
               first === "send"
-                ? { _tag: "Send", content: submitted }
+                ? {
+                    _tag: "Send",
+                    content: submitted,
+                    ...(library?.items.length
+                      ? { library: library.items.map(({ kind, refId }) => ({ kind, refId })) }
+                      : {})
+                  }
                 : {
                     _tag: "Generate",
                     direction: guidance ? submitted : ""
@@ -468,6 +478,7 @@ export function PendingWorkshop({
           <ComposerBox
             guidance={guidance}
             header={<UserDraftNotices draft={durable} />}
+            attachments={library?.items.length ? <PendingLibraryTiles library={library} /> : undefined}
             start={
               <>
                 <PendingComposerControls placement="speaker" context={controls} />
