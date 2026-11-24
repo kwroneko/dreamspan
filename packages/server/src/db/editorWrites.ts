@@ -244,7 +244,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       const own = yield* entityRevision(ref, revisionId)
       if (own !== null) return { ...own, kept: new Set<string>() }
       if (!(yield* revisionOnLine(sql, ref.head_revision_id, revisionId))) return null
-      const kept = new Set<string>()
+      const kept = new Set(ref.kind === "card" ? ["name", "nickname", "character_version"] : [])
       const seen = new Set<string>()
       let entity = ref.entity_id
       while (!seen.has(entity)) {
@@ -409,7 +409,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const head = resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))
         // A permission revoked since doesn't come back with the old revision.
         const restoring = JSON.parse(earlier.doc_json) as Record<string, unknown>
-        // What the fork changed when it was made (a card fork's names) stays the fork's.
+        // Inherited restores keep the fork's identity and fields changed by a fork step.
         for (const key of earlier.kept) {
           if (key in head) restoring[key] = head[key]
           else delete restoring[key]
