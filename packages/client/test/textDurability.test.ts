@@ -83,7 +83,10 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/chat/ChatDefaults.tsx": [{ durable: "useUserDraft", what: "Settings → Chats summarization instruction" }],
   "features/chat/agent/RunSteps.tsx": [{ durable: "useUserDraft", what: "an agent step's text edit" }],
   "features/chat/MergeChatDialog.tsx": [{ durable: "useDurableForm", what: "merge dialog's title and framing line" }],
-  "features/chat/agent/ApprovalPanel.tsx": [{ durable: "useDurableText", what: "note for the assistant on Decline" }],
+  "features/chat/agent/ApprovalPanel.tsx": [
+    { durable: "useDurableText", what: "note for the assistant on a library access decline" },
+    { durable: "useDurableText", what: "note for the assistant on a tool approval decline" }
+  ],
   "features/chat/htmlTextField.tsx": [
     { durable: "useDurableText", what: "a text field in a message's HTML, kept per version and place" }
   ],

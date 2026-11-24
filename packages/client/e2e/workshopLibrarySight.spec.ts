@@ -51,6 +51,48 @@ test.describe("library sight", () => {
     await provider.stop()
   })
 
+  test("keeps an unsaved library approval note across a reload and sends it with Decline", async ({ page }) => {
+    test.setTimeout(120_000)
+    const workshop = await admin((api) => api.CreateWorkshop({ title: "Approval note" }))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    let holdDraft = true
+    let heldDrafts = 0
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (holdDraft && typeof data === "string" && data.includes('"tag":"SaveUserDraft"')) {
+          heldDrafts++
+          return
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+
+    await page.goto(`${server().url}/chats/${workshop.id}`)
+    await page.getByLabel("Message", { exact: true }).fill("Look at Mara.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    const panel = page.locator('[data-approval-scoped="library.cards"]')
+    await expect(panel).toBeVisible({ timeout: 60_000 })
+    await panel.getByRole("button", { name: "Add a note", exact: true }).click()
+    const box = panel.getByRole("textbox", { name: "Note for the assistant" })
+    const note = "Please use the attached card instead.\nAsk me if you need anything else."
+    await box.fill(note)
+    await expect.poll(() => heldDrafts).toBeGreaterThan(0)
+    // The first save never reached the server. Let the reloaded page replay the local draft.
+    holdDraft = false
+    await page.reload()
+    await expect(box).toHaveValue(note)
+
+    await panel.getByRole("button", { name: "Decline", exact: true }).click()
+    await expect(page.getByRole("article").filter({ hasText: "Mara keeps the lighthouse." })).toHaveCount(1, {
+      timeout: 30_000
+    })
+    const result = provider.toolResults().at(-1)
+    expect(result).toContain("Please use the attached card instead.")
+    expect(result).toContain("Ask me if you need anything else.")
+  })
+
   for (const width of [1340, 390, 1920])
     for (const theme of ["dark", "light"] as const)
       test(`asks, holds always for the card, and is removed at ${width} ${theme}`, async ({ page }, info) => {
