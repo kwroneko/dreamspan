@@ -12,13 +12,14 @@ import {
 import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge } from "../db/ops.ts"
 import { judgeInputTokens } from "../decision/RefusalJudge.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
+import { ExecutionRegistry } from "../execution.ts"
 import * as Providers from "../providers/Providers.ts"
 import { internal } from "./internal.ts"
 
@@ -384,7 +385,17 @@ export const makeLcmHandlers = Effect.gen(function* () {
 /** Kept in a small handler layer to stay below TypeScript's RPC union instantiation limit. */
 export const makeSummaryRequestHandlers = Effect.gen(function* () {
   const reader = yield* Reader
+  // Optional, so the handlers' requirements stay as they were; the server always provides it.
+  const execution = yield* Effect.serviceOption(ExecutionRegistry)
   return {
+    ListSummaryStyles: () =>
+      Effect.sync(() =>
+        Option.match(execution, { onNone: () => [], onSome: (registry) => registry.summaries.list() }).map((style) => ({
+          id: style.id,
+          label: style.label ?? style.id,
+          description: style.description ?? null
+        }))
+      ),
     GetSummaryRevisionRequest: (params) =>
       Effect.flatMap(CurrentUser, (user) => reader.GetSummaryRevisionRequest({ userId: user.id, ...params })).pipe(
         internal("GetSummaryRevisionRequest")
