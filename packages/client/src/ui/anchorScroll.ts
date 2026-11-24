@@ -4,7 +4,17 @@
 // a reply as it streams), as does one that brings the row further into view (a half-hidden row
 // focused from the keyboard, its list scrolling to show it, smoothly or not). Scrolling inside
 // the menu itself never closes it.
+//
+// An open menu also says so on its trigger, bubbling (ANCHORED_POPUP): a list that scrolls by
+// itself, as a chat following a reply as it streams, holds still until the menu closes, so the
+// menu neither rides along with its row nor closes as the row leaves the view.
 import { type RefObject, useEffect, useRef } from "react"
+
+/** Dispatched, bubbling, on a menu's trigger as the menu opens (`detail` true) and closes (false). */
+export const ANCHORED_POPUP = "rp-anchored-popup"
+
+const announce = (anchor: HTMLElement, open: boolean) =>
+  anchor.dispatchEvent(new CustomEvent<boolean>(ANCHORED_POPUP, { bubbles: true, detail: open }))
 
 /** How much of `row` lies outside the part of `scroller` its content shows in, in pixels. */
 const clipped = (row: DOMRect, scroller: Element) => {
@@ -26,6 +36,7 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
   useEffect(() => {
     const anchor = trigger.current
     if (!open || anchor === null) return
+    announce(anchor, true)
     // The least clipping seen in each scroller since the menu opened.
     const hidden = new Map<Element, number>()
     const row = anchor.getBoundingClientRect()
@@ -44,6 +55,9 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
       if (now > before + 1) latest.current()
     }
     document.addEventListener("scroll", onScroll, { capture: true, passive: true })
-    return () => document.removeEventListener("scroll", onScroll, { capture: true })
+    return () => {
+      document.removeEventListener("scroll", onScroll, { capture: true })
+      announce(anchor, false)
+    }
   }, [open, trigger])
 }
