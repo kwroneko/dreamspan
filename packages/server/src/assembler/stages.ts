@@ -873,7 +873,9 @@ const resolveStage: AssemblerStage = {
           }
         }
         const piece = env.message(
-          entry.content || !entry.images?.length || entry.attachments?.length ? entry : { ...entry, content: "[Image]" },
+          entry.content || !entry.images?.length || entry.attachments?.length
+            ? entry
+            : { ...entry, content: "[Image]" },
           messages,
           at
         )
