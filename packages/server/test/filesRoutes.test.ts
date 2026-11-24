@@ -43,6 +43,24 @@ const body = (response: Response) => Effect.promise(() => response.text())
 const accountOf = (filesDir: string) => readdirSync(filesDir).find((name) => name !== ".bin")!
 
 describe("file routes", () => {
+  it.live("Keep both checks numbered names past the listing limit", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/report.txt", "original")
+      yield* upload("/files/report (2).txt", "first copy")
+      const files = join(config.dataDir, "files")
+      const root = join(files, accountOf(files))
+      for (let n = 0; n < 5_000; n++) writeFileSync(join(root, `earlier-${n}`), "")
+      const listing = yield* list("/files")
+      assert.strictEqual(listing.entries.length, 5_000)
+      assert.isFalse(listing.entries.some(({ name }) => name === "report (2).txt"))
+      const uploaded = yield* upload("/files/report.txt", "second copy", "keep")
+      assert.strictEqual(uploaded.status, 200)
+      assert.deepInclude((yield* Effect.promise(() => uploaded.json())) as object, { path: "/files/report (3).txt" })
+      assert.strictEqual(yield* body(yield* call("/files/raw?path=/files/report%20(2).txt")), "first copy")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
   it.live("upload, list, read, rename, make folders and delete", () => {
     const config = testConfig()
     return Effect.gen(function* () {

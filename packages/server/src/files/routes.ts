@@ -32,6 +32,7 @@ import {
   isWithin,
   keepBothName,
   nameProblem,
+  numberedFileName,
   TEXT_OPEN_MAX_BYTES,
   type TextFile,
   UploadConflict,
@@ -918,7 +919,9 @@ export const filesRoutes = Layer.unwrap(
       quota.wrote(userId, made * FOLDER_BYTES)
       let cleanUpUpload: (() => Promise<void>) | undefined
       return yield* Effect.gen(function* () {
-        let name = segments.at(-1)!
+        const originalName = segments.at(-1)!
+        let name = originalName
+        let nextNumber = 2
         const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
         let outcome: UploadOutcome["outcome"] = "written"
         let replacedBytes = 0
@@ -939,12 +942,7 @@ export const filesRoutes = Layer.unwrap(
             outcome = "replaced"
             // A file with other links keeps its bytes: nothing is replaced, nothing freed.
             replacedBytes = existing.isFile() && existing.nlink === 1 ? existing.size : 0
-          } else {
-            const taken = new Set(
-              (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
-            )
-            name = keepBothName(name, taken)
-          }
+          } else name = numberedFileName(originalName, nextNumber++)
         }
         // Over the quota, or past it with what the request says it sends, it's refused before
         // a byte is written; as it streams, each chunk takes room (uploads at once share it).
@@ -1068,7 +1066,17 @@ export const filesRoutes = Layer.unwrap(
               const freeToken = quota.freed(userId, reserved + replacedNow - taken)
               try {
                 if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
-                else await renameNoReplace(at(dir, temporary), at(dir, name))
+                else {
+                  for (;;) {
+                    try {
+                      await renameNoReplace(at(dir, temporary), at(dir, name))
+                      break
+                    } catch (error) {
+                      if (conflict.value !== "keep" || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+                      name = numberedFileName(originalName, nextNumber++)
+                    }
+                  }
+                }
               } catch (error) {
                 quota.unfreed(userId, freeToken)
                 throw error
