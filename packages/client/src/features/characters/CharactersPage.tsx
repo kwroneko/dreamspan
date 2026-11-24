@@ -18,8 +18,7 @@ import { PinnedChats } from "./ShellBrowser.tsx"
 
 // By Home's own width, not the window's: in a split frame the tiles keep their size rather than
 // shrinking to five columns of a narrow frame, where the corner toggles would cover the tile.
-// Two columns on a phone; wider, as many 11rem columns as fit (five at the old reading width).
-const COLUMNS = "grid grid-cols-2 gap-3 @xl:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]"
+const COLUMNS = "grid grid-cols-2 gap-3 @xl:grid-cols-3 @3xl:grid-cols-4 @4xl:grid-cols-5"
 
 function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()

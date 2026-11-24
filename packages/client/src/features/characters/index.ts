@@ -95,15 +95,7 @@ export const register = () => {
     icon: "people"
   })
   // The home screen: the character grid (DESIGN §2.1).
-  // Home's card grid adds columns as the column widens, so it uses the whole width (owner on a 4K screen).
-  routes.register({
-    id: "characters",
-    parent: "app",
-    path: "/",
-    component: CharactersPage,
-    retainSearch: homeSearch,
-    fullWidth: true
-  })
+  routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage, retainSearch: homeSearch })
   // A card without entering a chat; its pending chat is `/cards/$entityId/chat` (chat feature).
   routes.register({ id: "characters.card", parent: "app", path: "/cards/$entityId", component: CardPage })
   // A group's chats, named by any one of them (DESIGN §2.1).

@@ -58,11 +58,6 @@ export interface RouteEntry {
    * taking a tab's whole height (a field's own tab), as an editor opened from a chat does.
    */
   readonly fillBelowHeader?: boolean
-  /**
-   * The page uses the column's whole width (a grid of cards that adds columns), not the
-   * reading width other pages keep.
-   */
-  readonly fullWidth?: boolean
 }
 
 declare module "@tanstack/react-router" {
@@ -71,8 +66,6 @@ declare module "@tanstack/react-router" {
     fill?: boolean
     /** RouteEntry.fillBelowHeader. */
     fillBelowHeader?: boolean
-    /** RouteEntry.fullWidth. */
-    fullWidth?: boolean
   }
 }
 
@@ -172,11 +165,7 @@ export const buildRouter = (
           : {}
         const shared = {
           component: component(entry),
-          staticData: {
-            fill: entry.fill === true,
-            fillBelowHeader: entry.fillBelowHeader === true,
-            fullWidth: entry.fullWidth === true
-          },
+          staticData: { fill: entry.fill === true, fillBelowHeader: entry.fillBelowHeader === true },
           ...search
         }
         const route =

@@ -393,7 +393,6 @@ export function CenterPage() {
   // card source's card (composerbottom1): its composer sat under the greeting, mid-screen.
   const fill = useMatches({ select: (matches) => matches.at(-1)?.staticData.fill === true })
   const fillBelowHeader = useMatches({ select: (matches) => matches.at(-1)?.staticData.fillBelowHeader === true })
-  const fullWidth = useMatches({ select: (matches) => matches.at(-1)?.staticData.fullWidth === true })
   // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
   const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
   if (fill) return <Outlet />
@@ -421,7 +420,7 @@ export function CenterPage() {
         // The scrollbar's gutter is kept whether or not the page scrolls: a page growing past the
         // window or shrinking under it (a tab switch) never moves the centred column sideways.
         <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-          <div className={`mx-auto w-full px-4 py-6 ${fullWidth ? "" : "max-w-5xl"}`}>
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
             <Outlet />
           </div>
         </div>
