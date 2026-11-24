@@ -11,6 +11,35 @@ import { client, posted, serverLayer, serverPort, testConfig } from "./support/c
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { cardChunk, json as jsonBytes, png, stCardV2 } from "./formats/support.ts"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
+import { readCardFile } from "../src/formats/cardFile.ts"
+import { defaultLimits } from "../src/formats/safety.ts"
+import { unquoteToolData } from "./support/toolData.ts"
+
+const toolCall = (name: string, args: unknown, id: string) => [
+  {
+    id: "tool",
+    object: "chat.completion.chunk",
+    model: "mock",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: "assistant",
+          tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }]
+        },
+        finish_reason: null
+      }
+    ]
+  },
+  {
+    id: "tool",
+    object: "chat.completion.chunk",
+    model: "mock",
+    choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+  }
+]
 
 const call = (path: string, init?: RequestInit) =>
   Effect.gen(function* () {
@@ -120,12 +149,121 @@ describe("card files", () => {
       const content = text(requests.at(-1)!.messages.find((m) => text(m).includes("Tighten these."))!)
       assert.include(
         content,
-        `path=\\"/attachments/${wren.mediaId}\\" image_block=\\"true\\" card=\\"true\\" card_name=\\"Wren Hollow\\" format=\\"png\\" spec=\\"chara_card_v3\\" spec_version=\\"3.0\\">`
+        `path=\\"/attachments/${wren.mediaId}\\" image_block=\\"true\\" file_path=\\"/files/cards/Attachments/wren.png\\" card=\\"true\\" card_name=\\"Wren Hollow\\" format=\\"png\\" spec=\\"chara_card_v3\\" spec_version=\\"3.0\\">`
       )
       assert.include(content, `card_name=\\"Gull Keeper\\" format=\\"json\\"`)
       // Whole: its fields are in the element.
       assert.include(content, "A lighthouse keeper.")
       assert.strictEqual(content.split("read_card_file (the same views").length - 1, 1)
     }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live(
+    "are read with the card views, edited in their own format as a file version, and imported on request",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const requests: Array<{ messages: Array<{ role: string; content?: string }> }> = []
+        let steps: Array<[string, unknown]> = []
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((r, res) => {
+              const b = r.body as unknown as { messages: Array<{ role: string; content?: string }> }
+              if (!JSON.stringify(b.messages).includes("CARD TASK")) return sse(res, completionChunks(["Ready."], {}))
+              requests.push(b)
+              const done = b.messages.filter((m) => m.role === "tool").length
+              const step = steps[done]
+              if (!step) return sse(res, completionChunks(["Done."], {}))
+              sse(res, toolCall(step[0], step[1], `card_${done}`))
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+          model: { context: 200000, vision: true }
+        })
+        assert.strictEqual((yield* post("/files/folder", { path: "/files/cards" })).status, 200)
+        const chat = yield* api.CreateWorkshop({ title: "Card file tools" })
+        yield* api.ChangeCast({
+          chatId: chat.id,
+          slotId: null,
+          change: { _tag: "WorkshopFolder", path: "/files/cards" }
+        })
+        const folder = "/files/cards/Attachments"
+        const wren = yield* attachUpload(folder, "wren.png", png(cardChunk("ccv3", v3Card("Wren Hollow"))))
+        const other = yield* attachUpload(folder, "data.json", jsonBytes({ hello: "world" }))
+        const copy = `/attachments/${wren.mediaId}`
+        steps = [
+          ["edit_card_file", { path: wren.path, changes: [{ field: "description", text: "Too soon." }] }],
+          ["read_card_file", { path: copy }],
+          ["read_card_file", { path: wren.path, view: "summary" }],
+          [
+            "edit_card_file",
+            { path: wren.path, changes: [{ field: "description", find: "lighthouse", replace: "harbour" }] }
+          ],
+          ["edit_card_file", { path: copy, changes: [{ field: "description", text: "No." }] }],
+          ["read_card_file", { path: other.path }],
+          ["import_card_file", { path: wren.path }]
+        ]
+        const events: Array<ChatEvent> = []
+        yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        const sent = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "CARD TASK: tighten Wren and add it to my library."
+          })
+        )
+        const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+        const id = reply.entry.version.id
+        yield* eventually(() => finished(events, id) !== undefined, 120_000)
+        assert.strictEqual(finished(events, id)!.status, "complete")
+        const results = requests
+          .at(-1)!
+          .messages.filter((m) => m.role === "tool")
+          .map((m) => unquoteToolData(m.content ?? ""))
+        assert.include(results[0], "with read_card_file before changing it")
+        assert.include(results[1], '"name":"Wren Hollow"')
+        assert.include(results[1], '"format":"png"')
+        assert.include(results[1], "A lighthouse keeper.")
+        assert.include(results[2], `card file ${wren.path} "Wren Hollow" (PNG, chara_card_v3 3.0)`)
+        assert.include(results[2], "description: ")
+        assert.include(results[3], "description")
+        assert.include(results[4], "can't be changed")
+        assert.include(results[5], "isn't a character card")
+        assert.include(results[6], 'as the card "Wren Hollow"')
+
+        // The file is still a PNG card, with the change.
+        const me = yield* api.Whoami()
+        const onDisk = join(config.dataDir, "files", me.id, "cards/Attachments/wren.png")
+        const info = readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!
+        assert.strictEqual(info.format, "png")
+        assert.strictEqual(info.doc.description, "A harbour keeper.")
+        // The change names the card's fields, before and after; its undo puts the file back.
+        const effects = yield* api.ListVersionEffects({ versionId: id })
+        const edit = effects.find((e) => e.kind === "file.edit")!
+        assert.strictEqual(edit.title, `Edited the card file ${wren.path}`)
+        assert.deepStrictEqual((edit.undo as { card: unknown }).card, {
+          name: "Wren Hollow",
+          format: "png",
+          before: { description: "A lighthouse keeper." },
+          after: { description: "A harbour keeper." }
+        })
+        assert.isTrue(effects.some((e) => e.kind === "library.create"))
+        const library = yield* api.ListLibrary({ kind: "card" })
+        assert.isTrue(library.some((ref) => ref.label === "Wren Hollow"))
+        yield* api.UndoRolloutEffect({ rolloutId: edit.rolloutId, toolCallId: edit.toolCallId, seq: edit.seq })
+        const back = readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!
+        assert.strictEqual(back.doc.description, "A lighthouse keeper.")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    180_000
   )
 })

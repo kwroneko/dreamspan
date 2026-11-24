@@ -769,7 +769,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   )
                     return yield* refuseOperation("Make this note from the note's own editor.")
                   // A file may only add a new entry here: a new version of an existing one
-                  // merges into it and its followers, which binning a creation cannot undo.
+                  // merges into it and its followers, which binning a creation cannot undo. Its
+                  // pictures come only from server code that stored them first: the card file
+                  // tool's (agent/tools/cardFiles.ts); the text import has none.
                   if (
                     input.operation === "ImportFile" &&
                     (value.intoRefId !== null ||
@@ -777,8 +779,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       value.stageMerge !== undefined ||
                       value.arrival !== undefined ||
                       value.recognized !== undefined ||
-                      value.presetLorebooks !== undefined ||
-                      (value.media as ReadonlyArray<unknown>).length > 0)
+                      value.presetLorebooks !== undefined)
                   )
                     return yield* refuseOperation("Import this file from the library page.")
                   // A file the assistant imports is its own writing: as with its edits, changed

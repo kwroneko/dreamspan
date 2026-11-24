@@ -13,6 +13,7 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry } from "../execution.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
+import { Formats } from "../importer/Formats.ts"
 import { DISK_RESERVE_BYTES, FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
 import { COMMANDS_UNSANDBOXED } from "../agent/capabilities.ts"
 import { settleOrphanedCopies } from "../agent/subagents.ts"
@@ -84,6 +85,7 @@ export class WorkshopFiles extends Context.Service<
       const holds = yield* MediaHolds
       const reader = yield* Reader
       const notices = yield* Notices
+      const formats = yield* Formats
       const writer = yield* Writer
       const defaultBytes = parseByteSize(config.filesQuota)
       if (defaultBytes === null)
@@ -161,6 +163,7 @@ export class WorkshopFiles extends Context.Service<
       const networkSince = Date.now()
       const network = new Map<string, number>()
       const files = makeFileTools({
+        formats,
         appSource,
         outputs,
         hostFolders,
