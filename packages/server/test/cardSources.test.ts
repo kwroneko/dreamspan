@@ -7,6 +7,7 @@
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
 import { emptySourceQuery, remoteEntityId, SourceFailed } from "@dreamspan/shared/cardSources.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
+import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
@@ -550,6 +551,76 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         items: [{ remoteId: card.slug, sha256: null }]
       })
       assert.lengthOf(held, 0)
+    })
+  )
+
+  it.effect("a remote draft save reaching the writer after adoption follows the card", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const { id } = yield* api.Whoami()
+      const remoteId = archive.cards[117]!.slug
+      const refId = remoteEntityId("cardex", remoteId) as unknown as RefId
+      const opened = yield* api.OpenEditor({ refId })
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId })
+      const writer = yield* Writer
+      // This was prepared while OpenEditor still resolved to the source card.
+      const draft = yield* writer.SaveDraft({
+        userId: id,
+        key: new DraftKey({
+          targetKind: "remote_card",
+          targetId: `cardex:${remoteId}`,
+          field: textField(["description"])
+        }),
+        draftId: null,
+        content: "A note typed before adoption.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      const reopened = yield* api.OpenEditor({ refId })
+      assert.strictEqual(opened.revisionNumber, 0)
+      assert.strictEqual(reopened.ref.id, added.refId)
+      assert.deepInclude(
+        reopened.drafts.map(({ id, content }) => ({ id, content })),
+        {
+          id: draft.id,
+          content: "A note typed before adoption."
+        }
+      )
+      const lateSave = yield* api.SaveEditorDraft({
+        refId,
+        field: draft.key.field,
+        draftId: null,
+        content: "A competing note from the old editor.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      assert.strictEqual(lateSave.id, draft.id)
+      assert.strictEqual(lateSave.displaced?.content, draft.content)
+      const url = yield* base
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/library/drafts`, {
+          method: "POST",
+          headers: { ...alice, "content-type": "application/json" },
+          body: JSON.stringify({
+            drafts: [
+              {
+                refId,
+                field: draft.key.field,
+                draftId: lateSave.id,
+                content: "A final edit sent on leaving.",
+                expectedRowVersion: lateSave.rowVersion,
+                expectedSession: lateSave.session,
+                baseRevisionId: opened.ref.headRevisionId
+              }
+            ]
+          })
+        })
+      )
+      assert.strictEqual(response.status, 204)
+      const own = yield* api.OpenEditor({ refId: reopened.ref.id })
+      assert.strictEqual(own.drafts.find((saved) => saved.id === draft.id)?.content, "A final edit sent on leaving.")
     })
   )
 
