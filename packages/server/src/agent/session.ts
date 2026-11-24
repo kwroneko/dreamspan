@@ -811,6 +811,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           showProgress()
         },
         vision: (generation.model as { readonly vision?: boolean } | null)?.vision === true,
+        countTokens: (text: string) =>
+          run.reader.CountRolloutContext({
+            model: JSON.stringify(model),
+            request: JSON.stringify(generation.request),
+            transcript: "[]",
+            tools: "[]",
+            text
+          }),
+        ...(model.context ? { window: model.context } : {}),
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
       })

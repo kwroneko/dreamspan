@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { activeRunSummaries, summarySafeText } from "../agent/compaction.ts"
 import { messageBounds, placedSteps } from "../agent/steps.ts"
-import { attachedElement, inlineLimit } from "../agent/libraryView.ts"
+import { attachedElements, inlineLimit } from "../agent/libraryView.ts"
 import type { HistoryLibraryItem } from "../assembler/types.ts"
 import { libraryDocuments } from "./libraryAttachments.ts"
 import type { FrozenTool } from "../agent/tools.ts"
@@ -34,8 +34,8 @@ export const workshopTranscript = Effect.fnUntraced(function* (
     for (const { id, library } of attachments) {
       const items = JSON.parse(library) as ReadonlyArray<HistoryLibraryItem>
       if (items.length) {
-        const limit = Math.floor(inlineLimit(window) / items.length)
-        found.set(id, { library: items.map((item) => attachedElement(item, count, limit)) })
+        // The message's items share the inline limit, as in its request (`attachedElements`).
+        found.set(id, { library: attachedElements(items, count, inlineLimit(window)) })
       }
     }
   }
