@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { parseMarkdownIntoBlocks } from "streamdown"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
-import { fixMarkdown } from "../src/ui/stFormatting.ts"
+import { fixMarkdown, fixMarkdownMapped } from "../src/ui/stFormatting.ts"
 import { Markdown, messageRenderers } from "../src/ui/Markdown.tsx"
 import { MAX_COPIED, withDefinitions } from "../src/ui/referenceDefinitions.ts"
 
@@ -152,6 +152,17 @@ describe("ST 1.19 message formatting", () => {
     expect(fixMarkdown("`'*'`")).toBe("`'*'`")
     expect(fixMarkdown("say `x*` then *go")).toBe("say `x*` then *go*")
     expect(fixMarkdown("* spaced * `* keep *`")).toBe("*spaced* `* keep *`")
+  })
+  it("protects nested fences and finds the prose after a CRLF fence", () => {
+    const source = "```js\r\nconst pattern = '*';\r\n```\r\n*unfinished"
+    expect(fixMarkdownMapped(source)).toEqual({
+      text: source + "*",
+      offsets: [...Array.from({ length: source.length }, (_, index) => index), null]
+    })
+    const quote = "> ~~~js\n> const pattern = '*';\n> ~~~\n> *unfinished"
+    expect(fixMarkdown(quote)).toBe(quote + "*")
+    const list = "* ~~~js\n  const pattern = '*';\n  ~~~"
+    expect(fixMarkdown(list)).toBe(list)
   })
   it("matches inline code delimiters as complete runs of equal length", () => {
     expect(fixMarkdown("word ```*``")).toBe("word ```*``*")
