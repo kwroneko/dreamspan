@@ -24,6 +24,28 @@ export const titleFor = (names: ReadonlyArray<string>, at: number) =>
 /** How long a swept pending chat's late saves are still filed. */
 const SWEPT_KEPT_MS = 7 * 24 * 60 * 60 * 1000
 
+/**
+ * A reply that finished empty and was removed (chatSetupWrites.ts FinishGeneration
+ * `discardEmpty`): its slot and version, so a save of a swipe or an edit of it that comes after
+ * (its first save, or a browser's retry) is filed to recovered texts rather than refused. The
+ * receipt is a row of `swept_pending_chats` keyed `dropped-reply:<id>`, kept as long as a swept
+ * chat's, so no schema change: ids are never chat ids, and only `droppedReplyLabel` reads these.
+ */
+const DROPPED_REPLY = "dropped-reply:"
+export const DROPPED_REPLY_LABEL = "Empty reply"
+export const noteDroppedReply = (sql: SqlClient.SqlClient, userId: UserId, ids: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const now = Date.now()
+    for (const id of ids)
+      yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
+        VALUES (${DROPPED_REPLY + id}, ${userId}, ${DROPPED_REPLY_LABEL}, ${now})`
+  })
+/** The label a late save to the removed reply's `targetId` (a slot or a version) is filed under. */
+export const droppedReplyLabel = (sql: SqlClient.SqlClient, userId: UserId, targetId: string) =>
+  sql<{ label: string }>`SELECT label FROM swept_pending_chats
+    WHERE chat_id = ${DROPPED_REPLY + targetId} AND user_id = ${userId}
+      AND swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(Effect.map(([row]) => row?.label ?? null))
+
 export interface PendingRow {
   readonly id: ChatId
   readonly owner_user_id: UserId

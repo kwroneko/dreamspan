@@ -1,6 +1,6 @@
 import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
-import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
+import { fileTyped, noteDroppedReply, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
 import { composerKey, Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
@@ -1291,7 +1291,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               yield* sql`UPDATE rollouts SET slot_id = ${safe.parent_slot_id} WHERE slot_id = ${row.slot_id}`
               yield* sql`UPDATE queued_messages SET reply_slot_id = ${safe.parent_slot_id} WHERE reply_slot_id = ${row.slot_id}`
               // Its drafts go with it (a swipe of one's own typed while it was written, an edit
-              // of it): what each holds and its history protects goes to recovered texts first.
+              // of it, a message to insert below it): what each holds and its history protects
+              // goes to recovered texts first.
               const typed = yield* sql<{
                 id: string
                 target_kind: DraftKey["targetKind"]
@@ -1301,7 +1302,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               }>`SELECT id, target_kind, target_id, field, content FROM drafts
                 WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND (
                   (target_kind = 'scratchpad' AND target_id = ${row.slot_id})
-                  OR (target_kind = 'version_edit' AND target_id = ${versionId}))`
+                  OR (target_kind = 'version_edit' AND target_id = ${versionId})
+                  OR (target_kind = 'insert' AND target_id = ${slot!.chat_id}
+                    AND substr(field, instr(field, ':') + 1) = ${row.slot_id}))`
               for (const draft of typed) {
                 const lost = yield* bin.drafts.unsaved(draft.id, draft.content, [])
                 if (lost.length > 0)
@@ -1311,7 +1314,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                     lost,
                     "discard"
                   )
+                // An insertion below it has no anchor left to show at: it goes (the slot's own
+                // drafts go with the slot).
+                if (draft.target_kind === "insert") yield* sql`DELETE FROM drafts WHERE id = ${draft.id}`
               }
+              // A save of its swipe or edit still on its way is filed when it comes (writes.ts).
+              yield* noteDroppedReply(sql, userId, [row.slot_id, versionId])
               yield* sql`DELETE FROM slots WHERE id = ${row.slot_id}`
               const queue = safe.parent_slot_id ? yield* afterReply(safe.parent_slot_id, "reply") : nothing
               const [parent] = safe.parent_slot_id

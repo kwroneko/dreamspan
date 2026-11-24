@@ -287,3 +287,84 @@ it.live("an empty reply of several dropped files what was typed into its own swi
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
+
+/** A chat whose reply is being written: the round finishing empty removes its message. */
+const writing = Effect.gen(function* () {
+  const api = yield* client()
+  const writer = yield* Writer
+  const userId = (yield* api.Whoami()).id
+  const chat = yield* api.CreateChat({ title: "Synthetic empty reply" })
+  const running = yield* writer.AppendMessage({
+    userId,
+    chatId: chat.id,
+    parentSlotId: null,
+    branch: false,
+    version: new NewVersion({
+      content: "",
+      speakerEntityId: null,
+      writer: "model",
+      status: "generating",
+      origin: "generated",
+      macroMode: "verbatim"
+    }),
+    commitDraft: null
+  })
+  const empty = writer.FinishGeneration({
+    userId,
+    versionId: running.version.id,
+    content: "",
+    status: "complete",
+    error: null,
+    discardEmpty: true
+  })
+  const recovered = Effect.map(api.ListRecoveredTexts({ limit: 20, before: null }), (texts) =>
+    texts.map((text) => text.content)
+  )
+  return { api, chat, running, empty, recovered }
+})
+
+it.live("an empty reply dropped files what was typed to insert below it (rev-dv1 #5)", () =>
+  Effect.gen(function* () {
+    const { api, chat, running, empty, recovered } = yield* writing
+    const target = {
+      _tag: "Insert",
+      chatId: chat.id,
+      forkId: (yield* api.GetChat({ chatId: chat.id })).currentForkId!,
+      anchor: running.slotId
+    } as const
+    const typed = "A message to insert below the reply, typed while it was coming."
+    yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      expectedRowVersion: null,
+      expectedSession: null,
+      content: typed
+    })
+    yield* empty
+    assert.include(yield* recovered, typed)
+    // Nothing is left under an anchor that's gone.
+    const left = yield* api.MessageDrafts({ chatId: chat.id })
+    assert.notInclude(JSON.stringify(left), typed)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("a swipe of one's own saved after its empty reply was dropped goes to recovered texts (rev-dv1 #6)", () =>
+  Effect.gen(function* () {
+    const { api, running, empty, recovered } = yield* writing
+    yield* empty
+    const typed = "A swipe of my own whose first save came after the reply was dropped."
+    const late = { draftId: null, expectedRowVersion: null, expectedSession: null, content: typed }
+    yield* api.SaveMessageDraft({ target: { _tag: "Write", slotId: running.slotId }, ...late })
+    assert.include(yield* recovered, typed)
+    // Saved again (a browser's retry): filed once.
+    yield* api.SaveMessageDraft({ target: { _tag: "Write", slotId: running.slotId }, ...late })
+    assert.lengthOf(
+      (yield* recovered).filter((text) => text === typed),
+      1
+    )
+    // An edit of its version, too.
+    const edited = "An edit of the dropped reply, saved late."
+    yield* api.SaveMessageDraft({ target: { _tag: "Edit", versionId: running.version.id }, ...late, content: edited })
+    assert.include(yield* recovered, edited)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
