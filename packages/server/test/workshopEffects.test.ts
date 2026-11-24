@@ -635,6 +635,19 @@ describe("workshop setup effects", () => {
             (e) => e.role === "toolResult" && e.tool === "create_card" && !e.isError
           )
         )
+        const keeper = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Resume keeper")!
+        const visible = yield* reader.LibraryAccess({
+          userId: user.id,
+          chatId: chat.id,
+          forkId: chat.currentForkId,
+          leafSlotId: generated.entry.slotId,
+          rolloutId: "next-reply",
+          entities: [],
+          refs: [],
+          card: null
+        })
+        assert.include(visible.inView, keeper.entityId)
+
         const current = yield* reader.GetSlot({ userId: user.id, slotId: generated.entry.slotId })
         const swipe = yield* api.Regenerate({
           slotId: generated.entry.slotId,

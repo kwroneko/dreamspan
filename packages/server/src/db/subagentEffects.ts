@@ -165,6 +165,7 @@ export const childEffects = (
   options: {
     readonly kept?: { readonly calls: ReadonlySet<string>; readonly transcript: ReadonlyArray<AgentMessage> }
     readonly undone: boolean
+    readonly kind?: RolloutEffect["kind"]
   }
 ) =>
   Effect.gen(function* () {
@@ -180,6 +181,7 @@ export const childEffects = (
     const byId = new Map(spawns.map((s) => [s.id, s]))
     const rows = yield* sql<Parameters<typeof toRolloutEffect>[0]>`SELECT * FROM rollout_effects
       WHERE rollout_id IN ${sql.in([...byId.keys()])} ${options.undone ? sql`` : sql`AND undone_at IS NULL`}
+      ${options.kind === undefined ? sql`` : sql`AND kind = ${options.kind}`}
       ORDER BY created_at DESC, rollout_id DESC, tool_call_id DESC, seq DESC`
     return rows.map((row): RolloutEffect => ({ ...toRolloutEffect(row), subagent: label(byId.get(row.rollout_id)!) }))
   })
