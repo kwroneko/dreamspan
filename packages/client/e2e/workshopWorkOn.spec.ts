@@ -60,11 +60,15 @@ test.describe("work on in a workshop", () => {
   }
   const tip = (page: Page) => page.locator('[data-layout-overlay="Tooltip floats above the page"][data-open]')
 
-  for (const theme of ["dark", "light"] as const)
-    test(`a lorebook's editor puts it in the workshop open beside, at 1340 ${theme}`, async ({ page }, info) => {
+  for (const [width, theme] of [
+    [1340, "dark"],
+    [1340, "light"],
+    [1920, "dark"]
+  ] as const)
+    test(`a lorebook's editor puts it in the workshop open beside, at ${width} ${theme}`, async ({ page }, info) => {
       test.setTimeout(150_000)
-      await setUp(page, 1340, theme)
-      const shot = shooter(page, 1340, theme)
+      await setUp(page, width, theme)
+      const shot = shooter(page, width, theme)
       const book = await admin((api) => api.CreateLorebook({ label: `Harbor lore ${theme}` }))
       const workshop = await admin((api) => api.CreateWorkshop({ title: `Work ${theme}` }))
       const draft = await admin((api) => api.OpenComposer({ chatId: workshop.id, forkId: null }))
@@ -83,6 +87,15 @@ test.describe("work on in a workshop", () => {
       await expect(page.locator("[data-frame]")).toHaveCount(2)
       const work = page.getByRole("button", { name: "Work on in a workshop" })
       await expect(work).toBeVisible()
+      // The editor's toolbar keeps one row in its half frame: the button follows the frame's width.
+      const editor = page.locator("[data-frame]").nth(1)
+      const centers = await Promise.all(
+        ["History", "Make a variant", "Work on in a workshop"].map(async (name) => {
+          const box = (await editor.getByRole("button", { name, exact: true }).boundingBox())!
+          return Math.round(box.y + box.height / 2)
+        })
+      )
+      expect(new Set(centers).size).toBe(1)
       await admin((api) =>
         api.SetComposerLibrary({ chatId: workshop.id, draftId: draft.id, add: [], remove: [book.id] })
       )
@@ -94,7 +107,7 @@ test.describe("work on in a workshop", () => {
       await expect(menu.getByRole("menuitem")).toHaveText([new RegExp(`^Work ${theme}`), /^A new workshop/])
       await menu.getByRole("menuitem", { name: `Work ${theme}` }).hover()
       await shot("menu")
-      await expectLayout(page, info, `workon-menu-1340-${theme}`, { scope: "[role=menu]" })
+      await expectLayout(page, info, `workon-menu-${width}-${theme}`, { scope: "[role=menu]" })
       await menu.getByRole("menuitem", { name: `Work ${theme}` }).click()
       await expect(tiles).toHaveCount(1)
       await expect(tiles.first()).toHaveAttribute("data-library-tile", book.id)
