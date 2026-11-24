@@ -5,14 +5,13 @@ import { threadLabels } from "../src/db/threadReads.ts"
 // every label from seqs (also under a paused rebuild, as a bulk import runs). Synthetic data only.
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { rebuildForkLabels } from "../src/db/forkLabels.ts"
 import { insertFork, nextSeq } from "../src/db/forkState.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { knowsSql, readKnowers } from "../src/db/knowers.ts"
 import type { ForkRow } from "../src/db/rows.ts"
 import { installStorageKindValidation } from "../src/db/storageKinds.ts"
@@ -55,7 +54,7 @@ const addChat = (sql: SqlClient.SqlClient, chat: string, slots: ReadonlyArray<st
 
 const setup = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+  yield* migrate(migrationDefinitions)
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   yield* addChat(sql, CHAT, SLOTS)
   return sql

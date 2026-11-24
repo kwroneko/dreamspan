@@ -1,16 +1,15 @@
 // Inspect the actual settlement statements on the complete schema, off the test thread.
 import { parentPort } from "node:worker_threads"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../../src/db/connection.ts"
-import { migrations } from "../../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../../src/db/migrations.ts"
 import { settleSummaries, trackSummaryTouches } from "../../src/db/summaryValidity.ts"
 
 const plans = await Effect.runPromise(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     yield* trackSummaryTouches(sql)
     yield* sql`INSERT INTO shell_moved(chat_id, stamp) VALUES ('synthetic', 1)`
     const plans: Array<ReadonlyArray<{ detail: string }>> = []

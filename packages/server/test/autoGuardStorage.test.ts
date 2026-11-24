@@ -1,19 +1,18 @@
 // Synthetic writer transactions: the guard must classify the write, not merely a reply id.
 import { join } from "node:path"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { attributed, checkAutoTurn, claimAutoTurn, trackAutoRuns } from "../src/db/autoGuard.ts"
 import { writerConnection } from "../src/db/connection.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { transaction } from "../src/db/tx.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const at = { userId: "u", chatId: "chat", forkId: "chat" }
 const setup = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+  yield* migrate(migrationDefinitions)
   yield* trackAutoRuns(sql)
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'U', 'admin', 1)`
   yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`

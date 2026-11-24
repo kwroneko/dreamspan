@@ -7,7 +7,6 @@
 // Then the same after `rebuildForkLabels` recomputes everything from seqs. Synthetic data only.
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
@@ -16,7 +15,7 @@ import { forkLabelSchema, pointAtSql, rebuildForkLabels } from "../src/db/forkLa
 import { forkImportSlot } from "../src/db/stImportFork.ts"
 import { effectiveOverride, eventApplies, insertFork, nextSeq, writeOverride } from "../src/db/forkState.ts"
 import { historyRevision, recordReduction } from "../src/db/historyChanges.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import type { ForkRow } from "../src/db/rows.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -57,7 +56,7 @@ const random = (seed: number) => {
 
 const setup = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+  yield* migrate(migrationDefinitions)
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${CHAT}, 'u', 'rp', 'active', 1)`
   for (const [depth, id] of SLOTS.entries())

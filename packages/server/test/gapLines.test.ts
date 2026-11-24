@@ -101,10 +101,12 @@ it.effect("shared requests and source evidence equal the pipeline with the new s
     yield* assembler.stages.disable("gap-lines")
     const before = yield* assembleFixture(fx, { assembler })
     assert.strictEqual(JSON.stringify(added.request), JSON.stringify(before.request))
-    // The one input the knowledge stage adds: the speaker, for the agent's read tools to read a
-    // separate join's stretch by (spec/THREADS.md §11, TH8).
-    const { stretchViewers, ...inputs } = added.inputs
+    // The inputs the knowledge stage adds: the speaker, for the agent's read tools to read a
+    // separate join's stretch by (spec/THREADS.md §11, TH8), and the resolved view, which the
+    // request inspector reads (644e570bc).
+    const { stretchViewers, contextView, ...inputs } = added.inputs
     assert.deepStrictEqual(stretchViewers, ["wren"])
+    assert.strictEqual(contextView, "shared")
     assert.deepStrictEqual(inputs, before.inputs)
     assert.deepStrictEqual(added.pieces, before.pieces)
     assert.deepStrictEqual(added.issues, before.issues)

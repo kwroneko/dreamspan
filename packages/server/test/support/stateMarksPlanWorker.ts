@@ -1,19 +1,18 @@
 // Execute the marker reader on the complete stacked schema, including LCM indexes/stamps.
 // The performance contract is an indexed override lookup, not a wall-clock budget.
 import { parentPort } from "node:worker_threads"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { writerConnection } from "../../src/db/connection.ts"
-import { migrations } from "../../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../../src/db/migrations.ts"
 import { makeStateMarkReadHandlers } from "../../src/db/stateMarks.ts"
 
 const result = await Effect.runPromise(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES ('u','synthetic','Synthetic','admin',1)`

@@ -5,11 +5,10 @@ import { parentPort, workerData } from "node:worker_threads"
 import { isDeepStrictEqual } from "node:util"
 import { Cause, Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { NewVersion } from "@dreamspan/shared/chat.ts"
 import { defaultBinLimits } from "@dreamspan/shared/bin.ts"
 import { readerConnection, writerConnection } from "../../src/db/connection.ts"
-import { migrations } from "../../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../../src/db/migrations.ts"
 import { trackSummaryTouches, summaryValidSql } from "../../src/db/summaryValidity.ts"
 import { installStorageKindValidation } from "../../src/db/storageKinds.ts"
 import { makeWriteHandlers } from "../../src/db/writes.ts"
@@ -71,7 +70,7 @@ DatabaseSync.prototype.prepare = function (query) {
 const exit = await Effect.runPromise(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     yield* installStorageKindValidation
     yield* trackSummaryTouches(sql)
     reference = scanningSettlement(sql).compile()

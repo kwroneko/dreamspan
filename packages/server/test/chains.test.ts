@@ -2,7 +2,7 @@
 // assigns them, the triggers that keep them, and the segments a path is read by.
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-node"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { type ChatId, type EntityId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -10,7 +10,7 @@ import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile, writerConnection } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { pathSegments } from "../src/db/pathSegments.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -133,7 +133,7 @@ describe("chains", () => {
   it.effect("are assigned by the database and never change, and state events carry them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+      yield* migrate(migrationDefinitions)
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
       const slot = (id: string, parent: string | null, depth: number, chain: string | null = null) =>
@@ -189,7 +189,7 @@ describe("chains", () => {
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+        yield* migrate(migrationDefinitions)
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
         yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
         const slot = (id: string, parent: string | null, depth: number, inserted = 0) =>

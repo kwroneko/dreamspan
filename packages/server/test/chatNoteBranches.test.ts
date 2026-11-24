@@ -63,8 +63,9 @@ describe("a chat's own note on its branches", () => {
       const position = { chatId: chat.id, forkId, slotId: first.entry.slotId }
       yield* type(api, note.id, position, "Fog at the display end.")
       yield* save(api, note.id, position)
+      // Named by its structural tip, the branch reads at its display end, as the editor does (d9cd82897).
       const before = yield* api.ListChatNotes(position)
-      assert.strictEqual(before.find((n) => n.ref.id === note.id)?.doc.content, "")
+      assert.strictEqual(before.find((n) => n.ref.id === note.id)?.doc.content, "Fog at the display end.")
       const after = yield* api.ListChatNotes({ ...position, slotId: inserted.entry.slotId })
       assert.strictEqual(after.find((n) => n.ref.id === note.id)?.doc.content, "Fog at the display end.")
       assert.strictEqual(
