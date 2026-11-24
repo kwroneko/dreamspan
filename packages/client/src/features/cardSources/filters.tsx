@@ -616,18 +616,18 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
   switch (panel.key) {
     case "Creators": {
       const { mode, chosen } = creatorChoice(caps, filters)
-      if (chosen.length === 0) return "Any creator"
-      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "creator" : "creators"}`
-      return chosen.length === 1 ? "By 1 creator" : `Any of ${chosen.length} creators`
+      if (chosen.length === 0) return "Any author"
+      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "author" : "authors"}`
+      return chosen.length === 1 ? "By 1 author" : `Any of ${chosen.length} authors`
     }
     case "Sites": {
       const names = (values: ReadonlyArray<string>) =>
-        values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sites`
+        values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sources`
       const shown = [
         list(first.id).length ? names(list(first.id)) : "",
         list(exclude).length ? `Exclude ${names(list(exclude))}` : ""
       ].filter(Boolean)
-      return shown.length ? shown.join("; ") : "All sites"
+      return shown.length ? shown.join("; ") : "All sources"
     }
     case "Kind": {
       const value = text(first.id)

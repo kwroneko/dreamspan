@@ -92,7 +92,7 @@ interface Capabilities {
 /** v1's result kinds, in the order the Kind choice offers them (§3.9). */
 const KIND_ORDER = ["both", "character", "character_lorebook", "lorebook"] as const
 const KIND_LABELS: Readonly<Record<string, string>> = {
-  both: "Characters and lorebooks",
+  both: "All",
   character: "Characters",
   character_lorebook: "Characters with a lorebook",
   lorebook: "Lorebooks"
@@ -133,7 +133,7 @@ export const summaryOf = (item: unknown, origin = CARDEX_ORIGIN): AdapterSummary
     ...(author ? { creatorQuery: author } : {}),
     ...(item.tagline ? { tagline: item.tagline } : {}),
     tags: Array.isArray(item.tags) ? item.tags.filter((t): t is string => typeof t === "string") : [],
-    ...(item.nsfw ? { rating: "Mature" } : {}),
+    ...(item.nsfw ? { rating: "NSFW" } : {}),
     ...(typeof item.token_count === "number" ? { tokens: item.token_count } : {}),
     ...(thumb ? { thumb } : {}),
     ...(image ? { image } : {}),
@@ -245,9 +245,10 @@ const pageOf = (
   return Number.isInteger(page) && page >= 1 ? { page } : null
 }
 
-// The labels cardex's descriptors don't carry. A filter it no longer lists is left out.
-const RATING_LABELS: Record<string, string> = { exclude: "Safe", include: "Everything", only: "Mature only" }
-const MODE_LABELS: Record<string, string> = { fts: "Words", semantic: "Meaning" }
+// cardex's own labels (its search page's wording), for replies whose descriptors carry none. A
+// filter it no longer lists is left out.
+const RATING_LABELS: Record<string, string> = { exclude: "Hide NSFW", include: "Show NSFW", only: "Only NSFW" }
+const MODE_LABELS: Record<string, string> = { fts: "Text", semantic: "Semantic" }
 const SORTS: ReadonlyArray<{
   readonly id: string
   readonly label: string
@@ -255,11 +256,11 @@ const SORTS: ReadonlyArray<{
   readonly defaultOrder: string
 }> = [
   { id: "popular", label: "Popular", needs: ["popular"], defaultOrder: "popular cards" },
-  { id: "newest", label: "Newest", needs: ["newest", "oldest"], defaultOrder: "newest first" },
-  { id: "created", label: "Created", needs: ["created_desc", "created_asc"], defaultOrder: "newest created first" },
-  { id: "name", label: "Name", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
-  { id: "tokens", label: "Tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
-  { id: "relevance", label: "Best match", needs: ["relevance"], defaultOrder: "best matches" }
+  { id: "newest", label: "Newest added", needs: ["newest", "oldest"], defaultOrder: "newest first" },
+  { id: "created", label: "Newest created", needs: ["created_desc", "created_asc"], defaultOrder: "newest created first" },
+  { id: "name", label: "Name, A to Z", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
+  { id: "tokens", label: "Most tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
+  { id: "relevance", label: "Relevance", needs: ["relevance"], defaultOrder: "best matches" }
 ]
 /** Our sort and direction as cardex's sort; null leaves it to cardex. */
 const sortParam = (query: SourceQuery) => {
@@ -285,17 +286,17 @@ const sortParam = (query: SourceQuery) => {
 const FILTER_LABELS: Record<string, string> = {
   fields: "Search in",
   kind: "Kind",
-  not_source: "Exclude sites",
+  not_source: "Exclude sources",
   any_tags: "Any of these tags",
-  any_author: "Any of these creators",
-  not_author: "Exclude creators",
+  any_author: "Any of these authors",
+  not_author: "Not by these authors",
   picture: "Picture",
   added_after: "Added after",
   added_before: "Added before",
   created_after: "Created after",
   created_before: "Created before",
-  deleted_from_source: "Deleted from all sites",
-  deleted_from_any_source: "Deleted from a site",
+  deleted_from_source: "Deleted from all sources",
+  deleted_from_any_source: "Deleted from a source",
   chub_verified: "Chub verified",
   chub_recommended: "Chub recommended"
 }
@@ -387,18 +388,21 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   const body = raw as unknown as Capabilities
   const named = new Map(body.filters.filter(isRecord).map((f) => [f.name, f]))
   const allowed = (name: string) => (named.get(name)?.allowed_values ?? []).filter((v) => typeof v === "string")
+  /** cardex's own label for a value of a filter, when its capabilities carry one. */
+  const valueLabel = (name: string, value: string) =>
+    named.get(name)?.allowed_value_labels?.find((v) => v.value === value)?.label
   const filters: Array<SourceFilter> = []
   const ratings = allowed("nsfw").filter((v) => v in RATING_LABELS)
   if (ratings.length) {
     filters.push({
       id: "nsfw",
-      label: "Rating",
+      label: named.get("nsfw")?.label ?? "NSFW",
       kind: "choice",
       multi: false,
       about: FILTER_HELP.nsfw!,
       options: ["exclude", "include", "only"]
         .filter((v) => ratings.includes(v))
-        .map((value) => ({ value, label: RATING_LABELS[value]! }))
+        .map((value) => ({ value, label: valueLabel("nsfw", value) ?? RATING_LABELS[value]! }))
     })
   }
   const modes = (body.modes ?? []).map((m) => m?.name).filter((m): m is string => !!m && m in MODE_LABELS)
@@ -410,7 +414,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       multi: false,
       options: modes.map((value) => ({ value, label: MODE_LABELS[value]! })),
       about:
-        "Words finds cards that contain your words; Meaning finds cards about what you describe. Meaning shows up to 240 cards and uses its own order."
+        "Text finds cards that contain your words; Semantic finds cards about what you describe. Semantic shows up to 240 cards and uses its own order."
     })
   }
   if (named.has("min_tokens") && named.has("max_tokens")) {
@@ -432,14 +436,14 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   if (sites.length) {
     filters.push({
       id: "source",
-      label: "Site",
+      label: named.get("source")?.label ?? "Sources",
       kind: "choice",
       multi: true,
       options: sites.map((value) => ({
         value,
         label:
+          valueLabel("source", value) ??
           CARDEX_SITE_LABELS[value] ??
-          named.get("source")?.allowed_value_labels?.find((v) => v.value === value)?.label ??
           value
       })),
       about: FILTER_HELP.source!
@@ -448,7 +452,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   if (named.has("author")) {
     filters.push({
       id: "author",
-      label: "Creator",
+      label: named.get("author")?.label ?? "Author",
       kind: "text",
       suggestions: { kind: "creators", multiple: false },
       about: FILTER_HELP.author!
@@ -475,7 +479,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
     if (handled.has(name) || !PLACED.includes(name)) continue
     const common = {
       id: name,
-      label: FILTER_LABELS[name] ?? label ?? name,
+      label: label ?? FILTER_LABELS[name] ?? name,
       ...(description ? { about: description } : {})
     }
     if (name === "kind") {
@@ -486,17 +490,17 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
           kind: "choice",
           multi: false,
           about: FILTER_HELP.kind!,
-          options: options.map((value) => ({ value, label: KIND_LABELS[value]! }))
+          options: options.map((value) => ({ value, label: valueLabel(name, value) ?? KIND_LABELS[value]! }))
         })
     } else if (name === "has_cover") {
       filters.push({
         ...common,
-        label: "Cover",
+        label: label ?? "Only cards with a cover",
         kind: "choice",
         multi: false,
         options: [
-          { value: "true", label: "With a cover" },
-          { value: "false", label: "Any" }
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" }
         ],
         about: "Leaves out characters without a cover image. On by default; lorebooks are never left out."
       })
