@@ -32,7 +32,7 @@ import { Tooltip, IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { CenterPage, sidebarToggle } from "../shell.tsx"
 import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
-import { defaultTitle, itemKey, tabKind } from "./kinds.ts"
+import { defaultTitle, itemKey, nearOf, tabKind } from "./kinds.ts"
 import {
   allTabs,
   type Frame,
@@ -205,7 +205,13 @@ function useLinkGestures(store: WorkbenchStore) {
       // Alt-click: VS Code's Open to the Side, where frames fit side by side.
       if (event.altKey && matchMedia(WIDE).matches) store.openBeside(href)
       // A link inside a frame opens in that frame; outside (the sidebar), wherever it's open.
-      else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href, { whole: true })
+      else {
+        const near = nearOf(anchor)
+        store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href, {
+          whole: true,
+          ...(near ? { near } : {})
+        })
+      }
     }
     const beside = (event: Event) => {
       if (!(event instanceof CustomEvent)) return
