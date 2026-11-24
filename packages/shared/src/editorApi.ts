@@ -355,7 +355,9 @@ export class EditorApi extends RpcGroup.make(
       revisionId: RevisionId,
       expectedRowVersion: Schema.Int,
       /** A chat's own note: restored on this branch, from this position on, as its Save would. */
-      chatNote: Schema.optionalKey(ChatNotePosition)
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      /** The new revision's message (the assistant's `restore_revision`), for the default one. */
+      message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
     },
     success: SavedRef,
     error: Schema.Union([...Writes])

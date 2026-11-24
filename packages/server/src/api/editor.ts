@@ -465,10 +465,17 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("GetRevision")
       ),
 
-    RestoreRevision: ({ refId, revisionId, expectedRowVersion, chatNote }) =>
+    RestoreRevision: ({ refId, revisionId, expectedRowVersion, chatNote, message }) =>
       Effect.flatMap(userId, (id) =>
         writer
-          .RestoreRevision({ userId: id, refId, revisionId, expectedRowVersion, ...(chatNote ? { chatNote } : {}) })
+          .RestoreRevision({
+            userId: id,
+            refId,
+            revisionId,
+            expectedRowVersion,
+            ...(chatNote ? { chatNote } : {}),
+            ...(message === undefined ? {} : { message })
+          })
           .pipe(changed(id))
       ).pipe(
         Effect.tap(() => Effect.sync(() => chatNote && hub.publish(chatNote.chatId, { _tag: "State" }))),

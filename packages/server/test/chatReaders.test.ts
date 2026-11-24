@@ -52,6 +52,7 @@ const SCOPED: Readonly<Record<string, number>> = {
   "db/awayMarks.ts": 1,
   "db/bin.ts": 22,
   "db/binForks.ts": 2,
+  "db/changeReversals.ts": 4,
   "db/chatKindPolicy.ts": 6,
   "db/chatSetupReads.ts": 6,
   "db/chatSetupWrites.ts": 4,

@@ -242,3 +242,12 @@ export const combinedFileEdits = (
     }
   return { before, after }
 }
+
+/** A unit as the assistant names it: "description", "entries uid=3". */
+export const unitName = (unit: string) => (JSON.parse(unit) as Array<string>).join(" ")
+
+/** The units a list of names given by the assistant picks: by its name or its top-level field. */
+export const pickedUnits = (units: ReadonlyArray<string>, names: ReadonlyArray<string> | undefined) =>
+  names === undefined
+    ? units
+    : units.filter((unit) => names.some((n) => n === unitName(unit) || n === (JSON.parse(unit) as Array<string>)[0]))

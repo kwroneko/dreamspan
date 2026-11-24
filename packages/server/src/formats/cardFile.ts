@@ -11,7 +11,7 @@ import { cardTextChunk, decodeText, isPng, readChunks } from "./png.ts"
 import { defaultLimits, FormatError, type Limits, parseJson } from "./safety.ts"
 import { extract, isZip, readZip, writeZip } from "./zip.ts"
 
-export type CardFileFormat = "png" | "json" | "charx"
+type CardFileFormat = "png" | "json" | "charx"
 
 export interface CardFileInfo {
   readonly format: CardFileFormat

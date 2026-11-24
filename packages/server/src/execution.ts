@@ -11,6 +11,7 @@ import { chatKinds, type ChatKindProfile } from "@dreamspan/shared/chatKinds.ts"
 import { workshopCompactor, type RunCompactor } from "./agent/workshopCompactor.ts"
 import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
+import { versionTools } from "./agent/tools/versions.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
 import { historyTools, storyTools } from "./agent/tools/history.ts"
@@ -163,6 +164,7 @@ export class ExecutionRegistry extends Context.Service<
         ...storyTools,
         ...runTools,
         ...libraryTools,
+        ...versionTools,
         ...setupTools,
         lookupLore,
         listNotes,

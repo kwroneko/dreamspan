@@ -14,6 +14,9 @@ import type { ModelId } from "@dreamspan/shared/providers.ts"
 import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { resolveLibrary } from "./library.ts"
+import { findRevision } from "./versions.ts"
+import { changedUnits, pickedUnits, planReversal, unitName } from "@dreamspan/shared/changeReversal.ts"
+import type { Doc, RevisionId } from "@dreamspan/shared/library.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
 
 const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
@@ -114,6 +117,11 @@ const text = Type.String({ maxLength: limits.textChars })
 const name = Type.String({ minLength: 1, maxLength: limits.nameChars })
 const shortText = Type.String({ maxLength: limits.nameChars })
 const strict = { additionalProperties: false } as const
+/** A revision's message (spec/WORKSHOP-CARDS.md §9): what the change is, in a short line. */
+const message = Type.Optional(
+  Type.String({ maxLength: 200, description: "The revision's message: what this change is, in a short line." })
+)
+const given = (value: string | undefined) => (value === undefined ? {} : { message: value })
 const cardFields = {
   nickname: Type.Optional(shortText),
   description: Type.Optional(text),
@@ -138,6 +146,7 @@ interface CreateArgs {
   readonly system_prompt?: string
   readonly tags?: ReadonlyArray<string>
   readonly persona?: boolean
+  readonly message?: string
 }
 const createCard: RolloutTool<CreateArgs> = {
   source: import.meta.url,
@@ -150,9 +159,10 @@ const createCard: RolloutTool<CreateArgs> = {
   capability: "library.write",
   description:
     "Creates a card in the library, with one agent revision. Use first_message for her greeting. Returns its library and entity ids. Undo moves it to the bin if untouched.",
-  parameters: Type.Object({ name, ...cardFields }, strict),
+  parameters: Type.Object({ name, ...cardFields, message }, strict),
   summarize: ({ name }) => name,
-  describe: (_ctx, args) => Effect.succeed({ title: `Create the card “${args.name}”`, rows: rowsOf(args, ["name"]) }),
+  describe: (_ctx, args) =>
+    Effect.succeed({ title: `Create the card “${args.name}”`, rows: rowsOf(args, ["name", "message"]) }),
   execute: (ctx, args) =>
     !Schema.is(LibraryLabel)(args.name)
       ? Effect.succeed({
@@ -177,7 +187,8 @@ const createCard: RolloutTool<CreateArgs> = {
                 system_prompt: args.system_prompt ?? "",
                 tags: args.tags ?? []
               },
-              tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])]
+              tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])],
+              ...given(args.message)
             })
             .pipe(Effect.map((text) => ({ text })))
         )
@@ -231,6 +242,7 @@ const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
 const editCard: RolloutTool<{
   readonly card: string
   readonly changes: CardChanges
+  readonly message?: string
 }> = {
   source: import.meta.url,
   id: "edit_card",
@@ -258,7 +270,8 @@ const editCard: RolloutTool<{
           )
         ]),
         { minItems: 1, maxItems: limits.listItems }
-      )
+      ),
+      message
     },
     strict
   ),
@@ -297,7 +310,8 @@ const editCard: RolloutTool<{
           ...key(ctx),
           refId: ref.id,
           expectedRowVersion: saved.ref.rowVersion,
-          doc
+          doc,
+          ...given(args.message)
         })
         return { text }
       })
@@ -308,6 +322,7 @@ const cloneCard: RolloutTool<{
   readonly name: string
   readonly nickname?: string
   readonly version?: string
+  readonly message?: string
 }> = {
   source: import.meta.url,
   id: "clone_card",
@@ -324,7 +339,8 @@ const cloneCard: RolloutTool<{
       card: name,
       name,
       nickname: Type.Optional(shortText),
-      version: Type.Optional(shortText)
+      version: Type.Optional(shortText),
+      message
     },
     strict
   ),
@@ -332,7 +348,7 @@ const cloneCard: RolloutTool<{
   describe: (ctx, args) =>
     Effect.map(realName(ctx, "card", args.card), (source) => ({
       title: `Copy the card “${source}” as “${args.name}”`,
-      rows: rowsOf(args, ["card", "name"])
+      rows: rowsOf(args, ["card", "name", "message"])
     })),
   execute: (ctx, args) =>
     safely(
@@ -343,7 +359,8 @@ const cloneCard: RolloutTool<{
           refId: ref.id,
           name: args.name,
           nickname: args.nickname ?? "",
-          characterVersion: args.version ?? ""
+          characterVersion: args.version ?? "",
+          ...given(args.message)
         })
         return { text }
       })
@@ -526,7 +543,8 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
             ...key(ctx),
             refId: saved.ref.id,
             expectedRowVersion: saved.ref.rowVersion,
-            doc
+            doc,
+            ...given(typeof args.message === "string" ? args.message : undefined)
           })
           return { text }
         })
@@ -673,6 +691,92 @@ const editLibraryNote: RolloutTool<LibraryNoteEdit> = {
       })
     )
 }
+type RevertArgs = {
+  readonly kind: "card" | "preset" | "lorebook"
+  readonly item: string
+  readonly revision: string
+  readonly fields?: ReadonlyArray<string>
+  readonly message?: string
+}
+/** The revision a `revert_change` names, its parent, and the plan on the head, read for the approval. */
+const prepareRevert = (ctx: ToolContext, args: RevertArgs) =>
+  Effect.gen(function* () {
+    const ref = yield* findRef(ctx, args.kind, args.item)
+    remember(ctx, args.kind, args.item, ref)
+    const found = yield* findRevision(ctx, ref, args.revision)
+    if ("error" in found) return yield* Effect.fail(new ToolInputRefused(found.error))
+    const parent = found.revision.parents[0]
+    if (parent === undefined)
+      return yield* Effect.fail(
+        new ToolInputRefused("That's the item's first revision: it has no change to take back.")
+      )
+    const read = (revisionId: string) =>
+      ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId: revisionId as RevisionId })
+    const original = yield* read(parent)
+    const changed = yield* read(found.revision.id)
+    const head = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+    const units = changedUnits(original, changed)
+    const plan = planReversal({ original, changed, now: head.doc, fields: pickedUnits(units, args.fields) })
+    return { ref, revision: found.revision, plan, head: head.doc }
+  })
+const revertChange: RolloutTool<RevertArgs> = {
+  source: import.meta.url,
+  id: "revert_change",
+  storyRead: "library",
+  label: "Reverted a change",
+  titleField: "item",
+  explanation: "Take one revision's change back out of a library item, keeping later edits.",
+  effect: "library",
+  capability: "library.write",
+  description:
+    "Takes back the change one revision made (as git revert): each field it changed goes back to how it was before, keeping edits made to other fields and other parts of the text since. Name the revision by number (from list_revisions), id or latest. fields limits it to some fields (description; entries; entries uid=3). If a field was changed since in the same place, nothing is written and the result shows that field now and before the change, for you to edit yourself. Writes a new revision; nothing is lost.",
+  parameters: Type.Object(
+    {
+      kind: Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook")]),
+      item: name,
+      revision: Type.String({ minLength: 1, maxLength: 100 }),
+      fields: Type.Optional(Type.Array(name, { maxItems: limits.listItems })),
+      message
+    },
+    strict
+  ),
+  summarize: ({ item, revision }) => `${item}, revision ${revision}`,
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
+      const { ref, revision, plan, head } = yield* prepareRevert(ctx, args)
+      const title = `Revert the change of revision ${revision.number ?? revision.id} to the ${ref.kind} “${ref.label}”`
+      if (plan.conflicts.length > 0 || plan.doc === null)
+        return {
+          title,
+          rows: [{ label: "Changed since", value: plan.conflicts.map((c) => unitName(c.field)).join(", ") }]
+        }
+      const changes = documentDiff(head, plan.doc as Doc)
+      return { title, rows: documentChangeRows(changes), changes }
+    }).pipe(
+      Effect.mapError((error) =>
+        error instanceof ToolInputRefused
+          ? error
+          : new ToolInputRefused("That revision can't be read. Check it with list_revisions.")
+      )
+    ),
+  execute: (ctx, args) =>
+    safely(
+      Effect.gen(function* () {
+        const ref = yield* findRef(ctx, args.kind, args.item)
+        const found = yield* findRevision(ctx, ref, args.revision)
+        if ("error" in found) return { text: found.error, isError: true }
+        return {
+          text: yield* ctx.writer.AgentRevertRevision({
+            ...key(ctx),
+            refId: ref.id,
+            revisionId: found.revision.id,
+            ...(args.fields === undefined ? {} : { fields: args.fields }),
+            ...given(args.message)
+          })
+        }
+      })
+    )
+}
 export const libraryEditCard = receiptFirst(editCard)
 export const setupTools: ReadonlyArray<RolloutTool<never>> = [
   receiptFirst(editCardNote),
@@ -681,5 +785,6 @@ export const setupTools: ReadonlyArray<RolloutTool<never>> = [
   receiptFirst(cloneCard),
   receiptFirst(startChat),
   receiptFirst(editLibraryDocument("preset", presetEditArguments)),
-  receiptFirst(editLibraryDocument("lorebook", lorebookEditArguments))
+  receiptFirst(editLibraryDocument("lorebook", lorebookEditArguments)),
+  receiptFirst(revertChange)
 ]
