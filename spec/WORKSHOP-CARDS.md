@@ -195,6 +195,18 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
 
 **Build units.** C2 (storage and assembly), C3 (paperclip menu and pickers), C4 (drops), C5 (Work on in a workshop).
 
+### 4.5 A card file attached as a file [D, P mechanism]
+
+Owner [D] (2026-11-24): "It should also work with a card file being dragged in as a file attachment. Make sure that mode works end to end with the agent also being able to see what it is and how to interact with it."
+
+- **It stays a file.** A character card file (PNG or APNG with `chara` or `ccv3` text chunks, JSON V1/V2/V3, CHARX) dropped, picked or attached from Files in a workshop is an ordinary file attachment (§1.1): saved in the working folder's Attachments folder, sent by path, never imported into the library unless the user asks. It's recognised by its contents, not its extension, with the existing import parsers (`formats/cardImport.ts`, `formats/png.ts`, `formats/zip.ts`), in the format worker.
+- **The tile shows a card**: its avatar (the PNG itself, or CHARX's main asset), its name, and "Card file" under it. A PNG without card data stays an ordinary image tile.
+- **What the model sees**: the built `<attachment …/>` line gains `card="true" card_name="Mara Quill" format="png" spec="chara_card_v3" spec_version="3.0"`, and the §4.3 rule applies to its content: whole up to the inline limit, else the field summary with sizes, inside the element. With it, once per message, a note naming the tools: `read_card_file` (the same views as `read_card`, §4.3), `edit_card_file` (`edit_card`'s changes, written back into the file in its own format as a new file version), and `import_card_file` (into the library, only when the user asks).
+- **Edits are file versions.** `edit_card_file` writes the file through the built file tools (capability `files`), keeping every field and extension it doesn't change and, for a PNG, the image and its other chunks; the built file version ("Before the assistant's edit") is the undo, and the change row (§7) shows the card's fields diffed, not the file's bytes; Revert (§8) applies to it field by field as to a library card.
+- **Lorebook and preset JSON files**: the same recognition, line, views and edit, through `formats/lorebook.ts` and `formats/preset.ts`, where it falls out of the same code; otherwise listed as a follow-up in ARCHITECTURE.
+
+**Build unit.** C11, after C10: its end-to-end test needs change rows (C8) and Revert (C10). The e2e drops a synthetic PNG card and a JSON card into a workshop with a scripted model and checks the tile, the request in the inspector, a read call, an edit call, the change row and its diff, Revert, and that the edited file re-imports with the change; a server test round-trips every format, PNG text chunks included, keeping unknown fields and extensions.
+
 ## 5. Flow 3: creating a new card from instructions
 
 **What the user does.** Types "Make three fishermen for Mara's village, in your style", with or without attachments.
@@ -350,6 +362,7 @@ The same model, with their existing tools and diffs:
 | C8 | Change rows, the change view tab kind, per-open affinity | — |
 | C9 | `read_revision`, `diff_revisions`, `revert_change`, `message`, the Versions skill | C10's merge |
 | C10 | Revert: field and hunk three-way, conflicts in the change view, Redo, Revert all, created-item bin asks, the tail line | C8 |
+| C11 | Card files as file attachments (§4.5): recognition, the card tile, the attachment line and note, `read_card_file`, `edit_card_file`, `import_card_file`, lorebook and preset JSON where cheap, the round-trip and end-to-end tests | C2b, C8, C10 |
 
 Every UI unit runs the layout audit at the owner's widths and both themes; C7 is the only one that changes what models are sent by default (it adds the instruction paragraph once), so its parity test records the request bytes before and after.
 
