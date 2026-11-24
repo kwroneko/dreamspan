@@ -1,38 +1,18 @@
 // Write handlers for ST import jobs (ARCHITECTURE.md §13): the rows the import page lists.
 // Each is one small transaction; progress comes at most about once a second per job.
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import type { Writer } from "./Database.ts"
 import { NotFound, ST_IMPORT_RUN, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
 export const makeStImportJobWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const handlers = {
-    StImportJobStart: ({ userId, id, mode, source, root, prefix, filesTotal, bytesTotal, at }) =>
-      Effect.gen(function* () {
-        // The new run fences an earlier one (StImportBegin): an upload still marked running is over.
-        yield* sql`UPDATE st_import_jobs SET status = 'interrupted', finished_at = ${at}, updated_at = ${at},
-            current_file = NULL, error = 'Another import started before its files had all arrived.'
-          WHERE owner_user_id = ${userId} AND status = 'running' AND mode = 'upload'`
-        yield* sql`INSERT INTO st_import_jobs ${sql.insert({
-          id,
-          owner_user_id: userId,
-          mode,
-          source,
-          root,
-          prefix,
-          status: "running",
-          started_at: at,
-          updated_at: at,
-          files_total: filesTotal,
-          bytes_total: bytesTotal
-        })}`
-      }).pipe(transaction(sql, "StImportJobStart")),
-
-    StImportJobUpdate: (update) =>
-      Effect.gen(function* () {
-        const { userId, id, at, end } = update
-        const rows = yield* sql`UPDATE st_import_jobs SET
+  const updateJob = (update: Parameters<Writer["Service"]["StImportJobUpdate"]>[0]) =>
+    Effect.gen(function* () {
+      const { userId, id, at, end } = update
+      const rows = yield* sql`UPDATE st_import_jobs SET
             updated_at = ${at},
             files_total = ${update.filesTotal},
             files_done = ${update.filesDone},
@@ -47,14 +27,61 @@ export const makeStImportJobWriteHandlers = Effect.gen(function* () {
             error = coalesce(${end?.error ?? null}, error),
             finished_at = ${end === undefined ? null : at}
           WHERE id = ${id} AND owner_user_id = ${userId} AND status = 'running' RETURNING id`
-        if (end !== undefined && rows.length > 0) {
-          yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId} AND import_id = ${id}`
-          if (end.status !== "complete")
-            yield* sql`UPDATE jobs SET payload_json = '{}' WHERE owner_user_id = ${userId}
+      if (end !== undefined && rows.length > 0) {
+        yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId} AND import_id = ${id}`
+        if (end.status !== "complete")
+          yield* sql`UPDATE jobs SET payload_json = '{}' WHERE owner_user_id = ${userId}
               AND kind = ${ST_IMPORT_RUN} AND json_extract(payload_json, '$.importId') = ${id}`
+      }
+      return rows.length > 0
+    })
+
+  const handlers = {
+    StImportBegin: ({ userId, importId, job, previousUpload }) =>
+      Effect.gen(function* () {
+        const at = Date.now()
+        const error = "Another import started before its files had all arrived."
+        if (previousUpload !== undefined)
+          yield* updateJob({ ...previousUpload, userId, at, end: { status: "interrupted", error } })
+
+        const payload = JSON.stringify({ importId })
+        const updated = yield* sql`UPDATE jobs SET payload_json = ${payload}, updated_at = ${at}
+          WHERE owner_user_id = ${userId} AND kind = ${ST_IMPORT_RUN} RETURNING id`
+        if (updated.length === 0) {
+          yield* sql`INSERT INTO jobs ${sql.insert({
+            id: uuidv7(),
+            owner_user_id: userId,
+            kind: ST_IMPORT_RUN,
+            status: "processing",
+            payload_json: payload,
+            created_at: at,
+            updated_at: at
+          })}`
         }
-        return rows.length > 0
-      }).pipe(transaction(sql, "StImportJobUpdate")),
+        yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId}`
+
+        if (job !== undefined) {
+          // Close any running upload row left without a live session after a storage failure.
+          yield* sql`UPDATE st_import_jobs SET status = 'interrupted', finished_at = ${at}, updated_at = ${at},
+              current_file = NULL, error = ${error}
+            WHERE owner_user_id = ${userId} AND status = 'running' AND mode = 'upload'`
+          yield* sql`INSERT INTO st_import_jobs ${sql.insert({
+            id: importId,
+            owner_user_id: userId,
+            mode: job.mode,
+            source: job.source,
+            root: job.root,
+            prefix: job.prefix,
+            status: "running",
+            started_at: at,
+            updated_at: at,
+            files_total: job.filesTotal,
+            bytes_total: job.bytesTotal
+          })}`
+        }
+      }).pipe(transaction(sql, "StImportBegin")),
+
+    StImportJobUpdate: (update) => updateJob(update).pipe(transaction(sql, "StImportJobUpdate")),
 
     StImportJobReport: ({ userId, id, reportJson, countsJson, attention }) =>
       Effect.gen(function* () {
