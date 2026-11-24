@@ -865,6 +865,100 @@ export const makeFileTools = (deps: FileToolDeps) => {
     )
   }
 
+  type PreviousFile = { bytes: Buffer; info: Stats; sha256: string; byteSize: number }
+
+  /** Keeps the prior version and lands its replacement under the caller's file-tree lock. */
+  const writeWithVersion = (
+    userId: string,
+    full: string,
+    top: string,
+    segments: ReadonlyArray<string>,
+    host: boolean,
+    before: PreviousFile | null,
+    content: Buffer,
+    origin: "agent" | "restore",
+    receipt: { readonly rolloutId: string; readonly toolCallId: string } | null
+  ) =>
+    Effect.gen(function* () {
+      // Host folders keep versions, and their live files are outside account quota.
+      const expected = before?.info ?? null
+      const quota = host ? undefined : deps.quota
+      const reservation = quota
+        ? yield* quota.replacement(userId, expected, before, content.byteLength, "write files")
+        : null
+      let keptBytes = 0
+      let committed = false
+      const replacement = yield* Effect.gen(function* () {
+        if (reservation && !reservation.reserve(content.byteLength))
+          return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
+        let versionId: string | null = null
+        if (before) {
+          if (reservation) {
+            const { sha256: hash, byteSize, info, bytes } = before
+            const saved = yield* deps.holding(
+              [hash],
+              Effect.andThen(
+                storeMedia(deps.dataDir, hash, bytes),
+                reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
+                  deps.writer.RecordReplacementVersion({
+                    userId: userId as never,
+                    maxAddedBytes,
+                    version: {
+                      path: full,
+                      inode: info.ino,
+                      sha256: hash,
+                      byteSize,
+                      mime: "application/octet-stream",
+                      origin,
+                      ...receipt
+                    }
+                  })
+                )
+              )
+            )
+            keptBytes = saved.addedBytes
+            versionId = saved.id
+          } else
+            versionId = yield* keepVersion(
+              receipt,
+              userId,
+              full,
+              { bytes: before.bytes, inode: before.info.ino },
+              origin
+            )
+        }
+        const written = yield* attempt(() =>
+          writeRegularFile(top, segments, content, {
+            createFolders: before === null,
+            expected,
+            ...(reservation
+              ? {
+                  stage: reservation.stage,
+                  committing: () => reservation.committing(content.byteLength, keptBytes),
+                  landed: (file) => {
+                    reservation.landed(file)
+                    committed = true
+                  }
+                }
+              : {})
+          })
+        )
+        return { written, versionId }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (!committed) {
+              reservation?.release()
+              quota?.wrote(userId, keptBytes)
+            }
+          })
+        ),
+        Effect.uninterruptible
+      )
+      deps.onChanged?.(userId, [full])
+      return replacement
+    })
+
   /** Writes `next` over a file read in this run (or a new one), keeping the earlier content. */
   const replaceFile = (
     ctx: ToolContext,
@@ -878,12 +972,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
     withFileTree(
       env.userId,
       Effect.gen(function* () {
-        // A host folder (§3.7) has no quota; its changes are still versioned.
-        const counted = root.host !== true
         const top = root.hostRoot
         const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
-        let before: { bytes: Buffer; info: Stats; sha256: string; byteSize: number } | null = null
+        let before: PreviousFile | null = null
         if (info) {
           const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
           if (read.truncated) throw new FilePathRefused(`${full} is too large to change with the file tools. Use bash.`)
@@ -895,82 +987,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
           before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
-        const expected = before?.info ?? null
-        const quota = counted ? deps.quota : undefined
-        const reservation = quota
-          ? yield* quota.replacement(env.userId, expected, before, content.byteLength, "write files")
-          : null
-        let keptBytes = 0
-        let committed = false
-        const { written, versionId } = yield* Effect.gen(function* () {
-          if (reservation && !reservation.reserve(content.byteLength))
-            return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
-          let versionId: string | null = null
-          if (before) {
-            if (reservation) {
-              const { sha256: hash, byteSize, info, bytes } = before
-              const saved = yield* deps.holding(
-                [hash],
-                Effect.andThen(
-                  storeMedia(deps.dataDir, hash, bytes),
-                  reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
-                    deps.writer.RecordReplacementVersion({
-                      userId: env.userId as never,
-                      maxAddedBytes,
-                      version: {
-                        path: full,
-                        inode: info.ino,
-                        sha256: hash,
-                        byteSize,
-                        mime: "application/octet-stream",
-                        origin: "agent",
-                        rolloutId: ctx.rolloutId,
-                        toolCallId: ctx.toolCallId
-                      }
-                    })
-                  )
-                )
-              )
-              keptBytes = saved.addedBytes
-              versionId = saved.id
-            } else
-              versionId = yield* keepVersion(
-                ctx,
-                env.userId,
-                full,
-                { bytes: before.bytes, inode: before.info.ino },
-                "agent"
-              )
+        const { written, versionId } = yield* writeWithVersion(
+          env.userId,
+          full,
+          top,
+          segments,
+          root.host === true,
+          before,
+          content,
+          "agent",
+          {
+            rolloutId: ctx.rolloutId,
+            toolCallId: ctx.toolCallId
           }
-          const written = yield* attempt(() =>
-            writeRegularFile(top, segments, content, {
-              createFolders: true,
-              expected,
-              ...(reservation
-                ? {
-                    stage: reservation.stage,
-                    committing: () => reservation.committing(content.byteLength, keptBytes),
-                    landed: (file) => {
-                      reservation.landed(file)
-                      committed = true
-                    }
-                  }
-                : {})
-            })
-          )
-          return { written, versionId }
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (!committed) {
-                reservation?.release()
-                quota?.wrote(env.userId, keptBytes)
-              }
-            })
-          ),
-          Effect.uninterruptible
         )
-        deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
         const effectKind = before ? (kind === "edit" ? "file.edit" : "file.write") : "file.create"
@@ -2161,12 +2191,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
             .editCardFile(current.bytes, changes)
             .pipe(Effect.mapError(() => new EffectUndoRefused({ message: "The card file couldn't be changed." })))
           if ("error" in edited) return yield* new EffectUndoRefused({ message: edited.error })
-          yield* keepVersion(null, env.userId, input.path, { bytes: current.bytes, inode: current.info.ino }, "restore")
-          deps.quota?.wrote(env.userId, current.bytes.byteLength)
           const next = Buffer.from(edited.bytes)
-          yield* attempt(() => writeRegularFile(env.filesRoot, segments, next))
-          deps.quota?.wrote(env.userId, next.byteLength)
-          deps.onChanged?.(env.userId, [input.path])
+          yield* writeWithVersion(
+            env.userId,
+            input.path,
+            env.filesRoot,
+            segments,
+            false,
+            { ...current, sha256: beforeHash, byteSize: current.bytes.byteLength },
+            next,
+            "restore",
+            null
+          ).pipe(
+            Effect.mapError((error) =>
+              error instanceof QuotaExceeded ? new EffectUndoRefused({ message: error.message }) : error
+            )
+          )
           const id = yield* input.record({
             before: beforeHash,
             after: sha256(next),

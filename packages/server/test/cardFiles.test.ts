@@ -7,7 +7,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { AttachedFile } from "@dreamspan/shared/files.ts"
-import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { cardChunk, json as jsonBytes, png, stCardV2 } from "./formats/support.ts"
@@ -282,6 +282,7 @@ describe("card files", () => {
         // Revert takes the field back in the file's own format, keeping the old file as a version;
         // Redo puts the change back (spec/WORKSHOP-CARDS.md §8.1).
         const key = { rolloutId: edit.rolloutId, toolCallId: edit.toolCallId, seq: edit.seq }
+        yield* api.GetFilesUsage({ fresh: true })
         const reverted = yield* api.RevertChange({ effects: [key] })
         assert.deepStrictEqual(reverted.fields, ['["description"]'])
         const was = readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!
@@ -290,6 +291,16 @@ describe("card files", () => {
         assert.strictEqual(was.doc.name, "Wren Hollow")
         const listed = (yield* api.ListVersionEffects({ versionId: id })).find((e) => e.kind === "file.edit")!
         assert.deepStrictEqual(listed.reversion?.fields, ['["description"]'])
+        const cached = yield* api.GetFilesUsage({})
+        const measured = yield* api.GetFilesUsage({ fresh: true })
+        assert.strictEqual(cached.usedBytes, measured.usedBytes)
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: 0 })
+        assert.strictEqual(yield* outcome(api.RedoChange({ reversalId: reverted.reversalId! })), "EffectUndoRefused")
+        assert.strictEqual(
+          readCardFile(yield* Effect.promise(() => readFile(onDisk)), defaultLimits)!.doc.description,
+          "A lighthouse keeper."
+        )
+        yield* api.SetFilesQuota({ userId: me.id, quotaBytes: null })
         const redone = yield* api.RedoChange({ reversalId: reverted.reversalId! })
         assert.deepStrictEqual(redone.fields, ['["description"]'])
         assert.strictEqual(
