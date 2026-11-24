@@ -6,7 +6,7 @@ import { toolDataBody, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
 import { Type } from "@earendil-works/pi-ai"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { isDeepStrictEqual } from "node:util"
-import type { PathEntry, SlotId, StoryAt } from "@dreamspan/shared/chat.ts"
+import type { StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
 import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Effect } from "effect"
 import { activeRunSummaries } from "../compaction.ts"
@@ -18,43 +18,10 @@ import { historyTools, safely } from "./history.ts"
 
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
-/** The path before the generating message, oldest first, by message number (from 1). */
-const pathEntries = (context: ToolContext) =>
-  Effect.suspend(() => {
-    const key = "run-path"
-    if (context.cache.has(key)) return Effect.succeed(context.cache.get(key) as ReadonlyMap<number, PathEntry>)
-    return Effect.gen(function* () {
-      const byNumber = new Map<number, PathEntry>()
-      if (context.leafSlotId === null) return byNumber
-      const entries: Array<PathEntry> = []
-      let older: SlotId | null = null
-      let first = true
-      while (first || older !== null) {
-        const window: { readonly entries: ReadonlyArray<PathEntry>; readonly older: SlotId | null } =
-          yield* context.reader.ReadPath({
-            userId: context.userId,
-            chatId: context.chatId,
-            forkId: context.forkId,
-            leafSlotId: context.leafSlotId,
-            range: first ? { _tag: "Bottom" } : { _tag: "Older", from: older! },
-            limit: 500
-          })
-        entries.unshift(...window.entries)
-        older = window.older
-        first = false
-      }
-      for (const entry of entries) byNumber.set((entry.position ?? entry.depth) + 1, entry)
-      context.cache.set(key, byNumber)
-      return byNumber as ReadonlyMap<number, PathEntry>
-    })
-  })
-
 /** One message's tool steps, numbered from 1, with their results, from its stored run. */
-const messageSteps = (context: ToolContext, entry: PathEntry) =>
+const messageSteps = (context: ToolContext, versionId: VersionId) =>
   Effect.gen(function* () {
-    const material = yield* context.reader
-      .RolloutMaterial({ userId: context.userId, versionId: entry.version.id })
-      .pipe(Effect.option)
+    const material = yield* context.reader.RolloutMaterial({ userId: context.userId, versionId }).pipe(Effect.option)
     if (material._tag === "None" || !material.value.transcript) return null
     const frozen = JSON.parse(material.value.snapshot) as {
       agent?: { tools: ReadonlyArray<FrozenTool> }
@@ -65,7 +32,7 @@ const messageSteps = (context: ToolContext, entry: PathEntry) =>
     return {
       storyAt: frozen.storyAt,
       storyStamp: frozen.storyStamp,
-      steps: placedSteps(transcript, frozen.agent?.tools ?? [], material.value.status !== "running", entry.version.id)
+      steps: placedSteps(transcript, frozen.agent?.tools ?? [], material.value.status !== "running", versionId)
         .flatMap(({ step }) => (step.kind === "tool" ? [step] : []))
         .map((step, at) => ({ ...step, n: at + 1 }))
     }
@@ -120,18 +87,27 @@ const readRun: RolloutTool<{
     safely(
       "read_run",
       Effect.gen(function* () {
-        const entry = message === 0 ? undefined : (yield* pathEntries(context)).get(message)
-        if (message !== 0 && (!entry || entry.contextExcluded))
+        const version =
+          message > 0 && Number.isSafeInteger(message) && context.leafSlotId !== null
+            ? yield* context.reader.ReadPathVersionAt({
+                userId: context.userId,
+                chatId: context.chatId,
+                forkId: context.forkId,
+                leafSlotId: context.leafSlotId,
+                position: message - 1
+              })
+            : null
+        if (message !== 0 && version === null)
           return { text: `Message ${message} isn't one of the earlier messages.`, isError: true }
         // A separate context's character reads only its own runs (spec/CHARACTER-CONTEXT.md §9.2). A
         // stretch view (spec/THREADS.md §7.3: the whole path with a character speaking) isn't one:
         // it filters only a separate join's stretch, and the workshops this tool is offered in have
         // no joins, as the history tools read a stretch view whole where no separate join is on it.
         if (
-          entry &&
+          version &&
           context.viewers !== null &&
           !context.viewers.includes(STRETCH_VIEW) &&
-          !context.viewers.includes(entry.version.speakerEntityId ?? "")
+          !context.viewers.includes(version.speakerEntityId ?? "")
         )
           return { text: `Message ${message}'s steps aren't yours to read.`, isError: true }
         const run =
@@ -145,8 +121,8 @@ const readRun: RolloutTool<{
                   .flatMap(({ step }) => (step.kind === "tool" ? [step] : []))
                   .map((step, at) => ({ ...step, n: at + 1 }))
               }
-            : entry
-              ? yield* messageSteps(context, entry)
+            : version
+              ? yield* messageSteps(context, version.id)
               : null
         if (run === null || run.steps.length === 0)
           return { text: `Message ${message} was written without tool calls.` }
@@ -205,7 +181,7 @@ const readRun: RolloutTool<{
                 context.userId,
                 context.chatId,
                 context.forkId,
-                entry?.version.id ?? context.rolloutId,
+                version?.id ?? context.rolloutId,
                 s.n,
                 s.id,
                 s.tool,

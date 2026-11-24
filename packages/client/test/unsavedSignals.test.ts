@@ -39,7 +39,7 @@ it("every delete's toast tells editors to read their entries again", () => {
   stops.push(onEntriesChanged(heard))
   useDeletedToast()({ id: "item", kind: "branch", title: "Branch", excerpt: "", origin: {} } as unknown as BinItem)
   expect(heard).toHaveBeenCalledTimes(1)
-  useDeletedManyToast()([{ id: "a", kind: "message", title: "A", excerpt: "", origin: {} } as unknown as BinItem])
+  useDeletedManyToast()([[{ id: "a", kind: "message", title: "A", excerpt: "", origin: {} } as unknown as BinItem]])
   expect(heard).toHaveBeenCalledTimes(2)
 })
 

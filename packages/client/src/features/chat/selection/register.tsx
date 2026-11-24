@@ -117,7 +117,7 @@ function SelectionBar({ session }: { view: ChatView; session: ChatSession }) {
     store.stop()
     const copies = ticked.flatMap((t) => t.copies)
     deleted(
-      result.value,
+      [result.value],
       copies.length === 0
         ? []
         : [
@@ -132,14 +132,15 @@ function SelectionBar({ session }: { view: ChatView; session: ChatSession }) {
   const deleteCopies = async (copies: ReadonlyArray<{ readonly slotId: SlotId; readonly forkId: ForkId }>) => {
     const byFork = new Map<ForkId, Array<SlotId>>()
     for (const copy of copies) byFork.set(copy.forkId, [...(byFork.get(copy.forkId) ?? []), copy.slotId])
-    const items: Array<BinItem> = []
+    const groups: Array<ReadonlyArray<BinItem>> = []
     let failed = 0
     for (const [fork, slotIds] of byFork) {
       const result = await session.deleteMessages(fork, slotIds)
-      if (result.ok) items.push(...result.value)
-      else failed += slotIds.length
+      if (result.ok) {
+        if (result.value.length > 0) groups.push(result.value)
+      } else failed += slotIds.length
     }
-    if (items.length > 0) deleted(items)
+    if (groups.length > 0) deleted(groups)
     if (failed > 0)
       showToast({
         title: `${plural(failed, "copy wasn't", "copies weren't")} deleted`,

@@ -164,6 +164,45 @@ const run = <A, E>(body: (dataDir: string) => Effect.Effect<A, E, Database.Write
 }
 
 describe("inserting messages in forks", () => {
+  it.live("looks up only the shown run version by position on a fixed path", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const { userId, chatId, main, reader, writer } = t
+        const a = yield* t.append(main, null, "a", "human")
+        const b = yield* t.append(main, a, "b", "human")
+        yield* t.append(main, b, "later")
+        const plain = yield* t.fork(main, b)
+        const x = yield* t.insert(main, a, "inserted")
+        const at = (forkId: ForkId, position: number) =>
+          reader.ReadPathVersionAt({ userId, chatId, forkId, leafSlotId: b, position })
+        const identity = (slotId: SlotId, forkId: ForkId) =>
+          Effect.map(t.entry(slotId, forkId), ({ version: { id, speakerEntityId } }) => ({ id, speakerEntityId }))
+
+        assert.deepStrictEqual(yield* at(main, 1), yield* identity(x, main))
+        assert.deepStrictEqual(yield* at(plain, 1), yield* identity(b, plain))
+        assert.isNull(yield* at(main, 3))
+        assert.isNull(yield* at(plain, 2))
+
+        const entry = yield* t.entry(b, main)
+        yield* writer.AmendVersion({
+          userId,
+          forkId: main,
+          versionId: entry.version.id,
+          content: "amended",
+          expectedRowVersion: entry.rowVersion
+        })
+        assert.notStrictEqual((yield* at(main, 2))?.id, entry.version.id)
+        assert.deepStrictEqual(yield* at(main, 2), yield* identity(b, main))
+        yield* writer.SetSlotHidden({ userId, forkId: main, slotId: x, hidden: true })
+        yield* writer.DeleteMessage({ userId, forkId: main, slotId: a })
+        assert.isNull(yield* at(main, 0))
+        assert.isNull(yield* at(main, 1))
+        assert.deepStrictEqual(yield* at(plain, 0), yield* identity(a, plain))
+      })
+    )
+  )
+
   it.live(
     "opens the fork through an Around target beyond an explicitly named leaf",
     () =>

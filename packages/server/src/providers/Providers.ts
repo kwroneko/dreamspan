@@ -2025,18 +2025,10 @@ export const layer = (options: ProvidersOptions = {}) =>
               // comments included.
               const idleS = prepared.settings.idleTimeoutS ?? DEFAULT_IDLE_TIMEOUT_S
               const idle = new AbortController()
-              let heardAt: number | null = prepared.kind.acceptsFetch ? null : Date.now()
+              let heardAt: number | null = null
               const heard = () => {
                 if (heardAt !== null) heardAt = Date.now()
               }
-              const watch = setInterval(
-                () => {
-                  if (heardAt === null || Date.now() - heardAt < idleS * 1000) return
-                  state.silentFor = idleS
-                  idle.abort()
-                },
-                Math.min(1000, idleS * 250)
-              )
               const observed: typeof fetch = async (input, init) => {
                 if (state.pendingIdentity) {
                   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
@@ -2151,6 +2143,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 terms.prefix
                   ? ({ ...piModel, compat: { ...piModel.compat, supportsMidConvoEffort: false } } as PiModel<Api>)
                   : piModel
+              if (!prepared.kind.acceptsFetch) heardAt = Date.now()
               const events = prepared.kind.streams.streamSimple(streamModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one. A
                 // kind with its own transport authorizes the request itself from the stored key,
@@ -2372,6 +2365,14 @@ export const layer = (options: ProvidersOptions = {}) =>
                   return final
                 }
               })
+              const watch = setInterval(
+                () => {
+                  if (heardAt === null || Date.now() - heardAt < idleS * 1000) return
+                  state.silentFor = idleS
+                  idle.abort()
+                },
+                Math.min(1000, idleS * 250)
+              )
               try {
                 for await (const event of events) {
                   heard()
