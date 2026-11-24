@@ -737,7 +737,7 @@ function TabStrip({
           // A mouse wheel scrolls the strip sideways, as an editor's tab bar does.
           if (event.deltaY !== 0 && event.deltaX === 0) event.currentTarget.scrollLeft += event.deltaY
         }}
-        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] hover:[scrollbar-width:thin]"
+        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] hover:[scrollbar-width:auto]"
       >
         {tabs.map((tab, index) => {
           const owner = frameOfTab(layout, tab.id)

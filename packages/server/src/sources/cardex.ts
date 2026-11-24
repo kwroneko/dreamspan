@@ -305,10 +305,22 @@ const FILTER_HELP: Record<string, string> = {
   any_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   not_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   picture: "The picture's SHA-256: 64 hexadecimal characters. Finds cards sharing that picture.",
-  added_after: "Cards cardex added on or after this day.",
+  added_after: "When this version of the card was added to cardex. Both dates count.",
   added_before: "Cards cardex added before this day.",
-  created_after: "Cards their creator made on or after this day, as far as cardex knows.",
-  created_before: "Cards their creator made before this day, as far as cardex knows."
+  created_after:
+    "When the card was first published, as far as cardex can tell: the site's own date, its first listing, an earlier version, or when cardex first saw it. Once a date is set, cards with no known date are left out.",
+  created_before: "Cards their creator made before this day, as far as cardex knows.",
+  // What each panel and checkbox explains behind its (i), as the archive's own page does.
+  author:
+    "By any of: cards by any of the creators you add. Not by any of: cards by none of them. A creator is one account on one site. The number beside a name is how many of their cards cardex has.",
+  source:
+    "The sites a card is listed on. Include: cards on any of the ticked sites. Exclude: cards on none of them. Chub verified and Chub recommended work when Chub is the only site included.",
+  kind: "Characters, only characters whose card has a lorebook (its own or one the site attaches), standalone lorebooks, or all of them.",
+  nsfw: "NSFW as marked by a site the card is listed on or, where the site doesn't say, by cardex's own check.",
+  exclude_forks: "Leaves out cards that one of their sites marks as a fork: a changed copy of another card.",
+  deleted_from_source: "Only cards deleted from every site they were listed on.",
+  deleted_from_any_source:
+    "Only cards deleted from at least one site they are listed on. With sites included, only deletions from those sites count."
 }
 /**
  * Where each criterion sits in the filter bar, modeled on the archive's public search page: one
@@ -383,6 +395,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       label: "Rating",
       kind: "choice",
       multi: false,
+      about: FILTER_HELP.nsfw!,
       options: ["exclude", "include", "only"]
         .filter((v) => ratings.includes(v))
         .map((value) => ({ value, label: RATING_LABELS[value]! }))
@@ -410,10 +423,10 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       min: 0,
       ...(typeof max === "number" ? { max } : {}),
       scaleMax: 100_000,
-      about: `cardex leaves out characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens unless you set a minimum.`
+      about: `About how many tokens of the model's context the card takes up (an estimate). Characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens are hidden by default, since most are stubs; lorebooks never are.`
     })
   }
-  if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Hide forks", kind: "toggle" })
+  if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Hide forks", kind: "toggle", about: FILTER_HELP.exclude_forks! })
   const sites = allowed("source")
   if (sites.length) {
     filters.push({
@@ -428,7 +441,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
           named.get("source")?.allowed_value_labels?.find((v) => v.value === value)?.label ??
           value
       })),
-      about: "Only cards cardex found on these sites."
+      about: FILTER_HELP.source!
     })
   }
   if (named.has("author")) {
@@ -437,7 +450,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       label: "Creator",
       kind: "text",
       suggestions: { kind: "creators", multiple: false },
-      about: "One creator's cards, written as site/name, for example chub/someone."
+      about: FILTER_HELP.author!
     })
   }
   // The remaining v1 criteria the bar places (PLACEMENT), as choices, text fields and switches.
@@ -471,7 +484,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
           ...common,
           kind: "choice",
           multi: false,
-          about: "Characters, lorebooks, or both. Unchosen: both.",
+          about: FILTER_HELP.kind!,
           options: options.map((value) => ({ value, label: KIND_LABELS[value]! }))
         })
     } else if (name === "has_cover") {
@@ -484,7 +497,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
           { value: "true", label: "With a cover" },
           { value: "false", label: "Any" }
         ],
-        about: "cardex hides characters without a cover by default. Any includes them too."
+        about: "Leaves out characters without a cover image. On by default; lorebooks are never left out."
       })
     } else if (type === "boolean") {
       filters.push({
@@ -495,7 +508,9 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
               requires: { filterId: "source", values: ["chub"], about: "Choose Chub as the only included site first." },
               about: "Available when Chub is the only site included."
             }
-          : {})
+          : FILTER_HELP[name]
+            ? { about: FILTER_HELP[name] }
+            : {})
       })
     } else if ((type === "list" || type === "enum") && allowed(name).length) {
       filters.push({

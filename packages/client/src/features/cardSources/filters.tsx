@@ -128,32 +128,40 @@ function useSuggestions(browse: SourceBrowse, kind: "tags" | "creators", prefix:
   }
 }
 
-/** A list's Retry, or More while there are more. */
-function MoreSuggestions({
-  suggestions,
-  kind
-}: {
-  suggestions: ReturnType<typeof useSuggestions>
-  kind: "tags" | "creators"
-}) {
-  return suggestions.problem ? (
-    <div className="text-sm text-muted">
-      {problemText("the archive", suggestions.problem)}{" "}
-      <Button variant="ghost" hint="Asks for these suggestions again." onClick={suggestions.retry}>
-        Retry
-      </Button>
+/**
+ * The end of a suggestion list: the next page loads as it scrolls into view (no More button),
+ * with Retry when a page failed.
+ */
+function LoadMore({ suggestions }: { suggestions: ReturnType<typeof useSuggestions> }) {
+  const sentinel = useRef<HTMLDivElement>(null)
+  const { next, loading, more } = suggestions
+  const moreRef = useRef(more)
+  useEffect(() => {
+    moreRef.current = more
+  })
+  useEffect(() => {
+    const node = sentinel.current
+    if (!node || !next || loading) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) moreRef.current()
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [next, loading])
+  if (suggestions.problem)
+    return (
+      <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted">
+        <span className="min-w-0">{problemText("the archive", suggestions.problem)}</span>
+        <Button variant="ghost" className="h-7 px-2" hint="Asks for these suggestions again." onClick={suggestions.retry}>
+          Retry
+        </Button>
+      </div>
+    )
+  return (
+    <div ref={sentinel} className="min-h-px px-2 text-xs text-muted">
+      {loading && next ? <span className="block py-1.5">Loading more…</span> : null}
     </div>
-  ) : suggestions.next ? (
-    <Button
-      variant="ghost"
-      className="h-7 self-start px-2 text-xs"
-      hint={`Shows more ${kind} matching what you typed.`}
-      disabled={suggestions.loading}
-      onClick={suggestions.more}
-    >
-      More {kind}
-    </Button>
-  ) : null
+  )
 }
 
 // ---- The tag field ----
@@ -378,15 +386,29 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
   }
   const targets = targetsOf(sets)
   const shown = open
+  const tagsAbout = [
+    "Cards with every tag you include and none you exclude. Enter or + includes; − or a leading - excludes.",
+    anyId ? "or makes tags alternatives: a card needs only one of the tags joined by or." : ""
+  ]
+    .filter(Boolean)
+    .join(" ")
   const list = (
     <div
       className={
         inline
           ? "flex min-w-0 flex-col gap-1"
-          : "absolute top-full right-0 left-0 z-20 mt-1 flex max-h-96 min-w-72 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-surface p-2 shadow-lg"
+          : "absolute top-full right-0 z-20 mt-1 flex max-h-96 w-80 max-w-[calc(100vw-2rem)] flex-col gap-1 overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface p-2 shadow-lg"
       }
       {...(inline ? {} : { "data-layout-overlay": "Tag suggestions float under the tag field" })}
     >
+      {!inline && (
+        <div className="flex items-center gap-1.5 px-2 pb-0.5 text-sm font-semibold">
+          Tags
+          <AboutHint heading="Tags" info>
+            {tagsAbout}
+          </AboutHint>
+        </div>
+      )}
       <ul aria-label="Suggested tags" className="flex min-w-0 flex-col">
         {suggestions.items.map((item) => (
           <TagRow
@@ -404,7 +426,7 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
       {tagText(text) !== "" && suggestions.items.length === 0 && !suggestions.loading && !suggestions.problem && (
         <p className="px-2 text-sm text-muted">No tags match</p>
       )}
-      <MoreSuggestions suggestions={suggestions} kind="tags" />
+      <LoadMore suggestions={suggestions} />
       <ChosenTags sets={sets} onRemove={(tag) => place(tag, null)} />
     </div>
   )
@@ -414,12 +436,7 @@ function TagInput({ browse, inline = false }: { browse: SourceBrowse; inline?: b
         label="Tags"
         labelHidden={!inline}
         aboutInfo
-        about={[
-          "Type to find a tag. Enter or + requires it; − or a leading - leaves it out.",
-          anyId ? "or makes it an alternative to a tag you required: cards with either count." : ""
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        about={tagsAbout}
       >
         <Input
           value={text}
@@ -547,10 +564,10 @@ const creatorIds = (caps: SourceCapabilities) => {
 const isDatePair = (panel: Panel) =>
   panel.filters.length === 2 && panel.filters.every((f) => f.kind === "text" && f.format === "date")
 
-/** A range as words: "≥ 300 tokens", "100–2,000 tokens", "Any tokens". */
+/** A range as words: "≥ 300 tokens", "100–2,000 tokens", "Any size". */
 const rangeWords = (min: number, max: number | undefined, unit: string) =>
   min === 0 && max === undefined
-    ? `Any ${unit}`.trim()
+    ? "Any size"
     : max === undefined
       ? `≥ ${count(min)} ${unit}`.trim()
       : min === 0
@@ -567,6 +584,9 @@ const dateWords = (word: string, from: string, until: string) =>
         : `${word} ${from} – ${until}`
 
 const handle = (identity: string) => identity.slice(identity.indexOf("/") + 1)
+/** Creators' names as the source lists them, by identity (site/id), once seen in the picker. */
+const creatorNames = new Map<string, string>()
+const creatorName = (identity: string) => creatorNames.get(identity) ?? handle(identity)
 
 /** The creators chosen and whether they're left out. */
 const creatorChoice = (caps: SourceCapabilities, filters: Filters) => {
@@ -630,7 +650,7 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
   }
 }
 
-/** Two dates, from and to, with Clear; each applies as soon as it's a whole date. */
+/** Two dates, from and to, as the archive's page has them; each applies as soon as it's a whole date. Clear once one is set. */
 function DatePanel({ panel, filters, set }: { panel: Panel; filters: Filters; set: SetFilters }) {
   const [from, until] = panel.filters as [SourceFilter, SourceFilter]
   const value = (f: SourceFilter) => {
@@ -650,9 +670,7 @@ function DatePanel({ panel, filters, set }: { panel: Panel; filters: Filters; se
               <span className="sr-only">{filter.label}</span>
             </>
           }
-          about={filter.about}
-          aboutLabel={filter.label}
-          className="min-w-0 flex-1"
+          className="w-40 min-w-0"
         >
           <Input
             type="date"
@@ -662,14 +680,15 @@ function DatePanel({ panel, filters, set }: { panel: Panel; filters: Filters; se
           />
         </Field>
       ))}
-      <IconButton
-        label="Clear the dates"
-        hint="Clears both dates."
-        icon="close"
-        disabled={!any}
-        className={`size-9! shrink-0 rounded-md border border-border ${any ? "" : "invisible"}`}
-        onClick={() => set({ [from.id]: undefined, [until.id]: undefined })}
-      />
+      {any && (
+        <IconButton
+          label="Clear the dates"
+          hint="Clears both dates."
+          icon="close"
+          className="size-9! shrink-0 rounded-md border border-border"
+          onClick={() => set({ [from.id]: undefined, [until.id]: undefined })}
+        />
+      )}
     </div>
   )
 }
@@ -700,11 +719,13 @@ const scaleOf = (top: number) => {
 function RangePanel({
   filter,
   browse,
-  set
+  set,
+  popover
 }: {
   filter: Extract<SourceFilter, { kind: "range" }>
   browse: SourceBrowse
   set: SetFilters
+  popover: boolean
 }) {
   const raw = browse.remote.filters[filter.id]
   const value = isRange(raw) ? raw : undefined
@@ -738,76 +759,67 @@ function RangePanel({
     write({ ...value, [side]: side === "min" && number === undefined && floor !== undefined ? 0 : number })
   }
   const atDefault = value === undefined
-  const resetLabel = atDefault
-    ? `The ${filter.label.toLowerCase()} range is the default`
-    : floor !== undefined || browse.caps?.hiddenByDefault?.some((d) => d.filterId === filter.id)
+  const resetLabel =
+    floor !== undefined || browse.caps?.hiddenByDefault?.some((d) => d.filterId === filter.id)
       ? `Reset the ${filter.label.toLowerCase()} range to the default`
-      : `Reset the ${filter.label.toLowerCase()} range`
+      : `Clear the ${filter.label.toLowerCase()} range`
+  // While a thumb is dragged, the fields follow it; an untouched end keeps its exact value.
+  const shownMin = drag && drag[0] !== committed[0] ? scale.valueAt(drag[0]) : min
+  const shownMax =
+    drag && drag[1] !== committed[1] ? (drag[1] >= STEPS ? undefined : scale.valueAt(drag[1])) : max
   return (
-    <div className="flex w-80 max-w-full flex-col gap-3" data-range-filter={filter.id}>
-      <div className="flex flex-col gap-1">
-        <RangeSlider
-          label={filter.label}
-          thumbLabels={[`Min ${unit}`.trim(), `Max ${unit}`.trim()]}
-          value={shown}
-          steps={STEPS}
-          valueText={text}
-          onValueChange={setDrag}
-          onValueCommitted={([a, b]) => {
-            setDrag(null)
-            if (a === committed[0] && b === committed[1]) return
-            // A thumb that didn't move keeps its exact value.
-            const low = a === committed[0] ? value?.min : scale.valueAt(a)
-            const high = b === committed[1] ? max : b >= STEPS ? undefined : scale.valueAt(b)
-            write({ min: low, max: high })
-          }}
-        />
-        <p aria-hidden="true" className="flex justify-between text-sm text-muted tabular-nums">
-          <span>{text(shown[0], 0)}</span>
-          <span>{text(shown[1], 1)}</span>
-        </p>
-      </div>
-      <div className="flex items-end gap-2">
-        <Field label={`Min ${unit}`.trim()} className="w-28">
+    <div className={`flex max-w-full flex-col gap-3 ${popover ? "w-80" : "w-full"}`} data-range-filter={filter.id}>
+      <RangeSlider
+        label={filter.label}
+        thumbLabels={[`Min ${unit}`.trim(), `Max ${unit}`.trim()]}
+        value={shown}
+        steps={STEPS}
+        valueText={text}
+        onValueChange={setDrag}
+        onValueCommitted={([a, b]) => {
+          setDrag(null)
+          if (a === committed[0] && b === committed[1]) return
+          // A thumb that didn't move keeps its exact value.
+          const low = a === committed[0] ? value?.min : scale.valueAt(a)
+          const high = b === committed[1] ? max : b >= STEPS ? undefined : scale.valueAt(b)
+          write({ min: low, max: high })
+        }}
+      />
+      <div className="flex items-center gap-2">
+        <Field label={`Min ${unit}`.trim()} labelHidden className="min-w-0 flex-1">
           <Input
             type="number"
             inputMode="numeric"
             min={0}
-            value={String(min)}
+            className="max-w-none!"
+            placeholder="0"
+            value={String(shownMin)}
             onChange={(e) => typed("min", e.currentTarget.value)}
           />
         </Field>
-        <Field label={`Max ${unit}`.trim()} className="w-28">
+        <span aria-hidden="true" className="text-muted">
+          –
+        </span>
+        <Field label={`Max ${unit}`.trim()} labelHidden className="min-w-0 flex-1">
           <Input
             type="number"
             inputMode="numeric"
             min={0}
-            value={max === undefined ? "" : String(max)}
+            className="max-w-none!"
+            placeholder="No max"
+            value={shownMax === undefined ? "" : String(shownMax)}
             onChange={(e) => typed("max", e.currentTarget.value)}
           />
         </Field>
-        <IconButton
-          label={`Clear the ${filter.label.toLowerCase()} range`}
-          hint={`Any ${unit || "value"}: no minimum, no maximum.`}
-          icon="close"
-          disabled={min === 0 && max === undefined}
-          className={`size-9! shrink-0 rounded-md border border-border ${min === 0 && max === undefined ? "invisible" : ""}`}
-          onClick={() =>
-            write(
-              floor !== undefined || browse.caps?.hiddenByDefault?.some((d) => d.filterId === filter.id)
-                ? { min: 0 }
-                : undefined
-            )
-          }
-        />
-        <IconButton
-          label={resetLabel}
-          hint={resetLabel}
-          icon="undo"
-          disabled={atDefault}
-          className="size-9! shrink-0 rounded-md border border-border disabled:opacity-40"
-          onClick={() => write(undefined)}
-        />
+        {!atDefault && (
+          <IconButton
+            label={resetLabel}
+            hint={resetLabel}
+            icon="undo"
+            className="size-9! shrink-0 rounded-md border border-border"
+            onClick={() => write(undefined)}
+          />
+        )}
       </div>
     </div>
   )
@@ -849,11 +861,20 @@ function ChoicePanel({
         onValueChange={(next) =>
           set({ [filter.id]: next === first && !(ratings?.filterId === filter.id) ? undefined : next })
         }
-        options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+        options={
+          ratings?.filterId === filter.id
+            ? // In the words of the panel's button ("NSFW included"), in the archive's order.
+              [...filter.options]
+                .sort((a, b) => RATING_ORDER.indexOf(a.value) - RATING_ORDER.indexOf(b.value))
+                .map((o) => ({ value: o.value, label: RATING_WORDS[o.value] ?? o.label }))
+            : filter.options.map((o) => ({ value: o.value, label: o.label }))
+        }
       />
     </div>
   )
 }
+const RATING_ORDER = ["include", "exclude", "only"]
+const RATING_WORDS: Record<string, string> = { include: "Show NSFW", exclude: "Hide NSFW", only: "Only NSFW" }
 
 /** Several choices: checkboxes. */
 function ChecksPanel({
@@ -887,7 +908,6 @@ function ChecksPanel({
 
 /** A list of options, included or excluded as a whole (Include / Exclude above), and the panel's switches. */
 function IncludeExcludePanel({ panel, browse, set }: { panel: Panel; browse: SourceBrowse; set: SetFilters }) {
-  const id = useId()
   const filter = panel.filters[0] as Extract<SourceFilter, { kind: "choice" }>
   const exclude = panel.filters.find((f) => f.id === filter.excludeId)!
   const filters = browse.remote.filters
@@ -907,20 +927,37 @@ function IncludeExcludePanel({ panel, browse, set }: { panel: Panel; browse: Sou
   return (
     <fieldset className="flex flex-col gap-3" data-filter-list={filter.id}>
       <legend className="sr-only">{panel.title}</legend>
-      <GroupHeading id={id}>{`${panel.title} mode`}</GroupHeading>
-      <RadioGroup
-        aria-labelledby={id}
-        value={mode}
-        onValueChange={(next) => {
-          setPicked(next)
-          if (chosen.length) writeList(next, chosen)
-        }}
-        options={[
-          { value: "include", label: "Include", hint: `Only cards on the ${panel.title.toLowerCase()} ticked.` },
-          { value: "exclude", label: "Exclude", hint: `Leaves out cards on the ${panel.title.toLowerCase()} ticked.` }
-        ]}
-      />
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <Segmented
+          label="Include or exclude"
+          inlineDescription={false}
+          value={mode}
+          onValueChange={(next) => {
+            setPicked(next)
+            if (chosen.length) writeList(next, chosen)
+          }}
+          options={[
+            { value: "include", label: "Include", description: "Only cards on the ticked sites." },
+            {
+              value: "exclude",
+              label: "Exclude",
+              description: "Leaves out cards on the ticked sites."
+            }
+          ]}
+        />
+        {chosen.length > 0 && (
+          <Tooltip label="Shows cards from every site.">
+            <button
+              type="button"
+              className="rounded-sm px-1 text-sm text-accent underline outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={() => writeList("include", [])}
+            >
+              All sites
+            </button>
+          </Tooltip>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2">
         {filter.options.map((o) => (
           <Checkbox
             key={o.value}
@@ -940,16 +977,6 @@ function IncludeExcludePanel({ panel, browse, set }: { panel: Panel; browse: Sou
             <ToggleBox key={t.id} filter={t} filters={filters} set={set} />
           ))}
         </div>
-      )}
-      {chosen.length > 0 && (
-        <Button
-          variant="ghost"
-          className="self-start"
-          hint="Shows cards from every site."
-          onClick={() => writeList("include", [])}
-        >
-          All sites
-        </Button>
       )}
     </fieldset>
   )
@@ -984,18 +1011,21 @@ function ToggleBox({ filter, filters, set }: { filter: SourceFilter; filters: Fi
   )
 }
 
-/** The creators the source lists, with their cards' counts: by any of them, or not by any of them. */
-function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters }) {
+/**
+ * The creators the source lists, with their cards' counts: by any of them, or not by any of
+ * them. One line per creator (name, site, count, a mark when chosen); a click chooses or drops
+ * it, and more load as the list scrolls. In a popover the list fills its width and scrolls under
+ * the field; in the sheet it grows in the sheet's own scroll.
+ */
+function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: SetFilters; popover: boolean }) {
   const caps = browse.caps!
   const c = caps.creators!
-  const id = useId()
   const filters = browse.remote.filters
   const current = creatorChoice(caps, filters)
   const [picked, setPicked] = useState<"by" | "not">("by")
   const mode = current.chosen.length ? current.mode : picked
   const chosen = current.chosen
   const [text, setText] = useState("")
-  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map())
   const suggestions = useSuggestions(browse, "creators", text.trim())
   const full = chosen.length >= 20
   const write = (next: "by" | "not", list: ReadonlyArray<string>) => {
@@ -1007,29 +1037,31 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
     else if (list.length && c.anyFilterId) patch[c.anyFilterId] = joinList(list)
     set(patch)
   }
-  const nameOf = (identity: string) => names.get(identity) ?? handle(identity)
+  const nameOf = creatorName
+  useEffect(() => {
+    for (const item of suggestions.items) creatorNames.set(item.value, item.label)
+  }, [suggestions.items])
   // A creator's site, named as the site picker names it.
   const siteName = (site: string) =>
     caps.filters.flatMap((f) => (f.kind === "choice" && f.excludeId ? f.options : [])).find((o) => o.value === site)
       ?.label ?? site
+  const tone = mode === "not" ? "text-danger" : "text-accent"
   return (
-    <div className="flex w-96 max-w-full min-h-0 flex-col gap-2" data-creator-picker>
+    <div className={`flex min-h-0 flex-col gap-2 ${popover ? "" : "w-full"}`} data-creator-picker>
       {c.excludeFilterId && (
-        <>
-          <GroupHeading id={id}>Creator mode</GroupHeading>
-          <RadioGroup
-            aria-labelledby={id}
-            value={mode}
-            onValueChange={(next) => {
-              setPicked(next)
-              if (chosen.length) write(next, chosen)
-            }}
-            options={[
-              { value: "by", label: "By any of", hint: "Only cards by one of the creators ticked." },
-              { value: "not", label: "Not by any of", hint: "Leaves out the cards of the creators ticked." }
-            ]}
-          />
-        </>
+        <Segmented
+          label="Creator mode"
+          inlineDescription={false}
+          value={mode}
+          onValueChange={(next) => {
+            setPicked(next)
+            if (chosen.length) write(next, chosen)
+          }}
+          options={[
+            { value: "by", label: "By any of", description: "Only cards by one of the creators chosen." },
+            { value: "not", label: "Not by any of", description: "Leaves out the cards of the creators chosen." }
+          ]}
+        />
       )}
       <Field label={mode === "not" ? "Creator to leave out" : "Add a creator"} labelHidden>
         <Input
@@ -1041,77 +1073,112 @@ function CreatorsPanel({ browse, set }: { browse: SourceBrowse; set: SetFilters 
           onChange={(event) => setText(event.currentTarget.value)}
         />
       </Field>
-      <ul aria-label="Creators" className="-mx-2 flex max-h-80 min-w-0 flex-col overflow-y-auto px-2">
+      <ul
+        aria-label="Creators"
+        // Name, site and count in columns shared by every row (a subgrid), the mark last.
+        className={`grid grid-cols-[minmax(0,1fr)_auto_auto_1rem] content-start gap-x-3 ${
+          popover
+            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${chosen.length ? "border-b" : "-mb-3"}`
+            : ""
+        }`}
+      >
         {suggestions.items.map((item) => {
           const on = chosen.includes(item.value)
           return (
-            // Name, site and count in columns, as a table of the source's creators.
-            <li key={item.value} className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 hover:bg-hover">
-              <div className="min-w-0 flex-1">
-                <Checkbox
-                  checked={on}
-                  disabled={!on && full}
-                  onCheckedChange={(next) => {
-                    setNames((m) => new Map(m).set(item.value, item.label))
-                    write(mode, next ? [...chosen, item.value] : chosen.filter((v) => v !== item.value))
-                  }}
+            <li key={item.value} className="col-span-4 grid grid-cols-subgrid">
+              <button
+                type="button"
+                aria-pressed={on}
+                disabled={!on && full}
+                onClick={() => {
+                  creatorNames.set(item.value, item.label)
+                  write(mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value])
+                }}
+                className={`col-span-4 grid h-8 grid-cols-subgrid items-center rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-[1.125rem]" : "px-3"}`}
+              >
+                <span
+                  className={`min-w-0 truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
                 >
-                  <span className="block truncate">{item.label}</span>
-                </Checkbox>
-              </div>
-              <span className="shrink-0 rounded border border-border px-1.5 text-xs leading-5 text-muted">
-                {siteName(item.value.slice(0, item.value.indexOf("/")))}
-              </span>
-              <span className="w-14 shrink-0 text-right text-xs leading-5 text-muted tabular-nums">
-                {item.count !== undefined ? count(item.count) : ""}
-              </span>
+                  {item.label}
+                </span>
+                <span className="justify-self-end rounded border border-border px-1.5 text-xs leading-5 text-muted">
+                  {siteName(item.value.slice(0, item.value.indexOf("/")))}
+                </span>
+                <span className="justify-self-end text-xs text-muted tabular-nums">
+                  {item.count !== undefined ? count(item.count) : ""}
+                </span>
+                <span aria-hidden="true" className={`inline-flex size-4 items-center justify-center ${tone}`}>
+                  {on && <Icon name={mode === "not" ? "minus" : "check"} />}
+                </span>
+              </button>
             </li>
           )
         })}
-      </ul>
-      <MoreSuggestions suggestions={suggestions} kind="creators" />
-      <ul
-        aria-label="Chosen creators"
-        data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
-        className="flex min-h-9 flex-wrap content-start items-start gap-1.5"
-      >
-        {chosen.length === 0 && <li className="flex h-7 items-center text-xs text-muted">No creator filter set</li>}
-        {chosen.map((identity) => (
-          <li
-            key={identity}
-            className={`${chipClass} ${mode === "not" ? "border-danger/60 text-danger" : "border-accent/60"}`}
-          >
-            <span className={`min-w-0 truncate ${mode === "not" ? "line-through decoration-1" : ""}`} title={identity}>
-              {nameOf(identity)}
-            </span>
-            <IconButton
-              label={`Remove ${nameOf(identity)}`}
-              hint="Takes this creator out of the filter."
-              icon="close"
-              className="size-6! shrink-0"
-              onClick={() =>
-                write(
-                  mode,
-                  chosen.filter((v) => v !== identity)
-                )
-              }
-            />
+        {!suggestions.loading && !suggestions.problem && suggestions.items.length === 0 && (
+          <li className="col-span-4 px-3 py-1.5 text-sm text-muted">
+            {text.trim() ? "No creators match" : "No creators listed"}
           </li>
-        ))}
+        )}
+        <li className="col-span-4">
+          <LoadMore suggestions={suggestions} />
+        </li>
       </ul>
-      {full && <p className="text-xs text-muted">At most 20 creators.</p>}
+      {chosen.length > 0 && (
+        <ul
+          aria-label="Chosen creators"
+          data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
+          className={`flex flex-wrap content-start items-start gap-1.5 ${popover ? "max-h-24 shrink-0 overflow-y-auto" : ""}`}
+        >
+          {chosen.map((identity) => (
+            <li
+              key={identity}
+              className={`${chipClass} ${mode === "not" ? "border-danger/60 text-danger" : "border-accent/60"}`}
+            >
+              <span
+                className={`min-w-0 truncate ${mode === "not" ? "line-through decoration-1" : ""}`}
+                title={identity}
+              >
+                {nameOf(identity)}
+              </span>
+              <IconButton
+                label={`Remove ${nameOf(identity)}`}
+                hint="Takes this creator out of the filter."
+                icon="close"
+                className="size-6! shrink-0"
+                onClick={() =>
+                  write(
+                    mode,
+                    chosen.filter((v) => v !== identity)
+                  )
+                }
+              />
+            </li>
+          ))}
+          {full && <li className="flex h-8 items-center text-xs text-muted">At most 20 creators.</li>}
+        </ul>
+      )}
     </div>
   )
 }
 
 /** A panel's controls: each panel has its own, as the archive's page has; nothing else renders. */
-function PanelBody({ panel, browse, set }: { panel: Panel; browse: SourceBrowse; set: SetFilters }) {
+function PanelBody({
+  panel,
+  browse,
+  set,
+  popover = false
+}: {
+  panel: Panel
+  browse: SourceBrowse
+  set: SetFilters
+  popover?: boolean
+}) {
   const caps = browse.caps!
   const filters = browse.remote.filters
   const first = panel.filters[0]!
   switch (panel.key) {
     case "Creators":
-      return creatorIds(caps).includes(first.id) ? <CreatorsPanel browse={browse} set={set} /> : null
+      return creatorIds(caps).includes(first.id) ? <CreatorsPanel browse={browse} set={set} popover={popover} /> : null
     case "Sites":
       return first.kind === "choice" && first.excludeId ? (
         <IncludeExcludePanel panel={panel} browse={browse} set={set} />
@@ -1124,7 +1191,7 @@ function PanelBody({ panel, browse, set }: { panel: Panel; browse: SourceBrowse;
         <ChoicePanel filter={first} filters={filters} set={set} browse={browse} />
       ) : null
     case "Tokens":
-      return first.kind === "range" ? <RangePanel filter={first} browse={browse} set={set} /> : null
+      return first.kind === "range" ? <RangePanel filter={first} browse={browse} set={set} popover={popover} /> : null
     case "Added":
     case "Created":
       return isDatePair(panel) ? <DatePanel panel={panel} filters={filters} set={set} /> : null
@@ -1139,20 +1206,39 @@ const panelAbout = (panel: Panel) => panel.filters.find((f) => f.about)?.about
 const panelName = (panel: Panel, summary: string) =>
   summary.startsWith(panel.title) ? summary : `${panel.title}: ${summary}`
 
+/** A summary under its panel's name, without the name again: "Any date", not "Added: any date". */
+const sheetSummary = (panel: Panel, summary: string) => {
+  if (!summary.startsWith(panel.title)) return summary
+  const rest = summary.slice(panel.title.length).replace(/^:?\s*/, "")
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
+}
+
 /** Wide: a button that says what's chosen; its controls open under it. */
 function PanelButton({ panel, browse, set }: { panel: Panel; browse: SourceBrowse; set: SetFilters }) {
   const [open, setOpen] = useState(false)
   const summary = summaryOf(browse, panel)
+  const about = panelAbout(panel)
+  const creators = creatorIds(browse.caps!).includes(panel.filters[0]!.id)
   return (
+    // As the archive's: the panel's name with its (i), then its controls; no close button (the
+    // trigger names it; Escape or a click outside closes it), as wide as the controls need.
     <Popover
       open={open}
       onOpenChange={setOpen}
       title={panel.title}
+      closeButton={false}
+      titleAside={
+        about && (
+          <AboutHint heading={panel.title} info>
+            {about}
+          </AboutHint>
+        )
+      }
       triggerLabel={panelName(panel, summary)}
-      hint={panelAbout(panel) ?? `Click to choose the ${panel.title.toLowerCase()}.`}
+      hint={about ?? summary}
       side="bottom"
       tall
-      wide={creatorIds(browse.caps!).includes(panel.filters[0]!.id)}
+      fit={!creators}
       triggerClassName={`${buttonClass("secondary")} max-w-full`}
       trigger={
         <span data-filter-panel={panel.key} className="truncate">
@@ -1160,9 +1246,13 @@ function PanelButton({ panel, browse, set }: { panel: Panel; browse: SourceBrows
         </span>
       }
     >
-      <div className="-m-2 min-h-0 overflow-y-auto p-2">
-        <PanelBody panel={panel} browse={browse} set={set} />
-      </div>
+      {creators ? (
+        <PanelBody panel={panel} browse={browse} set={set} popover />
+      ) : (
+        <div className="-m-2 min-h-0 overflow-y-auto p-2">
+          <PanelBody panel={panel} browse={browse} set={set} popover />
+        </div>
+      )}
     </Popover>
   )
 }
@@ -1191,7 +1281,7 @@ function Switches({
               checked={active.includes(hidden)}
               labelHelp={
                 <AboutHint heading={hidden.toggle!} info>
-                  {hidden.about}
+                  {filter.about ?? hidden.about}
                 </AboutHint>
               }
               onCheckedChange={(on) => set({ [filter.id]: on ? undefined : (hidden.off as SourceFilterValue) })}
@@ -1237,6 +1327,8 @@ function SearchOptions({
               open={open}
               onOpenChange={setOpen}
               title={filter.label}
+              closeButton={false}
+              fit
               triggerLabel={`${filter.label}: ${summary}`}
               hint={filter.about ?? "The parts of a card the words are looked for in."}
               side="bottom"
@@ -1322,7 +1414,7 @@ function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }
                     className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 text-left text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     <span className="min-w-0 truncate">
-                      {panel.title} <span className="font-normal text-muted">· {summaryOf(browse, panel)}</span>
+                      {panel.title} <span className="font-normal text-muted">· {sheetSummary(panel, summaryOf(browse, panel))}</span>
                     </span>
                     <Icon name="down" className={open ? "rotate-180" : ""} />
                   </button>
@@ -1361,20 +1453,10 @@ function FiltersSheet({ browse, set }: { browse: SourceBrowse; set: SetFilters }
   )
 }
 
-/** The filter bar (§3.2): always shown on a wide bar; on a narrow one its panels are in the Filters sheet. */
-export function SourceFiltersPanel({
-  browse,
-  id,
-  filtersButton = false
-}: {
-  browse: SourceBrowse
-  id: string
-  /** Show the Filters button on the bar's first row when narrow (where no other bar holds one). */
-  filtersButton?: boolean
-}) {
-  const caps = browse.caps
-  if (!caps) return null
-  const set: SetFilters = (patch) => {
+/** Writes a change to the source's filters (undefined takes one off). */
+const setterOf =
+  (browse: SourceBrowse): SetFilters =>
+  (patch) => {
     const next = { ...browse.remote.filters }
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) delete next[key]
@@ -1382,10 +1464,45 @@ export function SourceFiltersPanel({
     }
     browse.change({ filters: next })
   }
+
+/**
+ * Right after the search box, as on the archive's page: which parts the words are looked for
+ * in, how they're matched and its (i); on a narrow bar, then the Filters button.
+ */
+export function SourceSearchOptions({ browse, filtersId }: { browse: SourceBrowse; filtersId?: string | undefined }) {
+  const caps = browse.caps
+  if (!caps) return null
+  const { search } = layoutOf(caps)
+  if (search.length === 0 && filtersId === undefined) return null
+  return (
+    <div data-search-options className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+      <SearchOptions browse={browse} filters={search} set={setterOf(browse)} />
+      {filtersId !== undefined && <SourceFiltersButton browse={browse} panelId={filtersId} />}
+    </div>
+  )
+}
+
+/** The filter bar (§3.2): always shown on a wide bar; on a narrow one its panels are in the Filters sheet. */
+export function SourceFiltersPanel({
+  browse,
+  id,
+  filtersButton = false,
+  searchOptions = true
+}: {
+  browse: SourceBrowse
+  id: string
+  /** Show the Filters button on the bar's first row when narrow (where no other bar holds one). */
+  filtersButton?: boolean
+  /** Show the search's options as the bar's first row; off where they sit beside the search box. */
+  searchOptions?: boolean
+}) {
+  const caps = browse.caps
+  if (!caps) return null
+  const set = setterOf(browse)
   const { panels, switches, search } = layoutOf(caps)
   return (
-    <div id={id} data-filter-bar className="flex min-w-0 flex-col gap-2">
-      {(search.length > 0 || filtersButton) && (
+    <div id={id} data-filter-bar className="flex min-w-0 flex-col gap-2 empty:hidden">
+      {searchOptions && (search.length > 0 || filtersButton) && (
         <div data-search-options className="flex min-w-0 flex-wrap items-center gap-2">
           <SearchOptions browse={browse} filters={search} set={set} />
           {filtersButton && <SourceFiltersButton browse={browse} panelId={id} />}
@@ -1396,7 +1513,7 @@ export function SourceFiltersPanel({
           <PanelButton key={panel.key} panel={panel} browse={browse} set={set} />
         ))}
         {(caps.tags.include || caps.tags.exclude) && (
-          <div className="max-w-64 min-w-48 flex-1">
+          <div className="max-w-64 min-w-40 flex-1">
             <TagInput browse={browse} />
           </div>
         )}
@@ -1568,7 +1685,7 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
             change(patch)
           }}
         >
-          {mode === "not" ? `Not by ${handle(identity)}` : `By ${handle(identity)}`}
+          {mode === "not" ? `Not by ${creatorName(identity)}` : `By ${creatorName(identity)}`}
         </Chip>
       )
     for (const id of creators) done.add(id)
@@ -1625,7 +1742,9 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
               )
             }
           >
-            {`${filter.label}: ${values.map(label).join(", ")}`}
+            {caps.ratings?.filterId === filter.id && RATING_WORDS[String(value)]
+              ? RATING_WORDS[String(value)]
+              : `${filter.label}: ${values.map(label).join(", ")}`}
           </Chip>
         )
     } else if (filter.kind === "range" && isRange(value)) {
@@ -1684,18 +1803,20 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
   )
 }
 
-/** "1,000+ more cards are hidden (no cover or under 300 tokens). Show them": only when the defaults hid some. */
-export function SourceHiddenNote({ browse }: { browse: SourceBrowse }) {
+/**
+ * After the result count, on its line: "· 1,000+ more hidden (under 300 tokens or no cover).
+ * Show them", only when the defaults hid some.
+ */
+export function sourceHiddenNote(browse: SourceBrowse): ReactNode {
   const results = browse.results
   const active = browse.caps ? activeDefaults(browse) : []
   const hidden = results?.hidden ?? 0
   if (hidden <= 0 || active.length === 0) return null
   const reasons = active.map((d) => (d.min !== undefined ? `under ${count(d.min)} tokens` : "no cover"))
-  const one = hidden === 1 && !results?.hiddenCapped
   return (
-    <p data-source-hidden-note className="text-sm text-muted">
+    <span data-source-hidden-note>
       {count(hidden)}
-      {results?.hiddenCapped ? "+" : ""} more {one ? "card is" : "cards are"} hidden ({reasons.join(" or ")}).{" "}
+      {results?.hiddenCapped ? "+" : ""} more hidden ({reasons.join(" or ")}).{" "}
       <Tooltip label="Includes the cards the archive leaves out by default.">
         <button
           type="button"
@@ -1709,6 +1830,6 @@ export function SourceHiddenNote({ browse }: { browse: SourceBrowse }) {
           Show them
         </button>
       </Tooltip>
-    </p>
+    </span>
   )
 }

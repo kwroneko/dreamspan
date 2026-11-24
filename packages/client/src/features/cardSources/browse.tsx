@@ -14,7 +14,7 @@ import type {
 } from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -353,6 +353,7 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
       ) : (
         <Segmented
           label="Sort by"
+          inlineDescription={false}
           value={current?.id ?? null}
           onValueChange={(sort) => browse.change({ sort, reverse: false })}
           options={sorts.map((s) => ({
@@ -367,19 +368,29 @@ export function SourceSortControl({ browse, compact = false }: { browse: SourceB
   )
 }
 
-/** "N results · page X of Y": the pages loaded so far, of the archive's 48-card pages. */
-export function SourceResultLine({ browse }: { browse: SourceBrowse }) {
+/**
+ * "N results · page X of Y": the pages loaded so far, of the archive's 48-card pages; then, on
+ * the same line, `note` (what the source's defaults hid).
+ */
+export function SourceResultLine({ browse, note }: { browse: SourceBrowse; note?: ReactNode }) {
   const { results } = browse
   const total = totalLabel(results)
-  if (!results || total === null || results.total === 0) return null
-  const loaded = Math.max(1, Math.ceil(results.items.length / SOURCE_PAGE))
-  const pages = results.total === undefined ? null : Math.max(1, Math.ceil(results.total / SOURCE_PAGE))
+  const counted = results && total !== null && results.total !== 0
+  if (!counted && !note) return null
+  const loaded = results ? Math.max(1, Math.ceil(results.items.length / SOURCE_PAGE)) : 1
+  const pages = !results || results.total === undefined ? null : Math.max(1, Math.ceil(results.total / SOURCE_PAGE))
   return (
     <p data-source-result-line className="min-h-5 text-sm leading-5 text-muted">
-      {total} {total === "1" ? "result" : "results"}
-      {pages !== null &&
-        pages > 1 &&
-        ` · page ${numberFormat.format(loaded)} of ${numberFormat.format(pages)}${results.capped ? "+" : ""}`}
+      {counted && (
+        <>
+          {total} {total === "1" ? "result" : "results"}
+          {pages !== null &&
+            pages > 1 &&
+            ` · page ${numberFormat.format(loaded)} of ${numberFormat.format(pages)}${results.capped ? "+" : ""}`}
+        </>
+      )}
+      {counted && note ? " · " : null}
+      {note}
     </p>
   )
 }

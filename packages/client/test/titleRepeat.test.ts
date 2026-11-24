@@ -48,13 +48,10 @@ const NAMED = /(?:label|title|name|unit|group|param|heading|kind|id)\b/i
 const COUNT = /\.(?:length|size|total|count)\b|toLocaleString|\bcount\b/i
 
 /**
- * Generic labels left in the card archive's filter bar (features/cardSources/filters.tsx), which
- * job/cardexsearch4 is rebuilding and removes them from. Lower each count as they go and delete
- * the entry at zero: the check fails until it matches.
+ * Generic labels a file may still hold while it's being rebuilt, by file. Lower each count as
+ * they go and delete the entry at zero: the check fails until it matches. None now.
  */
-const PENDING: Record<string, number> = {
-  "client/src/features/cardSources/filters.tsx": 2
-}
+const PENDING: Record<string, number> = {}
 
 describe("generic labels built from names", () => {
   const found = files.flatMap((file) => {

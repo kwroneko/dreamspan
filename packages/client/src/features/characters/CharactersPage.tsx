@@ -12,7 +12,7 @@ import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx
 import { useHomeBrowse } from "./useHomeBrowse.ts"
 import type { HomeBrowse } from "./homeSearch.ts"
 import { SourceResultLine, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
-import { SourceChips, SourceFiltersPanel, SourceHiddenNote } from "../cardSources/filters.tsx"
+import { SourceChips, SourceFiltersPanel, sourceHiddenNote } from "../cardSources/filters.tsx"
 import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
@@ -62,25 +62,33 @@ function Home({ data }: { data: ShellLibrary }) {
         sortBy={browse.pinsSort}
         onSortChange={(pinsSort) => setBrowse({ pinsSort })}
       />
-      <CardGridControls
-        data={data}
-        browse={browse}
-        onChange={setBrowse}
-        search={search}
-        onSearch={(search) => setBrowse({ search })}
-        searchLabel="Search characters and groups"
-        sources={sources}
-        onSource={(id) => setBrowse({ source: id })}
-      />
+      {/* With a source shown, its controls are one block with one gap between rows, as the
+          archive's page has them: the tabs; the search with its options, and the sort; the
+          filters and the tag field; the checkboxes; what's in effect; the count with what the
+          defaults hid. The tabs stay in one place either way, so switching never remounts them. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <CardGridControls
+          data={data}
+          browse={browse}
+          onChange={setBrowse}
+          search={search}
+          onSearch={(search) => setBrowse({ search })}
+          searchLabel="Search characters and groups"
+          sources={sources}
+          onSource={(id) => setBrowse({ source: id })}
+          filtersId={source !== null ? "home-source-filters" : undefined}
+        />
+        {source !== null && (
+          <>
+            <SourceFiltersPanel browse={sources} id="home-source-filters" searchOptions={false} />
+            <SourceChips browse={sources} />
+            <SourceResultLine browse={sources} note={sourceHiddenNote(sources)} />
+          </>
+        )}
+      </div>
       {source !== null ? (
         // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
-        <>
-          <SourceFiltersPanel browse={sources} id="home-source-filters" filtersButton />
-          <SourceChips browse={sources} />
-          <SourceResultLine browse={sources} />
-          <SourceHiddenNote browse={sources} />
-          <SourceResults browse={sources} className={COLUMNS} />
-        </>
+        <SourceResults browse={sources} className={COLUMNS} />
       ) : (
         <LocalCards data={data} browse={browse} search={search} needle={needle} />
       )}
