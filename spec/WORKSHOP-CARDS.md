@@ -1,6 +1,6 @@
 # Workshop cards: a coding agent for cards
 
-**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Nothing here is built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13 lists the open questions.
+**Status**: Proposed, 2026-11-24 (job `workshopcardsspec`). Nothing here is built. A delta from master `89eb816f` (ARCHITECTURE §14.2–§14.3 and §14.6 "History", §5 "The workbench", §3.8 "Change markers in the timeline", §16 "Workshop chats, client", "Workshop setup tools and undo", "Workshop approvals and undo", "Workshop presets and lorebooks", "Workshop skills in every mode", "Workshop side chat", "Workshop context", §18 "Attachments of any type"; spec/WORKSHOP.md §3; spec/WORKSHOP-CONTEXT.md §4.3) and from reference-harness `latest` (`src/tools/character-card.ts`, `src/tools/side-effects.ts`, `src/tools/file.ts`, the per-agent `tools` and `mcp_servers` allowlists in `src/config/schema.ts`). The owner's statements of 2026-11-24 are recorded in DESIGN §7.7 as **[D]**; everything else here is **[P]** unless it quotes them. §13: no questions are open.
 
 The workshop already has most of the machinery a coding agent for cards needs: library read and write tools, an approval prompt inside the steps, per-workshop grants, an effects table with Undo, a Changes tab, immutable card revisions with History and field comparisons, and the workbench's kind-affinity opens. What it lacks is the part a coding agent's user relies on most: a way to hand it the thing to work on, a gate on what else it may look at, a visible record between turns of what it changed, a revert for one change that survives later edits, and git-like version tools for the agent itself.
 
@@ -11,7 +11,7 @@ The workshop already has most of the machinery a coding agent for cards needs: l
 | 1. A cardmaker card as the workshop's personality | The start card's Assistant choice, `/new/workshop?workshopCard=`, the Cast tab's Join/Leave | "New workshop with this card" in a card's ⋯ menu; the cardmaker's own text needs no prompt to be read |
 | 2. Attaching a card | Workshop attachments of files and images (paperclip, paste, drop) | The paperclip becomes a menu in workshops (Files, Cards, Lorebooks, Presets); card drags drop on the composer; "Work on in a workshop" in a card's ⋯ menu; an attached card is in view: read and changed without a prompt |
 | 3. Creating a card | `create_card`, `clone_card`, effects, Undo | The new card is in view for the rest of the workshop; a change row under the turn |
-| 4. Searching the library | `list_library`, `read_*`, all Always allowed | Library reads Ask first (as chats already do), per resource class, with three scopes: this reply, this workshop, always with this model |
+| 4. Searching the library | `list_library`, `read_*`, all Always allowed | Library reads Ask first (as chats already do), per resource class, with four answers: Allow, Allow in this chat, Allow always for the workshop's character, Allow always |
 | 5. Seeing what changed | Per-step Undo and Open inside the steps; the Changes tab | Change rows after each turn: the card's name opens it as it is now, its count opens a change view; both with the request inspector's open semantics |
 | 6. Undo | Undo restores the previous revision only while the head is still the assistant's | "Revert this change" as a new revision that keeps later edits (field by field, then by hunk), with conflicts shown |
 | 7. Version tools for the agent | `list_revisions`, `restore_revision` | `read_revision`, `diff_revisions`, `revert_change`, a `message` on every edit |
@@ -43,10 +43,10 @@ The workshop already has most of the machinery a coding agent for cards needs: l
 
 The assistant reads, and with `library.write` Allowed changes, without any prompt:
 
-1. **Its own cast**: its personality card and the workshop persona, whose text the request already carries.
+1. **Its own cast**: its personality card and the workshop persona, whose text the request already carries. **[D]** It may edit its own personality card without it being attached: asked "May the assistant change its own personality card without it being attached?", the owner answered "Yes" (2026-11-24).
 2. **What the user attached** on a message on the reply's path before it (§4). Attachment is per branch and causal: a branch made before the attaching message doesn't have it; a swipe of a later reply keeps it.
 3. **What this workshop made**: items created by runs on the path whose creation isn't undone (§5), and clones it made.
-4. **The story beside a side workshop**, as built (its `chats.read` grant), and see §13 question 4 for that story's cast.
+4. **The story beside a side workshop**: its messages, as built (its `chats.read` grant), and **[D]** that story's cast cards and lorebooks (its chat's books and its cards' own books), read and edited without asking: asked "Is a story's cast in view for the workshop beside it?", the owner answered "Yes" (2026-11-24). The cast is the story's cast at the paired branch's position the reply reads (WORKSHOP-BRANCHES), so a card that joined later on another branch isn't in view.
 
 Owner [D]: "the whole point of attaching them is to have the agent be able to edit them or make new ones based on them." So attaching grants reading and editing at once; there is no separate "may edit" switch on an attachment.
 
@@ -77,21 +77,41 @@ Owner [D]: "whether the user needs to approve card changes individually. I'd say
 
 Owner [D]: "The user should not unexpectedly end up exposing information they don't want to to the agent. Different upstream models have different content policies. So prompts for accessing different things make sense. However, they should not be excessive because UX is imperative. Agents need to be able to work autonomously without users constantly approving prompts."
 
-So a class asks once and its answer covers the class, not the call. The prompt is the built `ApprovalPanel` in the call's step (the header badge says "Waiting for you"), with these words for `library.cards` searching for "lighthouse" on Claude Opus 5.5 through a connection named Anthropic:
+**[D] Not per model or connection** (owner, 2026-11-24): "This is ridiculous. I said content policies are a reason to allow/disallow this. But that's on the user. We're not going to base our permission model on it. No harness has permissions set per model, they're set per session or project." The prompt names no model or provider, and no answer is scoped to one.
+
+**[D] The scopes** (owner, 2026-11-24) are exactly "Allow", "Allow in this chat", "Allow always for [character]" and "Allow always": "So we have character card-scoped permissions. A character is effectively a specific (sub)agent, set up to do a specific task, so it makes sense as a permission boundary for reuse." [character] is the workshop's assistant card (its personality).
+
+So a class asks once and its answer covers the class, not the call. The prompt is the built `ApprovalPanel` in the call's step (the header badge says "Waiting for you"), with these words for `library.cards` searching for "lighthouse" in a workshop whose assistant is the card Quillwright **[P wording]**:
 
 > **Let the assistant look through your cards?**
-> It wants to search your characters and personas for “lighthouse”. What it finds is sent to **Claude Opus 5.5** (Anthropic), this workshop's model.
+> It wants to search your characters and personas for “lighthouse”, and to read what it finds.
 >
-> [Allow for this reply] [Allow in this workshop] [Always allow with Claude Opus 5.5] [Decline] · Add a note
+> [Allow] [Allow in this chat] [Allow always for Quillwright] [Allow always] [Decline] · Add a note
 
-- The title names the class in plain words ("look through your cards", "your lorebooks", "your presets", "your notes", "read your chats"). The first line says what this call does, from the server's `describe` of its real arguments ("search … for “lighthouse”", "open the card “Mara Quill”", "list your lorebooks").
-- **The content-policy concern** is the second line and nothing more: where it goes, named by model and connection, because the user can only judge a provider's rules if they know which provider it is. The model's name has a hover: "Each provider has its own rules about what it accepts. Cards you haven't attached reach it only if you allow this." No warning colour, no extra notice.
-- **Allow for this reply** (hover "Lets it look through your cards until this reply ends.") is the smallest scope, not one call: a search followed by three reads is one decision. Held in memory on the run and in the approval row (`scope: reply`); Resume of the same reply keeps it, a new reply doesn't.
-- **Allow in this workshop** (hover "Here, while it uses Claude Opus 5.5. Change it from the strip's “Can” chip.") writes `workshop_grants (chat, library.cards, target = <model key>, allow)`. The target binds it to the model the user saw named (§13 question 1). Switching the workshop to another model asks again at the next use.
-- **Always allow with Claude Opus 5.5** (hover "In every workshop that uses Claude Opus 5.5 on Anthropic. Take it back in Settings → Assistant tools.") writes an account setting, `workshop.standingGrants`, a list of `{ capability, connection, model }`, user-only: excluded from `change_setting` with every other grant (`operationExclusions`), so the agent can't give itself anything.
+- The title names the class in plain words ("look through your cards", "your lorebooks", "your presets", "your notes", "read your chats"). The line under it says what this call does, from the server's `describe` of its real arguments ("search … for “lighthouse”", "open the card “Mara Quill”", "list your lorebooks").
+- **Allow** (hover "Lets it look through your cards until this reply ends.") is the smallest scope, not one call: a search followed by three reads is one decision. Held on the run and in the approval row (`scope: reply`); Resume of the same reply keeps it, a new reply doesn't.
+- **Allow in this chat** (hover "In this workshop, until you change it from the strip's “Can” chip.") writes `workshop_grants (chat, library.cards, target '', allow)`, the built per-workshop grant.
+- **Allow always for Quillwright** (hover "In every workshop whose assistant is Quillwright. Change it on Quillwright's Extra tab or in Settings → Assistant tools.") writes a card grant (§2.5).
+- **Allow always** (hover "In every workshop. Change it in Settings → Assistant tools.") writes an account grant (§2.5).
 - **Decline** returns "{{user}} declined letting you look through their cards. Ask them to attach the ones they want you to work on." with the note, if any. A decline isn't remembered: the next reply may ask again, once.
-- **Subagents** see only what their reply may see; a subagent on another model is covered by the built rule that allowing a subagent model is the consent for its connection (DESIGN §7.10 [P]), plus the class grant, which the parent's answer already made.
-- The capability chip lists the four new rows with Off / Ask first / Allowed. A standing grant shows in its row as "Allowed for Claude Opus 5.5 (always)". Settings → Assistant tools (built page, a sections slot) gains **What the assistant may look at**: each standing grant with its model, connection and Remove.
+- **Content policy** is the user's judgement (owner, above); the prompt says what will be read, which is what the user needs to make it. Nothing else is added.
+- **Subagents** see only what their reply may see: the reply's answers and grants cover them; their own type is not a character and holds no grants.
+- A workshop with no assistant card (the user left the cast) offers no "Allow always for …".
+
+### 2.5 Where the grants live and how they're taken back [P]
+
+**Resolution.** For each class the most specific choice wins: the workshop's own (the chip, or Allow in this chat), else the assistant card's, else the account's, else the default (Ask first). So choosing Ask first or Off in one workshop's chip holds there even under an Allow always, and "Use the default" in the chip goes back to what the card or account says.
+
+**Storage.** Neither grant is in the card's document: a card file can be exported, shared and imported, and import formats never carry capability grants (DESIGN §7.7 [P], ARCHITECTURE §14.3). Both are account settings in the settings registry, user-only (excluded from `change_setting` with every other grant, `operationExclusions`, so the agent can't give itself anything):
+
+- `workshop.cardGrants`: `{ [cardEntityId]: { [capability]: "allow" } }`. Keyed by the card's entity, so every revision and rename of Quillwright keeps it; a fork is a card of its own and starts without it (it's another agent, set up anew). A card in the bin keeps its grants until it's purged.
+- `workshop.alwaysGrants`: `{ [capability]: "allow" }`.
+
+**Where they're shown.**
+
+- **The capability chip** (built rows; the four new classes join them): a row's state says where it comes from: "Allowed (for Quillwright, always)", "Allowed (always)", "Allowed here", with the row's hover naming where to change it.
+- **The assistant card's own settings**: a `cardEditorSections` entry on the card editor's Extra tab, beside Skills (the slot that already holds the card's `extensions.dreamspan` skills, in both the side panel's and the full editor), titled **Allowed for this assistant**, shown only while the card has a grant: one row per class ("Look through your cards") with **Remove** and its hover ("Workshops with this assistant will ask again."). Nothing on cards without grants, so no blank section.
+- **Settings → Assistant tools** (built page, sections slot): a section **What the assistant may look at** listing the Allow always grants, then each card with grants (its name a link to the card, its classes), each with Remove. This is the one place to revoke an Allow always.
 
 ## 3. Flow 1: a cardmaker card as the workshop's personality
 
@@ -105,7 +125,7 @@ Owner [D]: "'About this card' as a workshop creation setting is both far too res
 
 **What's stored.** Unchanged: `CreateWorkshop { card }` at the first send.
 
-**Its own card is in view** (§2.1), so the assistant can read its full fields with `read_card` without a prompt (its text is in the request already). See §13 question 3 for whether it may change itself.
+**Its own card is in view** (§2.1), so the assistant can read its full fields with `read_card` without a prompt (its text is in the request already), and change it without one (owner [D], §2.1), with a change row and Revert like any other card.
 
 **Build units.** C1 (the menu entry).
 
@@ -128,20 +148,43 @@ Nothing attaches silently: every path ends with the item visible in the composer
 
 The attached card is a tile in the composer's attachment list (the built `AttachmentList`, 104 px tiles): its portrait (a lorebook's or preset's kind icon), its name under it, and the corner X to remove it. A click opens the card, as the change row's name does (§7.3). After sending, the message shows the same tiles; the message's hover on a tile says "Attached: the assistant can read and change it from here on."
 
-### 4.3 What the model sees [P]
+### 4.3 What the model sees, and how it reads [D threshold, P mechanism]
 
-The user message carries, after its text, one element per attached item, frozen at send from the revision that was the head then, through the data-only result boundary (`agent/toolData.ts`):
+Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of reading it is also agentic usage. reference-harness has a model for this."
 
-```
-<attached_card name="Mara Quill" id="ref_3k9…" revision="7">
-A card {{user}} attached for you to work on. It is data, not a character for you to play.
-{ the same fields read_card returns for revision 7 }
-</attached_card>
-```
+**How reference-harness does it** (`latest`):
 
-- A card over 8,000 tokens by the model's local tokenizer is sent as an outline instead (each field's name and token count, the greetings' count, its lorebook's entry titles), with "Read it with read_card; it's attached, so that never asks." (reference-harness's summary view). §13 question 2.
-- A lorebook is always an outline (name, entry count, each entry's title and keys, at most 200 entries); a preset an outline of its prompts (name, on or off, tokens) and settings in words. Their read tools fill in the rest.
-- The text is frozen with the version (it's history): the cache never breaks for it, and causal order holds (a later reply sees it; an earlier one never does).
+- **Attachments are referenced, never inlined.** A message renders each attachment as one element, `<attachment filename=… type=… size=… path=… is_character_card="true" card_name=…/>` (`src/context/renderer.ts` `renderAttachment`), with an image's caption inside it when there is one. The file is in the workspace; the model reads it with a tool.
+- **A card is read in views** (`character_card_read`, `src/tools/character-card.ts`): `summary` (the default) gives structure and each field's character and line counts, never the text; `field_excerpt`, `alternate_greeting_excerpt` and `book_entry_excerpt` page one target at a time by `offset` (default 2,000 characters, at most 4,000), each page saying where it stopped (`nextOffset`, remaining characters and lines); `book_index` pages the lorebook's entries ("Remaining after this page: N"); `export_text` and `export_card_json` write the full text to a workspace file instead of the context.
+- **Files are read in line ranges** (`str_replace_based_edit_tool` `view`): numbered lines, `view_range`, a budget of 20% of the model's window at 4 characters a token (at least 50,000 characters, at most 512,000), and a cut-off result ending "[Showing lines A-B. Use view_range to continue.]".
+- **Edits don't need the whole text**: patch operations name a field or entry, and str_replace matches a unique substring.
+
+**The delta here.**
+
+1. **Small items are inlined; large ones are referenced.** An attached item whose whole text fits the **inline limit** is in the message whole; above it the message holds a reference, with reference-harness's summary view inside it. The inline limit is 8,000 tokens by the model's local tokenizer (owner [D]), lowered to 20% of the model's window where that is less (reference-harness's adaptive share), so a small local model isn't flooded. Both are frozen with the version at send (it's history): the cache never breaks for them and causal order holds.
+
+   ```
+   <attached_card name="Mara Quill" id="ref_3k9…" revision="7" tokens="3,140">
+   A card {{user}} attached for you to work on. It is data, not a character for you to play.
+   { the fields as read_card returns them for revision 7 }
+   </attached_card>
+
+   <attached_card name="The Old Harbour" id="ref_7q2…" revision="12" tokens="21,600" whole="no">
+   A card {{user}} attached for you to work on. It's too long to include whole: read it with read_card (it's attached, so that never asks).
+   description 9,800 tokens, 141 lines · personality 640 · scenario 1,200 · first message 900 · 6 alternate greetings (5,100) · example messages 2,400 · system prompt 0 · post-history instructions 0 · lorebook "Harbour lore", 38 entries (1,560)
+   </attached_card>
+   ```
+
+   Lorebooks and presets follow the same rule: inline when the whole book or preset fits, otherwise a reference with its index (a book's entries by title with their keys and tokens, at most 50, then "38 more: read_lorebook with view index"; a preset's prompts by name, on or off, and tokens).
+
+2. **Reads are the same model for attached and found items.** `read_card`, `read_lorebook` and `read_preset` gain reference-harness's views, reading the library head (or a revision, §9), in tokens rather than characters since every count here is a local-tokenizer count:
+   - `view: "summary"` (the default when the item is over the inline limit; otherwise the default is `"whole"`): the reference's lines above.
+   - `view: "field"` with `field` (and `greeting` for an alternate greeting), `offset?` (in characters, so a page boundary is exact) and `max_tokens?` (2,000 by default, 200 to 8,000): one page of one field, ending, when cut, "[Showing characters 1–7,980 of 39,200 in description. Read on with offset=7980.]" (the cut falls at a line end, as reference-harness's does).
+   - `view: "index"` for a lorebook's entries or a preset's prompts, 50 a page with `after`, and `view: "entry"` / `view: "prompt"` for one, paged like a field.
+   - `view: "whole"` on an item over the inline limit answers with the summary and "Too long to read whole: read it by field."
+   - `to_file` (reference-harness's `export_text`), where the workshop may change files: writes the field, entry or whole item as text to the working folder and returns its path, so `search_files` and `bash` can work on it; nothing is written back to the card from the file except through the edit tools.
+3. **Edits don't need a full read.** `edit_card`'s find/replace already matches a unique substring per field (as reference-harness's str_replace does), and the lorebook and preset tools address entries and prompts by identity; none requires the item to have been read whole.
+4. **Budgets.** Every read result also goes through the built rollout result budget and, in long runs, the built elision of older results (re-readable with `read_run`).
 - **Changes outside the workshop.** When an item in view has a newer revision than the assistant last read or wrote, the next user message carries a tail line, once, like the working-folder note (files3): "Changed since you last saw it: Mara Quill (Description, by {{user}})."
 
 ### 4.4 What's stored [P]
@@ -171,9 +214,9 @@ A card {{user}} attached for you to work on. It is data, not a character for you
 
 **What the user does.** "Do I have anyone like Mara already?" with nothing attached.
 
-**What happens.** The assistant calls `list_library { kind: "card", query: "lighthouse keeper" }` (its definitions never changed). The class is Ask first, so the step waits with §2.4's prompt. Allow for this reply: the search runs, and the three `read_card` calls after it run without asking. Decline: the assistant is told to ask for an attachment, and says so.
+**What happens.** The assistant calls `list_library { kind: "card", query: "lighthouse keeper" }` (its definitions never changed). The class is Ask first, so the step waits with §2.4's prompt. Allow: the search runs, and the three `read_card` calls after it run without asking. Decline: the assistant is told to ask for an attachment, and says so.
 
-**What's stored.** The approval row (`tool_approvals`, built) with the answer and its scope; for the wider scopes the grant row or the standing setting (§2.4); nothing for a decline.
+**What's stored.** The approval row (`tool_approvals`, built) with the answer and its scope; for the wider scopes the workshop grant row, the card grant or the always grant (§2.5); nothing for a decline.
 
 **Build units.** C7 (classes, scopes, wording, Settings section).
 
@@ -272,7 +315,7 @@ The agent never labels a revision it didn't write (`SetRevisionMessage` stays th
 
 The same model, with their existing tools and diffs:
 
-- **Attach**: Lorebooks… and Presets… in the paperclip menu, drops of their library links, Work on in a workshop in their editors' More menus. An attached lorebook or preset is in view; the model gets an outline (§4.3).
+- **Attach**: Lorebooks… and Presets… in the paperclip menu, drops of their library links, Work on in a workshop in their editors' More menus. An attached lorebook or preset is in view; the model gets it whole up to the inline limit, else a reference with its index, and reads it in pages (§4.3).
 - **Classes**: `library.lorebooks` and `library.presets` Ask first, with their wording ("Let the assistant look through your lorebooks?").
 - **Change rows**: "Skerry Lore · 2 entries added, 1 changed", "Night preset · 2 prompts changed, Prefill off"; the change view splits by entry and prompt identity (built W7 diffs).
 - **Revert** per entry or prompt as a field (§8.1), on top of the built exact-document recipe; an entry or prompt the user deleted since is a conflict.
@@ -284,9 +327,10 @@ The same model, with their existing tools and diffs:
 |---|---|---|
 | An attached item on a message | `version_attachments` kind `library`, `ref_id`, `revision_id` | Additive migration |
 | An attached item in a draft | `composer_images` kind `library`, `ref_id` | The same migration |
-| A class grant for a workshop | `workshop_grants (chat, capability, target = model key)` | None (the `target` column exists) |
-| A reply-scoped answer | `tool_approvals` answer with `scope: reply`, held on the run | None (prompt JSON) |
-| A standing grant | Account setting `workshop.standingGrants`, user-only, excluded from `change_setting` | A registered setting |
+| Allow in this chat | `workshop_grants (chat, capability, target '', allow)` | None (built) |
+| Allow (this reply) | `tool_approvals` answer with `scope: reply`, held on the run | None (prompt JSON) |
+| Allow always for [character] | Account setting `workshop.cardGrants` keyed by card entity, user-only, excluded from `change_setting` | A registered setting |
+| Allow always | Account setting `workshop.alwaysGrants`, user-only, excluded from `change_setting` | A registered setting |
 | The four classes | `workshopCapabilities`, `capabilityDefaults` (Ask first) | Registry entries; `library.read` becomes an alias that existing grants map onto `library.cards` |
 | A revert | A revision (origin `user`, `origin_ref` the effect) and the effect's `undo_result_json` | None |
 | A revision message from the agent | `entity_revisions.message` | None |
@@ -296,12 +340,13 @@ The same model, with their existing tools and diffs:
 | Unit | What | Depends on |
 |---|---|---|
 | C1 | New workshop with this card in card menus | — |
-| C2 | `library` attachments: migration, writer validation (owned, live), assembly of the frozen element and outlines, in-view derivation, the "changed since" tail line | — |
+| C2 | `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary), in-view derivation (story cast and books included), the "changed since" tail line | — |
+| C2b | Paged reads: `view`, `offset`, `max_tokens`, indexes and `to_file` on `read_card`, `read_lorebook`, `read_preset` | — |
 | C3 | The paperclip menu in workshops, the multi-select card picker and the lorebook and preset pickers | C2 |
 | C4 | `CARD_DRAG` and library links dropped on a workshop composer | C2 |
 | C5 | Work on in a workshop (card, lorebook and preset menus; `workshopAttach`) | C2 |
 | C6 | Creations in view | C2 |
-| C7 | Resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, standing grants and their Settings section, the fixed instruction paragraph | C2, C6 |
+| C7 | Resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, card and always grants with their resolution, the card editor's Extra-tab section and the Settings section, the fixed instruction paragraph | C2, C6 |
 | C8 | Change rows, the change view tab kind, per-open affinity | — |
 | C9 | `read_revision`, `diff_revisions`, `revert_change`, `message`, the Versions skill | C10's merge |
 | C10 | Revert: field and hunk three-way, conflicts in the change view, Redo, Revert all, created-item bin asks, the tail line | C8 |
@@ -310,7 +355,4 @@ Every UI unit runs the layout audit at the owner's widths and both themes; C7 is
 
 ## 13. Open questions
 
-1. **"Always allow" and "Allow in this workshop": per model or per connection?** The prompt names both. Per model asks again when the user switches models; per connection doesn't, but one connection (a router) can reach providers with different rules. Example: allowed with Claude Opus 5.5 on a router connection, then switched to another vendor's model on the same router. **Recommendation:** per model (connection and model id), what the prompt names.
-2. **Does attaching put the whole card in the message?** Inline is one step faster and what "it shouldn't have to search it" suggests; a 20,000-token card in every attaching message is costly. **Recommendation:** the whole card up to 8,000 tokens, an outline above that, and lorebooks and presets always as outlines.
-3. **May the assistant change its own personality card without it being attached?** It's in view (its text is in the request), but a cardmaker that "improves" its own prompt mid-workshop may surprise the user. **Recommendation:** yes, as any card in view, with its change row and Revert; the user who doesn't want it says so.
-4. **Is a story's cast in view for the workshop beside it?** Its messages are already readable without a prompt (built grant); its cards' text isn't. Example: "tighten Wren's description" in a side workshop. **Recommendation:** yes: opening a workshop beside a story brings that story's cast cards and its own lorebooks into view, read and changed without a prompt.
+None. The four questions of the first draft were answered by the owner on 2026-11-24 and are recorded as [D] where they apply: grants are per chat, per assistant card or always, never per model or connection (§2.4); the 8,000-token inline limit with agentic paged reads on reference-harness's model (§4.3); the assistant may change its own personality card (§2.1); a workshop beside a story may read and change that story's cast and lorebooks (§2.1).
