@@ -312,6 +312,36 @@ describe("a pending chat's edges", () => {
     )
   )
 
+  it.live("a composer save retried after the sweep filed it is filed once (rev-dd4b #7)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        const save = {
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: "Saved, its answer lost."
+        }
+        // The save reaches the server; the tab never hears back, and the sweep files its text.
+        yield* api.SaveComposer(save)
+        assert.isTrue(yield* writer.SweepPendingChat({ userId, chatId: draft.id }))
+        assert.include(yield* recoveredTexts(api), save.content)
+        // Back online, the tab sends the same save again.
+        yield* api.SaveComposer(save)
+        assert.lengthOf(
+          (yield* recoveredTexts(api)).filter((text) => text === save.content),
+          1
+        )
+      })
+    )
+  )
+
   it.live("a character removed before the first send gains no chat", () =>
     run(
       Effect.gen(function* () {

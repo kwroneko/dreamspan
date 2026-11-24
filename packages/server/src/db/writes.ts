@@ -284,14 +284,14 @@ export const makeWriteHandlers = (bin: Bin) =>
       })
 
     /** Text for a draft that's gone, to recovered texts, unless that draft already filed the same text. */
-    const fileLate = (userId: UserId, key: DraftKey, content: string, label: string) =>
+    const fileLate = (userId: UserId, key: DraftKey, content: string, label: string, anyField = false) =>
       Effect.gen(function* () {
         if (content.trim() === "") return false
         // Any text filed from this draft before, not only the latest: a retry replayed after a
-        // newer save is filed once (rev-dd2 #7).
+        // newer save is filed once (rev-dd2 #7). `anyField`: under any field of its target.
         const [filed] = yield* sql<{ n: number }>`SELECT 1 AS n FROM recovered_texts
           WHERE user_id = ${userId} AND source_kind = ${key.targetKind} AND source_id = ${key.targetId}
-            AND source_field = ${key.field} AND content = ${content} LIMIT 1`
+            AND (${anyField ? 1 : 0} = 1 OR source_field = ${key.field}) AND content = ${content} LIMIT 1`
         if (filed !== undefined) return false
         yield* bin.recover(userId, key, [content], "discard", label)
         return true
@@ -323,7 +323,14 @@ export const makeWriteHandlers = (bin: Bin) =>
             WHERE chat_id = ${chatId} AND operation_id = ${operationId}`
           if ((done?.n ?? 0) > 0) return { draft: null, recovered: true, accepted: false }
           yield* sql`INSERT INTO swept_pending_saves (chat_id, operation_id) VALUES (${chatId}, ${operationId})`
-          yield* fileLate(userId, composerKey(chatId, null), content, swept.label)
+          // A pending chat has one fork, so one composer: what the sweep filed from it, under its
+          // fork's key, is this text too (a save that reached the server, its answer lost, retried
+          // after the sweep, rev-dd4b #7). Filed under that key, as the sweep filed the rest.
+          const [prior] = yield* sql<{ field: string }>`SELECT source_field AS field FROM recovered_texts
+            WHERE user_id = ${userId} AND source_kind = 'composer' AND source_id = ${chatId}
+            ORDER BY created_at LIMIT 1`
+          const key = composerKey(chatId, prior === undefined || prior.field === "" ? null : prior.field)
+          yield* fileLate(userId, key, content, swept.label, true)
           return { draft: null, recovered: content.trim() !== "", accepted: false }
         }
         return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next, operationId }, content)
