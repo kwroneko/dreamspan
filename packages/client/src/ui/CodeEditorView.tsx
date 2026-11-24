@@ -193,8 +193,15 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   let props = initial
   let applying = false
   let deferred: string | null = null
-  /** When a pointer last pressed in the text: that focus places its own caret. */
-  let pressedAt = Number.NEGATIVE_INFINITY
+  /** The active press in the text: its focus places its own caret. */
+  let pressed: number | null = null
+  const pointerEvents = new AbortController()
+  const releasePress = (event: PointerEvent) => {
+    if (event.pointerId === pressed) pressed = null
+  }
+  const pointerOptions = { capture: true, signal: pointerEvents.signal }
+  host.ownerDocument.addEventListener("pointerup", releasePress, pointerOptions)
+  host.ownerDocument.addEventListener("pointercancel", releasePress, pointerOptions)
   const attributes = () => [
     EditorState.readOnly.of(props.readOnly ?? false),
     EditorView.contentAttributes.of({
@@ -237,8 +244,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           }
         }),
         EditorView.domEventHandlers({
-          pointerdown: () => {
-            pressedAt = performance.now()
+          pointerdown: (event) => {
+            pressed = event.pointerId
           },
           // Focus that isn't a press in the text (Tab, a command, a closing dialog, the panel focus
           // guard) keeps the editor's caret and selection, as a textarea's does. The browser keeps
@@ -246,7 +253,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
           // them) and places one at a line's start, which typing would then go to: the editor's
           // own focus writes its selection back. A press places the caret itself.
           focus: (_event, editor) => {
-            if (performance.now() - pressedAt > 500) editor.focus()
+            if (pressed === null) editor.focus()
+            pressed = null
           },
           blur: () => {
             props.onBlur?.()
@@ -434,6 +442,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
+      pointerEvents.abort()
       releaseCaret()
       extensionVersion++
       language = "\0gone" // A mode still loading isn't applied to a destroyed view.

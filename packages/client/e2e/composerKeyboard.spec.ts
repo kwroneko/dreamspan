@@ -60,6 +60,29 @@ test("composer undo belongs to the branch draft where the text was typed", async
   expect((await admin((api) => api.OpenComposer({ chatId: chat.id, forkId: fork.id }))).content).toBe("abcdef")
 })
 
+test("quick guidance toggles keep the selection when focus returns to the composer", async ({ page }) => {
+  const chat = await admin((api) => api.CreateChat({ title: "Composer selection" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const box = page.getByTestId("composer")
+  const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+  await expect(toggle).toBeEnabled()
+  await box.fill("Selected draft text")
+  await box.press("ControlOrMeta+a")
+  await box.evaluate(async (editor) => {
+    const toggle = document.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Guidance"]')!
+    for (const type of ["pointerdown", "pointerup"])
+      editor.dispatchEvent(new PointerEvent(type, { bubbles: true, composed: true, pointerId: 1 }))
+    toggle.focus()
+    toggle.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    editor.focus()
+  })
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await page.keyboard.insertText("Replacement")
+  await expectTextBox(box, "Replacement")
+})
+
 const setup = (human = false) =>
   admin((api) =>
     Effect.gen(function* () {
