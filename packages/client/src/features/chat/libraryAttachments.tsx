@@ -159,6 +159,8 @@ export function useComposerLibrary(
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** The draft whose items were read: before that, the send waits. */
+  const [loaded, setLoaded] = useState<string | null>(null)
   /** Handovers not on the server yet: the send waits for them (rev-dfu1 #5). */
   const [holding, setHolding] = useState(0)
   /** The last call's failure: refused (the item can't be attached) or not (try again). */
@@ -224,11 +226,17 @@ export function useComposerLibrary(
   useEffect(() => {
     if (!takes || draftId === null) return
     let live = true
-    void run(async () => {
-      const read = await call("GetComposerLibrary")
-      if (live) setReady(true)
-      return live ? read : null
-    })
+    // The items the draft holds, read until a read succeeds: until then a send would go
+    // without the ones attached before a reload, so it waits (rev-dd3 #6).
+    const read = async () => {
+      const items = await call("GetComposerLibrary")
+      if (!live) return null
+      setReady(true)
+      if (items === null) setTimeout(() => live && void run(read), HANDOVER_RETRY_MS)
+      else setLoaded(draftId)
+      return items
+    }
+    void run(read)
     if (early.current.length > 0) {
       const waiting = early.current
       const told = earlyDone.current
@@ -254,6 +262,8 @@ export function useComposerLibrary(
       return new Promise<boolean>((resolve) => earlyDone.current.push(resolve))
     }
     if (shown.current.length + fresh.length > MAX) {
+      // Refused: tried again it would only hold the send (rev-dd3 #7).
+      refused.current = true
       setError(`A message can carry at most ${MAX} cards, lorebooks and presets.`)
       return Promise.resolve(false)
     }
@@ -268,7 +278,7 @@ export function useComposerLibrary(
   return {
     items,
     ready,
-    busy: busy || holding > 0,
+    busy: busy || holding > 0 || (draftId !== null && loaded !== draftId),
     error,
     add: (added, hold = false) => {
       if (!hold) return addOnce(added)
