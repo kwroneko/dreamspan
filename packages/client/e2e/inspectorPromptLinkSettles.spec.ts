@@ -108,7 +108,7 @@ test.afterAll(async () => {
   await provider.stop()
 })
 
-/** The target's header top, from the top of the preset editor's scroll area, every frame for `ms`. */
+/** The target's header top, from the top of the pane that scrolls it, every frame for `ms`. */
 const tops = (page: Page, ms: number) =>
   page.evaluate(
     (ms) =>
@@ -117,7 +117,8 @@ const tops = (page: Page, ms: number) =>
         const until = performance.now() + ms
         const sample = () => {
           const block = document.querySelector<HTMLElement>('[data-prompt="nsfw"]')
-          const scroll = block?.closest<HTMLElement>("[data-preset-scroll]")
+          let scroll = block?.parentElement
+          while (scroll && !/auto|scroll/.test(getComputedStyle(scroll).overflowY)) scroll = scroll.parentElement
           seen.push(
             block && scroll ? block.getBoundingClientRect().top - scroll.getBoundingClientRect().top : Number.NaN
           )

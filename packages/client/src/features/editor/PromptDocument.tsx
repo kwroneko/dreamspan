@@ -770,6 +770,15 @@ function holdWhileSettling(scroll: HTMLElement, target: HTMLElement, align: () =
 }
 const USER_SCROLL = ["wheel", "touchstart", "pointerdown", "keydown"] as const
 
+/** The nearest ancestor that scrolls vertically (the library page's pane); null: none. */
+function scrollerOf(element: HTMLElement | null): HTMLElement | null {
+  for (let parent = element?.parentElement; parent; parent = parent.parentElement) {
+    const { overflowY } = getComputedStyle(parent)
+    if (overflowY === "auto" || overflowY === "scroll") return parent
+  }
+  return null
+}
+
 export function PromptDocument({
   store,
   context,
@@ -871,12 +880,13 @@ export function PromptDocument({
         })
         return
       }
-      const scroll = root.current?.closest<HTMLElement>("[data-preset-scroll]")
+      const scroll =
+        root.current?.closest<HTMLElement>("[data-preset-scroll]") ?? (column ? null : scrollerOf(root.current))
       if (scroll) {
         // The editors above it can still grow after this frame (a long prompt's text measuring
         // as it mounts), which pushed the target down and left the view mid-way through the
-        // prompt below (owner, 2026-11-24): its header is held at the top until the layout
-        // settles, unless the user scrolls first.
+        // prompt below (owner, 2026-11-24): its header is held at the top, under the toolbar,
+        // until the layout settles, unless the user scrolls first.
         const align = () => {
           const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
           const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - margin
