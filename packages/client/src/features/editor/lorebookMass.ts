@@ -7,7 +7,7 @@
 // "Isn't that how you would undo it if they didn't save themselves?"): Revert beside Save
 // undoes it and Save keeps it. No revision is cut for it, and its toast has no Undo of its own.
 import type { LorebookDoc, LorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
-import type { FieldPath } from "@dreamspan/shared/editing.ts"
+import { type FieldPath, textField } from "@dreamspan/shared/editing.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { entryPath } from "./lorebookTable.ts"
 import type { EditorStore } from "./store.ts"
@@ -50,6 +50,9 @@ export function applyMassChange(store: EditorStore, label: string, edits: Readon
     showToast({ title: "Nothing to change", description: "Every entry already has that." })
     return
   }
-  for (const edit of edits) store.setValue(edit.path, edit.value)
+  for (const edit of edits)
+    // An entry's own unsaved text in the field outranks a value: the change goes into it.
+    if (typeof edit.value === "string" && store.isDirty(textField(edit.path))) store.setText(edit.path, edit.value)
+    else store.setValue(edit.path, edit.value)
   showToast({ title: label, description: "Unsaved: Save keeps it, Revert undoes it." })
 }
