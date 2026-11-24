@@ -15,8 +15,9 @@ import {
   READ_RESULT,
   readResultTool
 } from "../src/agent/tools/mcp.ts"
-import { LOAD_SKILL, TOOL_SEARCH } from "../src/agent/toolLoading.ts"
-import type { RolloutTool } from "../src/agent/tools.ts"
+import { frozenOffer, LOAD_SKILL, TOOL_SEARCH } from "../src/agent/toolLoading.ts"
+import { frozenTool, type RolloutTool, type ToolContext } from "../src/agent/tools.ts"
+import { toolSearch } from "../src/agent/tools/loading.ts"
 import type { Reader } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 
@@ -113,6 +114,23 @@ describe("MCP deferred loading", () => {
         sent(result).filter((id) => !result.offer.deferred.has(id)),
         READ_RESULT
       )
+    })
+  )
+
+  it.effect("searching for a deferred story MCP tool also loads its result pager", () =>
+    Effect.gen(function* () {
+      const { offer, cardSkills } = yield* plan("rp", [connection("big", 2, "deferred")])
+      const context: Pick<ToolContext, "offer"> = {
+        offer: {
+          kind: "rp",
+          tools: frozenOffer(offer.tools, offer.deferred, frozenTool),
+          loaded: new Set(),
+          cardSkills
+        }
+      }
+      const result = yield* toolSearch.execute(context as ToolContext, { query: "select:mcp_big_t0" })
+      assert.sameMembers([...(result.loaded ?? [])], ["mcp_big_t0", READ_RESULT])
+      assert.include(result.text, READ_RESULT)
     })
   )
 

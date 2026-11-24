@@ -44,6 +44,7 @@ import {
   useSyncExternalStore
 } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
+import { beforeReply } from "./replyHooks.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -395,6 +396,7 @@ function Pending({
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
+          yield* Effect.promise(beforeReply)
           const started = yield* client("StartChat", {
             guidance,
             // The greeting card leads; a group's chat has all its characters, under its name.
