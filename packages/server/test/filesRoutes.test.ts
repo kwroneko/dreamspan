@@ -3,7 +3,7 @@
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { encodeText, type FolderListing, type TextFile } from "@dreamspan/shared/files.ts"
 import { Effect, Fiber } from "effect"
@@ -617,6 +617,53 @@ describe("file routes", () => {
       const cached = yield* api.GetFilesUsage({})
       const measured = yield* api.GetFilesUsage({ fresh: true })
       assert.strictEqual(cached.usedBytes, measured.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("a quota walk counts a staged upload only until the request is abandoned", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      assert.strictEqual((yield* upload("/files/warm.bin", "warm")).status, 200)
+      const root = join(config.dataDir, "files", (yield* api.Whoami()).id)
+      writeFileSync(join(root, ".ordinary.rp-tmp"), Buffer.alloc(10_000))
+      const baseline = yield* api.GetFilesUsage({ fresh: true })
+      assert.isAtLeast(baseline.filesBytes, 10_004)
+
+      const stop = new AbortController()
+      yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()))
+      const stream = new TransformStream<Uint8Array>()
+      const writer = stream.writable.getWriter()
+      const request = yield* Effect.forkChild(
+        Effect.exit(
+          call("/files/upload?path=/files/stalled.bin", {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: stream.readable,
+            duplex: "half",
+            signal: stop.signal
+          } as RequestInit)
+        )
+      )
+      const staged = () => readdirSync(root).find((name) => name.startsWith(".stalled.bin."))
+      const bytes = 600_000
+      yield* Effect.promise(() => writer.write(new Uint8Array(bytes)))
+      yield* eventually(() => {
+        const name = staged()
+        return name !== undefined && statSync(join(root, name)).size === bytes
+      })
+
+      const walked = yield* api.GetFilesUsage({ fresh: true })
+      assert.isBelow(walked.filesBytes, baseline.filesBytes + 4096)
+      const during = yield* api.GetFilesUsage({})
+      assert.strictEqual(during.usedBytes, walked.usedBytes + bytes)
+      stop.abort()
+      yield* Fiber.join(request)
+      yield* eventually(() => staged() === undefined)
+      const after = yield* api.GetFilesUsage({})
+      assert.strictEqual(after.usedBytes, during.usedBytes - bytes)
+      assert.strictEqual(after.measuredAt, during.measuredAt)
+      assert.strictEqual((yield* upload("/files/next.bin", "x".repeat(500_000))).status, 200)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 

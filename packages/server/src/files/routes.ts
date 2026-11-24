@@ -939,6 +939,7 @@ export const filesRoutes = Layer.unwrap(
       })
       const dir = yield* Effect.tryPromise(() => openFolder(root, parent, { create: true }))
       quota.wrote(userId, made * FOLDER_BYTES)
+      let cleanUpUpload: (() => Promise<void>) | undefined
       return yield* Effect.gen(function* () {
         let name = segments.at(-1)!
         const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
@@ -979,22 +980,29 @@ export const filesRoutes = Layer.unwrap(
             )
           )
         )
-        /** What the version of the replaced content takes: counted once it's kept, whatever follows. */
-        let keptBytes = 0
         const digest = createHash("sha256")
         let taken = 0
+        const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
         /** What the quota's room took for this upload: given back whole on failure. */
-        const held = quota.hold(userId)
-        let freeToken = 0
+        const held = quota.hold(userId, { temporaryName: temporary })
         const take = (bytes: number) => {
           const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
           if (more > 0 && !held.reserve(more, room.quotaBytes)) return false
           taken += bytes
           return true
         }
-        const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
-        const uploaded = yield* Effect.tryPromise(async () => {
+        let writing: Promise<Stats> | undefined
+        let ownsTemporary = false
+        let committed = false
+        cleanUpUpload = async () => {
+          if (committed) return
+          await writing?.catch(() => undefined)
+          if (ownsTemporary) await unlink(at(dir, temporary)).catch(() => undefined)
+          held.release()
+        }
+        const stream = async (signal: AbortSignal) => {
           const handle = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
+          ownsTemporary = true
           let received = 0
           let idle: NodeJS.Timeout | undefined
           // Out of room, the rest of the body is read and dropped (up to REFUSED_DRAIN_BYTES), so
@@ -1028,18 +1036,17 @@ export const filesRoutes = Layer.unwrap(
             const file = await handle.stat()
             // The write stream owns the handle: it syncs (`flush`) and closes it when done. With
             // `autoClose: false` the pipeline would wait for a close that never comes.
-            await pipeline(message, counter, handle.createWriteStream({ flush: true }))
+            await pipeline(message, counter, handle.createWriteStream({ flush: true }), { signal })
             if (refused) throw refused
             return file
           } catch (error) {
             await handle.close().catch(() => undefined)
-            await unlink(at(dir, temporary)).catch(() => undefined)
-            held.release()
             throw error
           } finally {
             clearTimeout(idle)
           }
-        })
+        }
+        const uploaded = yield* Effect.tryPromise((signal) => (writing = stream(signal)))
         // It lands under the path's lock (§8.2): the share is checked again, an editor save's base
         // is checked again just before the rename, and the content replaced is kept as a version
         // as it is at that moment. A name taken meanwhile (not replacing) is never written over.
@@ -1068,7 +1075,7 @@ export const filesRoutes = Layer.unwrap(
                 }
                 reserved += more
               }
-              keptBytes = yield* keepVersion(
+              const keptBytes = yield* keepVersion(
                 userId,
                 root,
                 target,
@@ -1076,12 +1083,13 @@ export const filesRoutes = Layer.unwrap(
                 base === null ? "upload" : "editor",
                 placed.actorId
               )
+              quota.wrote(userId, keptBytes)
             }
             yield* Effect.tryPromise(async () => {
               // What the new file takes is already counted as it arrived; the old one's bytes are
               // freed unless a version kept them (counted in keepVersion). Lowered before the
               // old file goes, so a measurement in between can only over-count.
-              freeToken = quota.freed(userId, reserved + replacedNow - taken)
+              const freeToken = quota.freed(userId, reserved + replacedNow - taken)
               try {
                 if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
                 else await renameNoReplace(at(dir, temporary), at(dir, name))
@@ -1090,21 +1098,12 @@ export const filesRoutes = Layer.unwrap(
                 throw error
               }
               held.landed(uploaded)
+              committed = true
             })
             return true
-          })
-        ).pipe(
-          Effect.tapError(() =>
-            Effect.promise(async () => {
-              await unlink(at(dir, temporary)).catch(() => undefined)
-              held.release()
-            })
-          ),
-          Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes)))
+          }).pipe(Effect.uninterruptible)
         )
         if (!landed) {
-          yield* Effect.promise(() => unlink(at(dir, temporary)).catch(() => undefined))
-          held.release()
           return HttpServerResponse.jsonUnsafe(
             { changed: true, message: "It changed since you opened it." },
             { status: 409 }
@@ -1116,7 +1115,14 @@ export const filesRoutes = Layer.unwrap(
           outcome,
           sha256: digest.digest("hex")
         } satisfies UploadOutcome)
-      }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(async () => {
+            await cleanUpUpload?.()
+            await dir.close()
+          })
+        )
+      )
     })
 
     const folder = Effect.gen(function* () {
@@ -1267,7 +1273,7 @@ export const filesRoutes = Layer.unwrap(
               const usage = yield* quota
                 .check(userId, adding, "attach files")
                 .pipe(Effect.mapError((error) => new Answer(507, error.message)))
-              const reservation = adding > 0 ? quota.hold(userId, true) : null
+              const reservation = adding > 0 ? quota.hold(userId, "outside-files") : null
               let landed = false
               return yield* Effect.gen(function* () {
                 if (reservation && !reservation.reserve(adding, usage.quotaBytes))
