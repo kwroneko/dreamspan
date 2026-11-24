@@ -39,7 +39,7 @@ import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
-import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
+import { guarded, insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
 import { unitName, unitPath } from "@dreamspan/shared/changeReversal.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
@@ -308,7 +308,8 @@ const createUndoer: Undoer = {
     })
 }
 // Older assistant revert recipes predate a flag that distinguishes them from other card edits.
-const assistantRevert = (effect: RolloutEffect) => effect.title.startsWith("Reverted a change to the ")
+const assistantRevert = (effect: RolloutEffect) =>
+  typeof effect.undo?.reversalId === "string" || effect.title.startsWith("Reverted a change to the ")
 
 const reviseUndoer: Undoer = {
   id: "library.revise",
@@ -316,10 +317,11 @@ const reviseUndoer: Undoer = {
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
+      const reverted = assistantRevert(effect)
       // Explicit user Undo restores the recorded document exactly, including its prior
       // approvals, and leaves active drafts alone. This is never tool-reachable approval.
       const change =
-        effect.undo!.exactDocument === true || assistantRevert(effect)
+        effect.undo!.exactDocument === true || reverted
           ? yield* ctx.ops.EditRef({
               userId: ctx.userId,
               refId: ref.id as RefId,
@@ -334,6 +336,8 @@ const reviseUndoer: Undoer = {
               revisionId: String(effect.undo!.before) as RevisionId,
               expectedRowVersion: ref.row_version
             })
+      if (reverted)
+        yield* recordAssistantRevertUndo(ctx.sql, ctx.userId, effect, ref.head_revision_id, change.ref.headRevisionId)
       return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
@@ -1215,7 +1219,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
-            yield* insertReversal(sql, {
+            const reversalId = yield* insertReversal(sql, {
               userId: input.userId,
               chatId,
               targetKind: "entity",
@@ -1248,6 +1252,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                           refId: before.id,
                           before: before.head_revision_id,
                           exactDocument: true,
+                          reversalId,
                           archivedAt: before.archived_at,
                           beforeRowVersion: before.row_version,
                           head: change.ref.headRevisionId,

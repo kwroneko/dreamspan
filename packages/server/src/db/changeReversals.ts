@@ -13,7 +13,8 @@ import {
   planReversal,
   type ReversalPatch,
   revertedFields,
-  type ReversalPlan
+  type ReversalPlan,
+  valuesOfUnits
 } from "@dreamspan/shared/changeReversal.ts"
 import {
   keepsRegexApproval,
@@ -216,6 +217,46 @@ const standingCoverage = (sql: SqlClient.SqlClient, record: ReversalRow, selecte
     const covered = new Set(chosen.flatMap((effect) => effect.fields))
     const fields = (JSON.parse(record.fields_json) as Array<string>).filter((field) => covered.has(field))
     return { fields, effects }
+  })
+
+/** Exact Undo of an assistant revert puts back any original edits the revert still covers. */
+export const recordAssistantRevertUndo = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  effect: RolloutEffect,
+  headBefore: string,
+  headAfter: string
+) =>
+  Effect.gen(function* () {
+    const undo = effect.undo!
+    const identity =
+      typeof undo.reversalId === "string"
+        ? sql`id = ${undo.reversalId}`
+        : sql`head_before = ${String(undo.before)} AND head_after = ${String(undo.head)}`
+    const [record] = yield* sql<ReversalRow>`SELECT * FROM change_reversals
+      WHERE user_id = ${userId} AND target_kind = 'entity' AND target_id = ${effect.targetId}
+        AND action = 'revert' AND ${identity}`
+    if (!record) return
+    const { fields, effects } = yield* standingCoverage(sql, record)
+    if (fields.length === 0) return
+    const lib = makeLibraryQueries(sql)
+    yield* insertReversal(sql, {
+      userId,
+      chatId: record.chat_id,
+      targetKind: "entity",
+      targetId: effect.targetId,
+      label: record.label,
+      action: "redo",
+      reversesId: record.id,
+      headBefore,
+      headAfter,
+      plan: {
+        fields,
+        before: valuesOfUnits(yield* lib.loadDoc(headBefore), fields),
+        after: valuesOfUnits(yield* lib.loadDoc(headAfter), fields)
+      },
+      effects
+    })
   })
 
 /** The approvals a revert never gives (as a restored revision, editorWrites.ts `RestoreRevision`). */

@@ -97,6 +97,15 @@ const unitValue = (doc: unknown, key: string): unknown => {
   return at < 0 ? undefined : value[at]
 }
 
+/** The recorded value of each present unit in a document. */
+export const valuesOfUnits = (doc: unknown, fields: Iterable<string>) =>
+  Object.fromEntries(
+    [...fields].flatMap((field) => {
+      const value = unitValue(doc, field)
+      return value === undefined ? [] : [[field, value]]
+    })
+  )
+
 /**
  * `doc` with a field set (removed for undefined). An element that isn't in the list goes after
  * the one before it in `order` (the list as the value came from), else first.
@@ -248,18 +257,11 @@ export const planGroupedReversal = (
       )
     }
   }
-  const values = (source: Record<string, unknown>) =>
-    Object.fromEntries(
-      [...fields].flatMap((field) => {
-        const value = unitValue(source, field)
-        return value === undefined ? [] : [[field, value]]
-      })
-    )
   return {
     doc: conflicts.size > 0 ? null : doc,
     fields: [...fields].filter((field) => !conflicts.has(field)),
-    before: values(now),
-    after: values(doc),
+    before: valuesOfUnits(now, fields),
+    after: valuesOfUnits(doc, fields),
     conflicts: [...conflicts].map((field) => {
       const current = unitValue(now, field)
       const before = unitValue(doc, field)
