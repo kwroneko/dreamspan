@@ -100,7 +100,7 @@ export interface LibrarySteps {
     readonly source?: string
     readonly doc?: Doc
     readonly message?: string
-  }) => Sql<RefRow>
+  }) => Effect.Effect<RefRow, NotFound | RefOperationRefused | SqlError.SqlError>
   readonly checkReferences: (userId: string, doc: Doc) => Effect.Effect<void, NotFound | SqlError.SqlError>
 }
 

@@ -43,6 +43,7 @@ import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeLibraryReplaceWrites } from "./libraryReplaceWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
+import { replacementConflict } from "./noteReplacementWrites.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { type FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { recordCardArrival } from "./stArrival.ts"
@@ -335,12 +336,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       Effect.gen(function* () {
         const { ref } = options
         const source = options.source ?? ref.head_revision_id
+        const doc = options.doc ?? (yield* lib.loadDoc(source))
+        if (ref.kind === "note") {
+          const conflict = yield* replacementConflict(sql, options.userId, null, doc)
+          if (conflict) return yield* new RefOperationRefused({ refId: ref.id, reason: conflict })
+        }
         const fork = yield* createUpstream({
           userId: options.userId,
           kind: ref.kind,
           label: options.label,
           subtitle: options.subtitle,
-          doc: encode(options.doc ?? (yield* lib.loadDoc(source))),
+          doc: encode(doc),
           schemaVersion: (yield* revision(source)).schema_version,
           origin: "user",
           originRef: JSON.stringify({ forked: source }),

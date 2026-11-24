@@ -62,6 +62,27 @@ const setup = Effect.gen(function* () {
 })
 
 layer(serverLayer(testConfig()))("replacement writes", (it) => {
+  it.effect("refuses a second replacement from a note variant and allows a copy for a new card", () =>
+    Effect.gen(function* () {
+      const { api, card, draft } = yield* setup
+      const target = { kind: "card_field", field: "description" } as const
+      const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Original" })
+      yield* (yield* draft(note, target, null))()
+      const refused = yield* api
+        .ForkVariant({ refId: note.id, label: "Copy", subtitle: "", moveDrafts: false })
+        .pipe(Effect.flip)
+      assert.strictEqual(refused._tag, "EditRefused")
+      if (refused._tag === "EditRefused") assert.match(refused.message, /Only one note can replace this target/)
+      const fork = yield* api.ForkCard({ refId: card.id, name: "Mira variant", nickname: "", characterVersion: "" })
+      const [copy] = yield* api.ListCardNotes({ cardRefId: fork.id })
+      assert.deepStrictEqual(copy?.doc.owner, { card: fork.entityId })
+      assert.deepStrictEqual(copy?.doc.replaces, target)
+      assert.deepStrictEqual(
+        (yield* api.ListCardNotes({ cardRefId: card.id })).map((entry) => entry.ref.id),
+        [note.id]
+      )
+    })
+  )
   it.effect("serializes two tabs creating replacements, even while the first note is off", () =>
     Effect.gen(function* () {
       const { create, api, at } = yield* setup
