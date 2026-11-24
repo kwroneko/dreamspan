@@ -12,7 +12,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { memo, useEffect, useState, useSyncExternalStore } from "react"
 import { Button, LinkButton } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { tokenizerText, useTokenCounts } from "../editor/tokenCounts.ts"
+import { type CountModel, tokenizerText, useTokenCounts } from "../editor/tokenCounts.ts"
 import { useWorkbenchTab } from "../workbench/tab.tsx"
 import { compactTokens } from "./CacheIndicator.tsx"
 import { nextRequestHref, nextRequests } from "./nextRequest.ts"
@@ -45,7 +45,11 @@ export const ContextChip = memo(function ContextChip({
   const rested = useSyncExternalStore(typed.subscribe, typed.snapshot)
   // While a reply's guidance is edited the box makes a new version of it, not the next request.
   const text = editingGuidance ? "" : rested.trim()
-  const counted = useTokenCounts([text])
+  const model = view.history?.model
+  const choice = model
+    ? { connection: model.connection as CountModel["connection"], model: model.model as CountModel["model"] }
+    : undefined
+  const counted = useTokenCounts([choice ? text : ""], choice, true)
   const size = view.history?.size
   const budget = view.history?.budget ?? null
   const chatId = (view.chat?.id ?? null) as ChatId | null

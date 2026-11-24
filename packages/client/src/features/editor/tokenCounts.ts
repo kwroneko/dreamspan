@@ -32,7 +32,12 @@ const tokenizers = new Map<string, TokenizerInfo>()
 const inFlight = new Set<string>()
 /** A chat's own model, which counts instead of the account's (a message edited in that chat). */
 export type CountModel = typeof ModelChoice.Type
-let wanted: Array<{ readonly model: string; readonly text: string; readonly choice: CountModel | undefined }> = []
+let wanted: Array<{
+  readonly model: string
+  readonly text: string
+  readonly choice: CountModel | undefined
+  readonly localOnly: boolean
+}> = []
 let timer: ReturnType<typeof setTimeout> | null = null
 let version = 0
 const listeners = new Set<() => void>()
@@ -67,7 +72,11 @@ async function send(call: Caller) {
       const part = group.slice(at, at + COUNT_TOKENS_TEXTS)
       const choice = part[0]!.choice
       const result = await call((client) =>
-        client("CountTokens", { texts: part.map((w) => w.text), ...(choice ? { model: choice } : {}) })
+        client("CountTokens", {
+          texts: part.map((w) => w.text),
+          ...(choice ? { model: choice } : {}),
+          ...(part[0]!.localOnly ? { localOnly: true } : {})
+        })
       )
       for (const [i, w] of part.entries()) {
         inFlight.delete(key(w.model, w.text))
@@ -76,7 +85,7 @@ async function send(call: Caller) {
       if (result.ok && epoch === calibrationVersion) tokenizers.set(part[0]!.model, result.value.tokenizer)
     }
   if (epoch !== calibrationVersion) {
-    for (const w of batch) requestCounts(call, w.model, [w.text], w.choice)
+    for (const w of batch) requestCounts(call, w.model, [w.text], w.choice, w.localOnly)
   }
   changed()
 }
@@ -86,7 +95,8 @@ export function requestCounts(
   call: Caller,
   model: string,
   texts: ReadonlyArray<string>,
-  choice: CountModel | undefined = undefined
+  choice: CountModel | undefined = undefined,
+  localOnly = false
 ) {
   let added = false
   for (const text of texts) {
@@ -97,7 +107,7 @@ export function requestCounts(
       continue
     }
     inFlight.add(k)
-    wanted.push({ model, text, choice })
+    wanted.push({ model, text, choice, localOnly })
     added = true
   }
   if (added && timer === null) timer = setTimeout(() => void send(call), GATHER_MS)
@@ -116,15 +126,16 @@ const countingAtom = AppClient.query("GetTokenCounting", undefined, { reactivity
  * The model that counts (`given`, a chat's own, else the account's), and which connection counts
  * for it, as the cache's key: counts follow both.
  */
-const useModelKey = (given: CountModel | undefined) => {
+const useModelKey = (given: CountModel | undefined, localOnly: boolean) => {
   const defaults = useAtomValue(defaultsAtom)
   const counting = useAtomValue(countingAtom)
   const model = given ?? (AsyncResult.isSuccess(defaults) ? defaults.value.model : null)
-  const via =
-    AsyncResult.isSuccess(counting) && model !== null
-      ? counting.value.find((choice) => choice.connectionId === model.connection)?.via
-      : undefined
-  return model ? `${model.connection}/${model.model}/${via ?? "local"}` : "none"
+  if (model === null) return localOnly ? "none/local-only" : "none"
+  if (localOnly) return `${model.connection}/${model.model}/local-only`
+  const via = AsyncResult.isSuccess(counting)
+    ? counting.value.find((choice) => choice.connectionId === model.connection)?.via
+    : undefined
+  return `${model.connection}/${model.model}/${via ?? "local"}`
 }
 
 export interface TokenCounts {
@@ -140,9 +151,9 @@ export interface TokenCounts {
  * `texts`' token counts, counted once they rest (see the top of this file). `chatModel`: in a
  * chat with its own model, that model counts (the one its next reply uses); else the account's.
  */
-export function useTokenCounts(texts: ReadonlyArray<string>, chatModel?: CountModel): TokenCounts {
+export function useTokenCounts(texts: ReadonlyArray<string>, chatModel?: CountModel, localOnly = false): TokenCounts {
   const call = useCaller()
-  const model = useModelKey(chatModel)
+  const model = useModelKey(chatModel, localOnly)
   const joined = texts.join("\u0000")
   const id = useId()
   const [rested, setRested] = useState(texts)
@@ -154,7 +165,7 @@ export function useTokenCounts(texts: ReadonlyArray<string>, chatModel?: CountMo
   }, [joined])
   const restedJoined = rested.join("\u0000")
   useEffect(() => {
-    requestCounts(call, model, rested, chatModel)
+    requestCounts(call, model, rested, chatModel, localOnly)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rested texts, by value
   }, [call, model, restedJoined, calibrationVersion])
   const counted = rested.map((text) => (text === "" ? 0 : (cache.get(key(model, text)) ?? null)))

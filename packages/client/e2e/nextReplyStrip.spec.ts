@@ -229,13 +229,16 @@ test.describe("the strip", () => {
   })
 
   test("typing counts nothing until it pauses, then once", async ({ page }) => {
-    const counts: Array<string> = []
+    const effective = await admin((api) =>
+      Effect.map(api.GetNextContext({ chatId, leafSlotId: null }), (next) => next.model!)
+    )
+    const counts: Array<{ tag?: string; payload?: unknown }> = []
     await page.routeWebSocket(/\/rpc$/, (socket) => {
       const upstream = socket.connectToServer()
       socket.onMessage((data) => {
         if (typeof data === "string") {
-          const tag = (JSON.parse(data) as { tag?: string }).tag
-          if (tag === "CountTokens" || tag === "GetNextRequest") counts.push(tag)
+          const rpc = JSON.parse(data) as (typeof counts)[number]
+          if (rpc.tag === "CountTokens" || rpc.tag === "GetNextRequest") counts.push(rpc)
         }
         upstream.send(data)
       })
@@ -252,7 +255,16 @@ test.describe("the strip", () => {
     await expect.poll(() => counts.length, { timeout: 10_000 }).toBe(1)
     await expect.poll(() => chipTokens(page)).toBeGreaterThan(before)
     await page.waitForTimeout(2_000)
-    expect(counts).toEqual(["CountTokens"])
+    expect(counts).toMatchObject([
+      {
+        tag: "CountTokens",
+        payload: {
+          localOnly: true,
+          model: { connection: effective.connection, model: effective.model },
+          texts: [typed]
+        }
+      }
+    ])
     await contextChip(page).click()
     await expect(page.getByRole("list", { name: "Parts of the request" })).toContainText("Your message")
   })
