@@ -1,7 +1,7 @@
 // RPC handlers for the new-chat page's pending chat (@dreamspan/shared/draftChatApi.ts, DESIGN
 // §2.1): a real chat nothing lists until its first turn commits it (db/pendingChats.ts).
 import { CurrentUser } from "@dreamspan/shared/api.ts"
-import type { Chat, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { Chat, ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { DraftChatApi } from "@dreamspan/shared/draftChatApi.ts"
 import { startingPersona } from "@dreamspan/shared/personaLock.ts"
@@ -61,6 +61,18 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
           draftFor === "empty"
             ? ["empty", ""]
             : [draftFor.slice(0, draftFor.indexOf(":")), draftFor.slice(draftFor.indexOf(":") + 1)]
+        // A workshop beside a story (its Workshop tab), going with the story branch shown.
+        if (kind === "side") {
+          const [story = "", fork = ""] = of.split(":")
+          return given(
+            yield* writer.CreateWorkshop({
+              userId: id,
+              draftFor,
+              attachTo: story as ChatId,
+              ...(fork === "" ? {} : { attachFork: fork as ForkId })
+            })
+          )
+        }
         // A new workshop: made as the first send made it before, pending (spec/WORKSHOP-CARDS.md §3).
         if (kind === "workshop") {
           const [card = "", persona = ""] = of.split(":")

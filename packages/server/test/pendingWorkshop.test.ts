@@ -198,4 +198,38 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  it.live("a workshop beside a story is pending until its first message, and only then beside it", () =>
+    run(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const story = yield* api.CreateChat({ title: "Harbor" })
+        yield* api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "The tide turns." })
+        const fork = (yield* api.GetChat({ chatId: story.id })).currentForkId!
+        const beside = () => api.ListAttachedWorkshops({ chatId: story.id, forkId: fork })
+        const draft = yield* api.OpenDraftChat({ draftFor: `side:${story.id}:${fork}` })
+        assert.strictEqual(draft.status, "pending")
+        assert.strictEqual(draft.kind, "workshop")
+        assert.deepStrictEqual(yield* beside(), [])
+        // A reload reopens it.
+        assert.strictEqual(
+          (yield* api.OpenDraftChat({ draftFor: `side:${story.id}:${fork}`, reopen: draft.id })).id,
+          draft.id
+        )
+        yield* api.SendMessage({
+          chatId: draft.id,
+          parentSlotId: draft.activeLeafSlotId!,
+          branch: false,
+          content: "What happened at the harbor?"
+        })
+        const started = yield* api.GetChat({ chatId: draft.id })
+        assert.strictEqual(started.status, "active")
+        assert.strictEqual(started.title, "About Harbor")
+        assert.deepStrictEqual(
+          (yield* beside()).map((chat) => chat.id),
+          [draft.id]
+        )
+      })
+    )
+  )
 })

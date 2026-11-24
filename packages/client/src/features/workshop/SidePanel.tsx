@@ -39,13 +39,13 @@ import { KindBadge } from "../chat/KindBadge.tsx"
 import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
 import type { PanelProps } from "../chat/panels.tsx"
 import { ChatSurfaceProviders, chatComposer, chatComposerNotes, chatOverlays } from "../chat/presentation.tsx"
-import { ChatSession, type ChatView } from "../chat/session.ts"
+import { ChatSession, type ChatView, seedChat } from "../chat/session.ts"
 import { branchLabel, useChatForks } from "../chat/forks.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { PendingSideChat } from "./PendingWorkshop.tsx"
+import { PendingSideDraft, type SideDraftHost } from "./PendingSideDraft.tsx"
 import { pairedWith, useWorkshopBranches } from "./workshopBranches.tsx"
 import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
 import {
@@ -195,9 +195,28 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       <ReadingLine story={session} view={storyView} />
     </>
   )
-  // None yet, or a new one: its composer, ready; the first send makes it.
+  // None yet, or a new one: a pending workshop shown as a saved one is; its first send starts it.
   if (choice.shown === null)
-    return <PendingSideChat key="new" story={session} attachFork={storyFork} header={header} onCreated={onCreated} />
+    return (
+      <PendingSideDraft
+        key={`new ${storyFork ?? ""}`}
+        story={session.id}
+        storyFork={storyFork}
+        header={header}
+        onCreated={onCreated}
+        render={(chat, draft) => (
+          <SideChat
+            key={chat.id}
+            chat={chat}
+            storyFork={storyFork}
+            focusComposer={false}
+            header={header}
+            onGone={gone}
+            draft={draft}
+          />
+        )}
+      />
+    )
   return (
     <SideChat
       key={choice.shown.id}
@@ -314,7 +333,8 @@ function SideChat({
   storyFork,
   focusComposer,
   header,
-  onGone
+  onGone,
+  draft
 }: {
   chat: Chat
   /** The story branch shown: the workshop shows a branch of its own that goes with it. */
@@ -323,6 +343,8 @@ function SideChat({
   focusComposer: boolean
   header: ReactNode
   onGone: () => void
+  /** A workshop not started yet (PendingSideDraft): told when its first turn starts it. */
+  draft?: SideDraftHost
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
@@ -372,6 +394,7 @@ function SideChat({
       header={header}
       focusComposer={focusComposer}
       onGone={onGone}
+      draft={draft ?? null}
     />
   )
 }
@@ -383,7 +406,8 @@ function SideChatSurface({
   onFork,
   header,
   focusComposer,
-  onGone
+  onGone,
+  draft
 }: {
   session: ChatSession
   fork: ForkId
@@ -393,8 +417,27 @@ function SideChatSurface({
   header: ReactNode
   focusComposer: boolean
   onGone: () => void
+  draft: SideDraftHost | null
 }) {
   const view: ChatView = useSyncExternalStore(session.subscribe, session.snapshot)
+  // A new workshop's first turn started it: the tab shows it as any other, opening on what this
+  // shows, with no loading state in between.
+  const started = view.chat !== null && view.chat.status !== "pending"
+  useEffect(() => {
+    if (draft === null || !started) return
+    const now = session.snapshot()
+    if (now.chat === null) return
+    seedChat(now.chat.id, {
+      chat: now.chat,
+      forkId: now.forkId,
+      leafSlotId: now.leafSlotId,
+      entries: now.entries,
+      older: now.older,
+      newer: now.newer,
+      cast: now.cast
+    })
+    draft.onStarted(now.chat)
+  }, [draft, started, session])
   const open = useOpenOwn()
   const flashes = useRef<Flashes>({ opened: 0, repeat: null })
   const cast = useMemo(() => castView(view.cast), [view.cast])
@@ -407,8 +450,10 @@ function SideChatSurface({
     session.showFork(fork, null)
   }, [session, fork])
   useEffect(() => {
-    if (view.deleted) onGone()
-  }, [view.deleted, onGone])
+    if (!view.deleted) return
+    if (draft !== null) draft.onDeleted()
+    else onGone()
+  }, [view.deleted, onGone, draft])
   const [branchError, setBranchError] = useState<string | null>(null)
   const onBranch = useCallback(
     async (entry: PathEntry, index: number) => {
