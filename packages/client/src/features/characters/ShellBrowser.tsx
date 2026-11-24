@@ -44,7 +44,7 @@ import { SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
 import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
+import { characterChatActions, sidebarChatStarts, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading, LoadingProgress, PlaceholderBar } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -1275,18 +1275,25 @@ function Browser() {
           filtersId="side-source-filters"
         />
       )}
-      {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
-      {!grid && (scope.entity || scope.chat) && (
+      {/* Below every filter row, directly above the list it navigates. In All chats too, as where
+          you are, so the list starts at the same height in every scope (owner, 2026-11-24). */}
+      {!grid && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
-          <Tooltip label="Back to the list of all your chats.">
-            <button
-              type="button"
-              className="shrink-0 text-accent hover:underline"
-              onClick={() => setScope({ entity: null, chat: null })}
-            >
+          {kind === "all" ? (
+            <span aria-current="location" className="shrink-0 font-medium">
               All chats
-            </button>
-          </Tooltip>
+            </span>
+          ) : (
+            <Tooltip label="Back to the list of all your chats.">
+              <button
+                type="button"
+                className="shrink-0 text-accent hover:underline"
+                onClick={() => setScope({ entity: null, chat: null })}
+              >
+                All chats
+              </button>
+            </Tooltip>
+          )}
           {scope.entity && (
             <>
               <span aria-hidden className="shrink-0 text-muted">
@@ -1326,7 +1333,7 @@ function Browser() {
             </>
           )}
           {/* On the breadcrumbs' own line, so the rows don't move when it goes. */}
-          {forks.progress && (
+          {forks.progress && kind !== "all" && (
             <LoadingProgress
               noun={kind === "chat" ? "branches" : "chats"}
               ready={forks.progress.ready}
@@ -1402,6 +1409,12 @@ function Browser() {
           <div className="max-w-controls">
             {kind === "character" && card && (
               <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+            )}
+            {/* In the slot a character's New Roleplay has, as tall: side by side, stacked where they don't fit. */}
+            {kind === "all" && (
+              <div data-sidebar-starts className="mt-2 flex flex-wrap gap-2 empty:hidden">
+                <SlotOutlet slot={sidebarChatStarts} props={{}} />
+              </div>
             )}
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && data && (

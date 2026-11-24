@@ -50,14 +50,14 @@ for (const width of [390, 1440]) {
         return
       }
       await expect(panel.locator(`[data-chat-id="${group.chat.id}"]`)).toBeVisible()
-      const action = panel.getByRole("button", { name: `New chat with ${name}`, exact: true })
+      const action = panel.getByRole("button", { name: `New Roleplay with ${name}`, exact: true })
       await expect(action).toBeVisible()
       const findings = await expectLayout(page, info, "left-character-chats", { scope: selector })
       writeFileSync(info.outputPath("left-layout.json"), JSON.stringify(findings, null, 2))
       await panel.screenshot({ path: info.outputPath("left-after.png") })
       await action.hover()
       await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
-        `Starts a separate chat with ${name}.`
+        `Start a new roleplay with ${name}.`
       )
       await action.click()
       await expect(page).toHaveURL(new RegExp(`/cards/${card.entityId}/chat`))
@@ -73,7 +73,7 @@ for (const width of [390, 1440]) {
       for (const query of [`forks=${group.chat.id}`, `forks=${group.chat.id}&character=${card.entityId}`, ""]) {
         await page.goto(`${server().url}/?side=chats&${query}`)
         await showAppNavigation(page)
-        await expect(panel.getByRole("button", { name: /^New chat with / })).toHaveCount(0)
+        await expect(panel.getByRole("button", { name: /^New Roleplay with / })).toHaveCount(0)
       }
     })
   }

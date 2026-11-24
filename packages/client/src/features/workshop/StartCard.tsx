@@ -5,6 +5,7 @@
 // New workshop makes nothing (owner, 2026-11-17: "The chat is created when the first message is
 // sent"): it opens the workshop not made yet (`/new/workshop`, StartWorkshopPage.tsx) with these
 // choices and the title, where they can still change, and its first message makes it.
+import { SidebarStartLink } from "../characters/NewCharacterChat.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
@@ -164,6 +165,18 @@ export const useWorkshopStart = () => {
   const [card, setCard] = usePlaceParam(CARD_KEY, "")
   const [persona, setPersona] = usePlaceParam(PERSONA_KEY, "")
   return { card, setCard, persona, setPersona }
+}
+
+/** The sidebar's "New Workshop", beside New Roleplay above All chats (owner, 2026-11-24). */
+export function NewWorkshopStart() {
+  return (
+    <SidebarStartLink
+      to="/new/workshop"
+      icon="tool"
+      label="New Workshop"
+      hint="Start a workshop: a chat with an assistant about your cards, presets and lorebooks, outside any story."
+    />
+  )
 }
 
 export function WorkshopStartCard() {

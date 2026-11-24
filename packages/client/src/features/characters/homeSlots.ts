@@ -22,6 +22,12 @@ export const homeHeaderActions = defineSlot<Record<string, never>>("home.header-
  */
 export const sidebarFoot = defineSlot<Record<string, never>>("sidebar.foot")
 
+/**
+ * The start buttons above All chats, sharing one row (owner, 2026-11-24): New Roleplay (this
+ * feature's) and New Workshop (the workshop's), each a `SidebarStartLink`.
+ */
+export const sidebarChatStarts = defineSlot<Record<string, never>>("sidebar.chat-starts")
+
 /** Actions above a single character's chats, outside group and branch scopes. */
 export const characterChatActions = defineSlot<{ entityId: EntityId; label: string }>("sidebar.character-chat-actions")
 
