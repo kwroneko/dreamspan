@@ -61,7 +61,7 @@ describe("ChatHub", () => {
     }).pipe(Effect.scoped, Effect.provide(ChatHub.layerWith({ backlog: 2 })))
   )
 
-  it.live("one chat's grace doesn't end another's", () => {
+  it.live("one chat's grace doesn't end another's, and a chat just given out counts as held", () => {
     // Long after the server started, so its first minute holds nothing.
     let now = Date.now() + 3_600_000
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now)
@@ -76,6 +76,10 @@ describe("ChatHub", () => {
       assert.isTrue(hub.held(chatId, 60_000))
       now += 60_000
       assert.isFalse(hub.held(chatId, 60_000))
+      // Given to a tab that hasn't subscribed yet: held for the grace, as if it had just left.
+      hub.touch(other)
+      now += 10_000
+      assert.isTrue(hub.held(other, 60_000))
     }).pipe(
       Effect.scoped,
       Effect.provide(ChatHub.layerWith({ backlog: 4 })),
@@ -83,4 +87,3 @@ describe("ChatHub", () => {
     )
   })
 })
-

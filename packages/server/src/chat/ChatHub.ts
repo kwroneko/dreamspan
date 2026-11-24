@@ -82,11 +82,13 @@ export class ChatHub extends Context.Service<
     readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
     /**
      * Whether a tab may still have the chat open: someone is subscribed, or the last one left
-     * less than `graceMs` ago, at most HELD_MAX_MS (or the server started less than that ago, as
-     * after a deploy, while tabs reconnect). A pending chat is swept only when nobody has it
-     * (db/pendingChats.ts).
+     * (or it was given out, `touch`) less than `graceMs` ago, at most HELD_MAX_MS (or the server
+     * started less than that ago, as after a deploy, while tabs reconnect). A pending chat is
+     * swept only when nobody has it (db/pendingChats.ts).
      */
     readonly held: (chatId: ChatId, graceMs: number) => boolean
+    /** The chat was just given to a tab that hasn't subscribed yet: `held` counts it as just left. */
+    readonly touch: (chatId: ChatId) => void
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -152,6 +154,9 @@ export class ChatHub extends Context.Service<
           held: (chatId, graceMs) =>
             (subscribers.get(chatId)?.size ?? 0) > 0 ||
             Date.now() - Math.max(startedAt, left.get(chatId) ?? 0) < Math.min(graceMs, HELD_MAX_MS),
+          touch: (chatId) => {
+            if ((subscribers.get(chatId)?.size ?? 0) === 0) leave(chatId)
+          },
           listen: (listener) =>
             Effect.acquireRelease(
               Effect.sync(() => listeners.add(listener)),

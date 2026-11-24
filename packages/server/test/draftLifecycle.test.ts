@@ -4,8 +4,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, Layer, Queue } from "effect"
+import { vi } from "vitest"
 import { PENDING_LEFT_MS } from "../src/api/draftChats.ts"
+import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -47,6 +49,20 @@ const setup = Effect.gen(function* () {
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+
+/** `run`, with the server's own ChatHub, which the server doesn't expose (taken where the generator gets it). */
+const withHub = <A, E, R>(test: (hub: ChatHub["Service"]) => Effect.Effect<A, E, R>) => {
+  let hub: ChatHub["Service"] | undefined
+  const generator = Layer.merge(
+    Generator.none,
+    Layer.effectDiscard(
+      Effect.gen(function* () {
+        hub = yield* ChatHub
+      })
+    )
+  )
+  return Effect.suspend(() => test(hub!)).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), generator)))
+}
 
 describe("pending chats", () => {
   it.live("open with the card's greeting, unlisted, and commit on the first message as if made then", () =>
@@ -269,6 +285,40 @@ describe("pending chats", () => {
           recovered.map((text) => [text.content, text.sourceLabel]),
           [paragraph, "New chat with Mira"]
         )
+      })
+    )
+  )
+})
+
+describe("pending chats and the tabs that have them", () => {
+  it.live("a draft just opened is kept until its tab subscribes, long after the server started", () => {
+    let offset = 0
+    const now = Date.now.bind(Date)
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + offset)
+    return run(
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        offset = 120_000
+        // Tab A is given its draft; tab B opens another before A's subscription arrives.
+        const a = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        yield* api.OpenDraftChat({ draftFor: "empty" })
+        assert.strictEqual((yield* api.GetChat({ chatId: a.id })).status, "pending")
+      })
+    ).pipe(Effect.ensuring(Effect.sync(() => clock.mockRestore())))
+  })
+
+  it.live("a tab that subscribed as its draft was being swept is told the chat is gone", () =>
+    withHub((hub) =>
+      Effect.gen(function* () {
+        const { api, mira } = yield* setup
+        const a = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        // Nobody had it when the sweep looked; a tab subscribes before the sweep is written.
+        const held = vi.spyOn(hub, "held").mockImplementation(() => false)
+        const queue = yield* hub.subscribe(a.id, () => ({ _tag: "Hello", live: [] }))
+        yield* api.OpenDraftChat({ draftFor: "empty" }).pipe(Effect.ensuring(Effect.sync(() => held.mockRestore())))
+        assert.strictEqual((yield* Effect.flip(api.GetChat({ chatId: a.id })))._tag, "NotFound")
+        const events = (yield* Queue.takeAll(queue)).flat()
+        assert.deepStrictEqual(events.at(-1), { _tag: "Deleted" })
       })
     )
   )
