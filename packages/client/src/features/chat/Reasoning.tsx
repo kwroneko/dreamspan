@@ -168,18 +168,22 @@ function ReasoningBlock({
     setChosen({ open: false, streaming })
   }
   const open =
-    chosen !== null && chosen.streaming === streaming ? chosen.open : streaming ? preferred === "expanded" : false
+    editor !== undefined ||
+    (chosen !== null && chosen.streaming === streaming ? chosen.open : streaming && preferred === "expanded")
 
   // What a click does, on hover and focus (DESIGN: every action explains itself).
-  const hint = open
-    ? streaming
-      ? "Folds this thinking away. Replies after this one stream with it folded too."
-      : "Folds this thinking away."
-    : streaming
-      ? "Shows this thinking, live as it's written. Replies after this one stream with it open too."
-      : "Shows this thinking."
+  const hint = editor
+    ? "Save or cancel the thinking edit to fold this thinking."
+    : open
+      ? streaming
+        ? "Folds this thinking away. Replies after this one stream with it folded too."
+        : "Folds this thinking away."
+      : streaming
+        ? "Shows this thinking, live as it's written. Replies after this one stream with it open too."
+        : "Shows this thinking."
 
   const toggle = () => {
+    if (editor) return
     setChosen({ open: !open, streaming })
     // During a run the choice sticks: later replies stream that way too (DESIGN §7.4).
     if (streaming) {
@@ -196,6 +200,7 @@ function ReasoningBlock({
           <button
             type="button"
             aria-expanded={open}
+            aria-disabled={editor !== undefined}
             aria-controls={id}
             aria-describedby={hintId}
             onClick={toggle}
@@ -223,17 +228,18 @@ function ReasoningBlock({
         </div>
       </div>
       {notice && <p className="pl-4 text-xs text-muted">{notice}</p>}
-      {editor ? (
-        <ThinkingEditor session={session} version={version} editor={editor} />
-      ) : (
-        open && (
-          <div
-            id={id}
-            role="region"
-            aria-label={label}
-            aria-busy={streaming && thinking ? true : undefined}
-            className="border-l-2 border-border pl-3 text-sm text-muted"
-          >
+      <div
+        id={id}
+        role="region"
+        aria-label={label}
+        aria-busy={streaming && thinking ? true : undefined}
+        hidden={!open}
+        className={editor ? undefined : "border-l-2 border-border pl-3 text-sm text-muted"}
+      >
+        {editor ? (
+          <ThinkingEditor session={session} version={version} editor={editor} />
+        ) : open ? (
+          <>
             <MessageBody text={text}>
               {shown.pending ? (
                 // Its place kept, not shown, until the display scripts answer.
@@ -249,9 +255,9 @@ function ReasoningBlock({
                 {issue}
               </p>
             ))}
-          </div>
-        )
-      )}
+          </>
+        ) : null}
+      </div>
       {viewer.error && (
         <p role="alert" className="text-xs text-danger">
           Your choice wasn’t saved: {viewer.error.message}
