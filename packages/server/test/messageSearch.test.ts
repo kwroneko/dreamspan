@@ -229,6 +229,24 @@ describe("message search", () => {
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
+  it.effect("searches only the pinned chat's branches after a split", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      yield* f.api.SetSplitChat({ forkId: f.branch, split: true })
+      yield* f.api.SetChatPin({ chatId: f.chatId, leaf: null, pinned: true })
+
+      assert.lengthOf((yield* f.search("only the branch")).hits, 1)
+      const pinned = { filter: "pinned" as const, text: "only the branch" }
+      assert.lengthOf((yield* f.api.SearchMessages({ ...pinned, cursor: null })).hits, 0)
+      assert.deepStrictEqual(yield* f.api.CountMessages(pinned), { messages: 0, chats: 0, more: false })
+      const shared = yield* f.api.SearchMessages({ filter: "pinned", text: "lighthouse", cursor: null })
+      assert.deepStrictEqual(
+        shared.hits[0]!.branches.map((branch) => branch.forkId),
+        [f.main]
+      )
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("pages on from the cursor without repeating or skipping a hit", () =>
     Effect.gen(function* () {
       const f = yield* setup

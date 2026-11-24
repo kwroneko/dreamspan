@@ -1,6 +1,6 @@
 // Pure shell projections. Both worker reads and the shared materialization use these.
 import { branchMatches } from "@dreamspan/shared/branchNaming.ts"
-import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
+import type { CastCard, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@dreamspan/shared/chatBrowse.ts"
 import { ShellFork, type ShellCard, type ShellForksView, type ShellSection } from "@dreamspan/shared/chatSetupApi.ts"
 import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
@@ -105,26 +105,28 @@ const inChatFilter = (f: Fork, filter: ChatBrowse["filter"], pinned: ReadonlySet
 
 /**
  * The chats a message search looks through, as the Chats tab lists them: those `filter` shows,
- * of card `entity`'s chats when given, by name (A to Z, as its Name sort). Each a stored chat
- * id: a row standing for split chats gives each of them, together.
+ * of card `entity`'s chats when given, by name (A to Z, as its Name sort).
+ * Keep the displayed rows' fork ids alongside the stored chat ids they share.
  */
-export const searchedChats = (
-  state: ShellState,
-  filter: ChatBrowse["filter"],
-  entity: EntityId | null
-): ReadonlyArray<string> => {
+export const searchedChats = (state: ShellState, filter: ChatBrowse["filter"], entity: EntityId | null) => {
   const rows = perChat(state.forks.filter((f) => entity === null || f.joined.includes(entity)))
     .map((f) => state.chatIndex.get(f.chat.id)!)
     .filter((f) => inChatFilter(f, filter, state.pinnedChats))
     .sort((a, b) => a.chatName.localeCompare(b.chatName) || a.chat.id.localeCompare(b.chat.id))
   const rank = new Map(rows.map((f, i) => [f.chat.id, i]))
   const ids = new Map<string, number>()
+  const forks: Array<ForkId> = []
   for (const f of state.forks) {
     const at = rank.get(f.chat.id)
+    if (at === undefined) continue
     const id = f.sourceChatId ?? f.chat.id
-    if (at !== undefined && !ids.has(id)) ids.set(id, at)
+    ids.set(id, Math.min(at, ids.get(id) ?? at))
+    forks.push(f.forkId as ForkId)
   }
-  return [...ids].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([id]) => id)
+  return {
+    chats: [...ids].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([id]) => id),
+    forks
+  }
 }
 
 const browseChats = (rows: ReadonlyArray<Fork>, browse: ChatBrowse, state: ShellState) => {

@@ -5888,7 +5888,8 @@ const ReadOpsOwn = RpcGroup.make(
       cursor: Schema.NullOr(MessageCursor),
       limit: Schema.Int,
       sort: Schema.optionalKey(MessageSort),
-      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      forks: Schema.optionalKey(Schema.Array(ForkId))
     },
     success: MessageSearchPage,
     error: StorageError
@@ -5898,7 +5899,8 @@ const ReadOpsOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       text: MessageQuery,
-      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+      chats: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+      forks: Schema.optionalKey(Schema.Array(ForkId))
     },
     success: MessageCount,
     error: StorageError
