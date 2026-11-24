@@ -350,7 +350,10 @@ describe("MCP servers in workshops", () => {
         { name: "mcp_big_dump", args: {}, id: "original" },
         { name: "read_run", args: { message: 0, call: "original", max_tokens: 4000 }, id: "first-page" }
       ])
-      const { api, chat, events, mock } = yield* workshop(script.handler, 24_000)
+      // The mock model's window, measured with this toolset: small enough that the quota shortens
+      // the page, large enough that the run doesn't compact before the page is sent (26k to 28k pass).
+      // Re-measured when the read_card/read_lorebook/read_preset definitions grew (07d7c202a): 24k compacted.
+      const { api, chat, events, mock } = yield* workshop(script.handler, 27_000)
       for (const capability of ["plugins.write", "plugins.apply", "network", "subagents"] as const)
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability, mode: "off" })
       const big = yield* fakeServer([fakeTool("dump")])
