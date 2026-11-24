@@ -141,6 +141,33 @@ describe("exact Undo of a workshop edit", () => {
   })
 })
 
+describe("exact Undo of a workshop creation", () => {
+  it.live("follows an edit made after a recorded Undo in the same reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Synthetic keeper" }, "c1")
+      const refId = JSON.parse(out.text).id as RefId
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "First edit." }] }, "c2")
+      const [edit] = yield* f.editKeys(["c2"])
+      yield* api.UndoRolloutEffect(edit!)
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Second edit." }] }, "c3")
+      const head = (yield* api.OpenEditor({ refId })).ref.headRevisionId
+      const [creation] = yield* f.editKeys(["c1"])
+      yield* api.UndoRolloutEffect(creation!)
+      const effects = yield* f.effects()
+      assert.deepStrictEqual(effects.find((e) => e.toolCallId === "c3")?.undoResult, { binnedWithCreation: true })
+      assert.isString(effects.find((e) => e.toolCallId === "c2")?.undoResult?.restoredHead)
+      const bin = yield* api.ListBin({ limit: 50, before: null })
+      yield* api.RestoreBinItem({ itemId: bin.find((e) => e.title === "Synthetic keeper")!.id })
+      const restored = yield* api.OpenEditor({ refId })
+      assert.strictEqual(restored.ref.headRevisionId, head)
+      assert.strictEqual(restored.doc.description, "Second edit.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
 describe("revert a change", () => {
   it.live("puts the fields back as a new revision of the user's, and the change says it's reverted", () => {
     const config = testConfig()

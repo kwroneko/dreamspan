@@ -170,31 +170,36 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     const ref = yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(undo.refId))
     let head = String(undo.head)
     let version = Number(undo.rowVersion)
-    // A created item can go to the bin with all consecutive edits the same reply made.
     const edits = ctx.creationEdits?.filter((e) => e.targetId === effect.targetId).map((e) => e.undo!) ?? []
-    for (;;) {
-      const edit = edits.find((e) => e.refId === ref.id && e.before === head && e.beforeRowVersion === version)
-      if (!edit || typeof edit.head !== "string" || Number(edit.rowVersion) <= version) break
-      head = edit.head
-      version = Number(edit.rowVersion)
-    }
     const restored = yield* ctx.sql<{
       undo_json: string
       undo_result_json: string
     }>`SELECT undo_json, undo_result_json FROM rollout_effects
-    WHERE target_kind = 'entity' AND target_id = ${effect.targetId} AND kind = 'library.revise' AND undone_at IS NOT NULL ORDER BY undone_at, created_at DESC`
-    // A chain may have been undone at the same millisecond. Follow edges rather than clock order.
-    const remaining = restored.map(
-      (r) => ({ ...JSON.parse(r.undo_json), ...JSON.parse(r.undo_result_json) }) as Record<string, unknown>
-    )
+    WHERE target_kind = 'entity' AND target_id = ${effect.targetId} AND kind = 'library.revise'
+      AND undone_at IS NOT NULL AND undo_json IS NOT NULL AND undo_result_json IS NOT NULL
+    ORDER BY undone_at, created_at DESC`
+    const edges = [
+      ...edits,
+      ...restored.map((r) => {
+        const { refId, before, beforeRowVersion } = JSON.parse(r.undo_json) as Record<string, unknown>
+        const result = JSON.parse(r.undo_result_json) as Record<string, unknown> | null
+        return { refId, before, beforeRowVersion, head: result?.restoredHead, rowVersion: result?.restoredRowVersion }
+      })
+    ]
+    // Recorded Undo can land on the starting point of another standing edit in the reply.
     for (;;) {
-      const at = remaining.findIndex(
-        (r) => r.before === head && Number(r.beforeRowVersion) === version && typeof r.restoredHead === "string"
+      const edge = edges.find(
+        (r): r is { head: string; rowVersion: number } =>
+          r.refId === ref.id &&
+          r.before === head &&
+          r.beforeRowVersion === version &&
+          typeof r.head === "string" &&
+          typeof r.rowVersion === "number" &&
+          r.rowVersion > version
       )
-      if (at < 0) break
-      const [edge] = remaining.splice(at, 1)
-      head = String(edge!.restoredHead)
-      version = Number(edge!.restoredRowVersion)
+      if (!edge) break
+      head = edge.head
+      version = edge.rowVersion
     }
     if (undo.exactDocument === true && ref.archived_at !== undo.archivedAt) return yield* refuse()
     if (ref.entity_id !== effect.targetId || ref.head_revision_id !== head || ref.row_version !== version)
