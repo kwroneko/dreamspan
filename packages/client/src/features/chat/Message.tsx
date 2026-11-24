@@ -188,7 +188,7 @@ function StatusRow({ text, action }: { text: string; action: ReactNode }) {
 /** An edit open in a version's body. */
 interface BodyEdit {
   /** Its text box once its saved text is read (null until then: the text stays), given the text's height as it opened. */
-  readonly text: ((height: number | null) => ReactNode) | null
+  readonly text: ((height: number | null, onShown: () => void) => ReactNode) | null
   /** Its thinking field (editThinking.tsx), above the text. */
   readonly thinking: ReactNode
   /** Whether that field stands in for the thinking panels now (opened, changed or removed). */
@@ -239,7 +239,13 @@ function VersionBody({
     if (edit !== undefined && held === null)
       setHeld({ height: textBox.current?.getBoundingClientRect().height ?? null })
   }, [edit, held])
-  const editText = edit?.text && held !== null ? edit.text(held.height) : null
+  // The text stays on screen until the edit's box has drawn its text, which may take a fetch
+  // of the editor's code the first time: until then the box lies over it, unseen, and both
+  // swap in the frame it's drawn, so the message never shows blank (owner, 2026-11-23).
+  const [shown, setShown] = useState(false)
+  const editing = !!edit?.text && held !== null
+  if (!editing && shown) setShown(false)
+  const editText = edit?.text && held !== null ? edit.text(held.height, () => setShown(true)) : null
   return (
     <div className="flex flex-col gap-2 compact:gap-1">
       {/* Its thinking panels stay as they are in an edit, until its thinking field stands in for them. */}
@@ -253,28 +259,31 @@ function VersionBody({
         />
       </div>
       {edit?.thinking}
-      {editText}
-      <div ref={textBox} className="flex flex-col gap-2 compact:gap-1" hidden={editText !== null}>
-        {text === "" && generating ? (
-          <p className="text-sm text-muted" aria-live="polite">
-            {waiting ? "Waiting for the cache…" : "Writing…"}
-          </p>
-        ) : version.mark === "silent" && text === "" ? (
-          // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
-          <p data-silent className="text-sm text-muted italic">
-            {speakerName} stays silent
-          </p>
-        ) : (
-          <BodyText
-            version={version}
-            session={session}
-            parentSlotId={parentSlotId}
-            depth={depth}
-            placement={placement}
-            text={text}
-            streaming={generating}
-          />
-        )}
+      {/* One cell holding both while the edit's box is being drawn (above). */}
+      <div className={editText !== null && !shown ? "grid *:min-w-0 *:[grid-area:1/1]" : "contents"}>
+        {editText !== null && <div className={shown ? "contents" : "pointer-events-none opacity-0"}>{editText}</div>}
+        <div ref={textBox} className="flex flex-col gap-2 compact:gap-1" hidden={editText !== null && shown}>
+          {text === "" && generating ? (
+            <p className="text-sm text-muted" aria-live="polite">
+              {waiting ? "Waiting for the cache…" : "Writing…"}
+            </p>
+          ) : version.mark === "silent" && text === "" ? (
+            // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
+            <p data-silent className="text-sm text-muted italic">
+              {speakerName} stays silent
+            </p>
+          ) : (
+            <BodyText
+              version={version}
+              session={session}
+              parentSlotId={parentSlotId}
+              depth={depth}
+              placement={placement}
+              text={text}
+              streaming={generating}
+            />
+          )}
+        </div>
       </div>
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
@@ -821,11 +830,12 @@ export const Message = memo(function Message({
   const bodyEdit: BodyEdit | undefined = inPlace && {
     text:
       editLoaded && editBase !== undefined
-        ? (height) => (
+        ? (height, onShown) => (
             <InPlaceText
               draft={inPlace}
               base={editBase}
               height={height}
+              onShown={onShown}
               caret={caretAt}
               onCaretTaken={caretTaken}
               onCaretPlaced={onScrollIntoView}
