@@ -351,6 +351,11 @@ test("1440: a summary's text and a chat's own note open beside the chat, live bo
   await expect.poll(() => textBoxValue(inPanel)).toContain("Typed in its tab.")
   await append(inPanel, " Typed in the panel.")
   await expect.poll(() => textBoxValue(own)).toContain("Typed in the panel.")
+  await summary.panel.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(inPanel).toHaveCount(0)
+  await expect.poll(() => textBoxValue(own)).toBe(`${LONG} Typed in its tab. Typed in the panel.`)
+  await expect(texts.getByText("Unchanged.", { exact: true })).toBeVisible()
+  await expect(texts.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)
 
   // The chat's own note: a plain click opens it where the summary's tab is, the chat keeping its frame.
   const note = await ownNote(page)

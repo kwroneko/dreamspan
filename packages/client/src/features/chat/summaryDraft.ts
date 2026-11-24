@@ -124,6 +124,10 @@ export class SummaryDraft {
     return this.base.revisionId ?? this.summary.revisionId
   }
 
+  get saved() {
+    return this.summary
+  }
+
   private set(change: Partial<SummaryDraftView>) {
     this.view = { ...this.view, ...change }
     for (const listener of this.listeners) listener()
@@ -160,6 +164,7 @@ export class SummaryDraft {
 
   /** The summary moved on (another revision selected, another tab): the box keeps what the user has. */
   update(summary: SummaryDraftSubject) {
+    if (summary.rowVersion < this.summary.rowVersion) return
     this.summary = summary
     this.refresh()
   }
@@ -399,6 +404,7 @@ export class SummaryDraft {
     }
     const recovered = this.view.recovered + result.value.recovered
     const now = this.shown()
+    if (result.value.summary.rowVersion >= this.summary.rowVersion) this.summary = result.value.summary
     // The draft holding the text committed is ended; one holding text typed since isn't.
     if (this.draft?.content === content) this.draft = null
     if (now !== content) {

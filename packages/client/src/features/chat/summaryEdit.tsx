@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { Alert } from "../../ui/Surface.tsx"
 import { rangeText } from "./lcm.ts"
-import type { SummaryDraft, SummaryDraftHost, SummaryDraftSubject, SummaryDraftView } from "./summaryDraft.ts"
+import type { SummaryDraft, SummaryDraftHost, SummaryDraftView } from "./summaryDraft.ts"
 
 type Range = Pick<LcmSummary, "from" | "to">
 
@@ -20,7 +20,8 @@ export const summaryTabLabel = (summary: Range) => `Summary of ${rangeText(summa
  * The saved text the draft is compared with: the revision in use, or the older one the draft
  * started from (read once), null until that's read or when it can't be.
  */
-export function useSummaryBase(host: SummaryDraftHost, summary: SummaryDraftSubject, store: SummaryDraft) {
+export function useSummaryBase(host: SummaryDraftHost, store: SummaryDraft) {
+  const summary = store.saved
   const baseId = store.comparisonRevisionId
   const [comparison, setComparison] = useState<SummaryRevision | null>(null)
   const [problem, setProblem] = useState<AppError | null>(null)
