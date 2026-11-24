@@ -219,6 +219,11 @@ export const migrationDefinitions = {
         doc_json TEXT NOT NULL
       ) STRICT`
     ]
+  },
+  "0024_workshop_import_media_quota": {
+    statements: [
+      "ALTER TABLE media_refs ADD COLUMN files_quota INTEGER NOT NULL DEFAULT 0 CHECK (files_quota IN (0, 1))"
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

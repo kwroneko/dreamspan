@@ -6,6 +6,7 @@ import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@dreamspan/shared/importReport.ts"
 import type { Effect } from "effect"
 import { posix } from "node:path"
+import { describeImage } from "../importer/images.ts"
 import { cardFromJson } from "./card.ts"
 import { ASSET_KEYWORD, decodeText, isPng, readChunks, replaceCardChunks } from "./png.ts"
 import { attempt, defaultLimits, fail, type FormatError, type Limits, parseJson } from "./safety.ts"
@@ -110,10 +111,20 @@ const fromCharx = (bytes: Uint8Array, limits: Limits, issues: ReportBuilder) => 
       )
     } else if (!used.has(path)) {
       used.add(path)
+      const data = extract(bytes, entry, limits, budget)
+      if (describeImage(data).mime === "application/octet-stream") {
+        issues.add(
+          "warning",
+          "charx.asset_skipped",
+          `The asset "${shownText(asset.name)}" isn't an image; it was skipped.`,
+          ["data", "assets", index]
+        )
+        return
+      }
       files.push({
         uri: asset.uri,
         ext,
-        bytes: extract(bytes, entry, limits, budget),
+        bytes: data,
         type: asset.type,
         name: asset.name
       })

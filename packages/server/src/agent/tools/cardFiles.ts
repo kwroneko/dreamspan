@@ -15,6 +15,8 @@ import type { Formats } from "../../importer/Formats.ts"
 import { storeMedia } from "../../importer/mediaFiles.ts"
 import { prepareAvatarThumbnails } from "../../importer/prepareThumbnails.ts"
 import { FilePathRefused, readRegularFile } from "../../files/safePath.ts"
+import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
+import { withFileTree } from "../../files/treeLocks.ts"
 import { type CountEffect, estimateCount, visibleDoc } from "../libraryView.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import { pagedView, VIEWS } from "./library.ts"
@@ -37,10 +39,12 @@ export interface CardFileToolDeps {
   readonly formats: () => Formats["Service"] | undefined
   readonly dataDir: string
   readonly writer: () => Writer["Service"]
+  readonly quota: FilesQuota | undefined
   readonly holding: <A, E, R>(hashes: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly wrap: (
     capability: string,
-    run: (ctx: ToolContext, args: Record<string, unknown>, env: Env) => Effect.Effect<ToolOutput, unknown>
+    run: (ctx: ToolContext, args: Record<string, unknown>, env: Env) => Effect.Effect<ToolOutput, unknown>,
+    cardFileImport?: true
   ) => (ctx: ToolContext, args: Record<string, unknown>) => Effect.Effect<ToolOutput>
   /** Where a path to read is: a file in Files, or an attachment copy. */
   readonly readPlace: (ctx: ToolContext, env: Env, path: string) => Effect.Effect<Place, unknown>
@@ -238,6 +242,7 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
     id: "import_card_file",
     label: "Imported a card file",
     capability: "library.write",
+    alwaysAsk: () => true,
     effect: "library",
     replyTool: false,
     storyRead: "account",
@@ -246,48 +251,101 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
       "Adds a character card file (in your files or a message attachment) to the library as a new card, with its picture, as the library's import does. Only when the user asks for it: a card file is otherwise worked on as a file.",
     parameters: Type.Object({ path: name }, strict),
     summarize: (args) => String(args.path ?? ""),
-    execute: deps.wrap("library.write", (ctx, args, env) =>
+    describe: (ctx, args) =>
       Effect.gen(function* () {
-        const { place, bytes } = yield* readCard(ctx, env, String(args.path))
-        const fileName = posix.basename(place.full)
-        const parsed = yield* formats()
-          .parse(bytes, fileName)
-          .pipe(Effect.mapError(() => new FilePathRefused("The card file could not be read. Check that it is whole.")))
-        if (parsed.library === null) return { text: `${place.full} could not be imported as a card.`, isError: true }
-        // Where the card says it came from stays unread: no card source is linked here.
-        const { links: _links, ...library } = parsed.library
-        const saved = yield* deps.holding(
-          parsed.media.map((file) => file.sha256),
-          Effect.gen(function* () {
-            yield* Effect.forEach(parsed.media, (file) => storeMedia(deps.dataDir, file.sha256, file.bytes), {
-              discard: true
-            })
-            return yield* deps.writer().RunWorkshopOperation({
-              userId: ctx.userId as never,
-              rolloutId: ctx.rolloutId,
-              toolCallId: ctx.toolCallId,
-              capability: "library.write",
-              ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {}),
-              expected: {},
-              operation: "ImportFile",
-              payload: {
-                userId: ctx.userId,
-                intoRefId: null,
-                ...library,
-                sourceName: fileName,
-                sourceHash: parsed.sha256,
-                media: parsed.media.map(({ bytes: _, ...file }) => file)
-              }
-            })
-          })
-        )
-        yield* prepareAvatarThumbnails(formats(), deps.dataDir, parsed.media)
-        const ref = (saved as { ref?: { id: string; label: string; kind: string } }).ref
-        if (!ref) throw new ToolInputRefused("The card file could not be imported. Try again.")
-        return {
-          text: `Imported ${place.full} into the library as the ${ref.kind} "${ref.label}" (id ${ref.id}). The file stays as it is.`
-        }
-      })
+        const grants = yield* ctx.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })
+        if (grants.some((grant) => grant.capability === "files" && grant.mode === "off"))
+          return yield* Effect.fail(new ToolInputRefused("Files are off in this workshop."))
+        return { title: "Import a card file into the library?", rows: [{ label: "Path", value: String(args.path) }] }
+      }),
+    execute: deps.wrap(
+      "library.write",
+      (ctx, args, env) =>
+        Effect.gen(function* () {
+          const { place, bytes } = yield* readCard(ctx, env, String(args.path))
+          const fileName = posix.basename(place.full)
+          const parsed = yield* formats()
+            .parse(bytes, fileName)
+            .pipe(
+              Effect.mapError(() => new FilePathRefused("The card file could not be read. Check that it is whole."))
+            )
+          if (parsed.library?.kind !== "card")
+            return { text: `${place.full} could not be imported as a card.`, isError: true }
+          // Where the card says it came from stays unread: no card source is linked here.
+          const { links: _links, ...library } = parsed.library
+          const media = parsed.media.map(({ bytes: _, ...file }) => file)
+          const save = (maxAddedBytes: number) =>
+            deps.holding(
+              media.map((file) => file.sha256),
+              Effect.gen(function* () {
+                yield* Effect.forEach(parsed.media, (file) => storeMedia(deps.dataDir, file.sha256, file.bytes), {
+                  discard: true
+                })
+                const saved = yield* deps
+                  .writer()
+                  .RunWorkshopOperation({
+                    userId: ctx.userId,
+                    rolloutId: ctx.rolloutId,
+                    toolCallId: ctx.toolCallId,
+                    capability: "library.write",
+                    cardFileImport: { maxAddedBytes },
+                    ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {}),
+                    expected: {},
+                    operation: "ImportFile",
+                    payload: {
+                      userId: ctx.userId,
+                      intoRefId: null,
+                      ...library,
+                      sourceName: fileName,
+                      sourceHash: parsed.sha256,
+                      media
+                    }
+                  })
+                  .pipe(
+                    Effect.catchTag("EffectUndoRefused", (error) => Effect.fail(new FilePathRefused(error.message)))
+                  )
+                return saved as { ref?: { id: string; label: string; kind: string }; addedBytes: number }
+              })
+            )
+          const quota = deps.quota
+          const saved =
+            quota && media.length > 0
+              ? yield* withFileTree(
+                  ctx.userId,
+                  Effect.gen(function* () {
+                    const what = "import card media"
+                    const requested = media.map(({ sha256, byteSize }) => ({ sha256, byteSize }))
+                    const adding = yield* ctx.reader.WorkshopImportBytes({ userId: ctx.userId, media: requested })
+                    const usage = yield* quota.check(ctx.userId, adding, what)
+                    const reservation = quota.hold(ctx.userId, "outside-files")
+                    let committed = false
+                    return yield* Effect.gen(function* () {
+                      if (!reservation.reserve(adding, usage.quotaBytes))
+                        return yield* Effect.fail(
+                          new QuotaExceeded(quota.overMessage(usage.usedBytes + adding, usage.quotaBytes, what))
+                        )
+                      const result = yield* save(adding)
+                      reservation.landed(undefined, result.addedBytes)
+                      committed = true
+                      return result
+                    }).pipe(
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          if (!committed) reservation.release()
+                        })
+                      )
+                    )
+                  }).pipe(Effect.uninterruptible)
+                )
+              : yield* save(quota ? 0 : Number.MAX_SAFE_INTEGER)
+          yield* prepareAvatarThumbnails(formats(), deps.dataDir, parsed.media)
+          const { ref } = saved
+          if (!ref) throw new ToolInputRefused("The card file could not be imported. Try again.")
+          return {
+            text: `Imported ${place.full} into the library as the ${ref.kind} "${ref.label}" (id ${ref.id}). The file stays as it is.`
+          }
+        }),
+      true
     )
   }
 

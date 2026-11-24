@@ -201,6 +201,41 @@ test.describe("workshop library attachments", () => {
         })
       })
 
+  test("a stale composer cannot send a card removed in another tab", async ({ page, context }) => {
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const card = await importCard(page, "Cross-tab card")
+    const workshop = await admin((api) =>
+      Effect.gen(function* () {
+        const chat = yield* api.CreateWorkshop({ title: "Cross-tab removal" })
+        const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+        yield* api.SetComposerLibrary({ chatId: chat.id, draftId: draft.id, add: [card.id], remove: [] })
+        return chat
+      })
+    )
+    const other = await context.newPage()
+    const url = `${server().url}/chats/${workshop.id}`
+    await page.goto(url)
+    await other.goto(url)
+    const tile = `[data-library-tile="${card.id}"]`
+    await expect(page.locator(tile)).toBeVisible()
+    await expect(other.locator(tile)).toBeVisible()
+    await page.locator(tile).locator("a").hover()
+    await page.getByRole("button", { name: "Remove Cross-tab card" }).click()
+    await expect(page.locator(tile)).toHaveCount(0)
+
+    const message = other.getByLabel("Message", { exact: true })
+    const send = other.getByRole("button", { name: /^Send( as .+)?$/ })
+    await message.fill("Please check this draft.")
+    await send.click()
+    await expect(other.locator(tile)).toHaveCount(0)
+    await expect(message).toContainText("Please check this draft.")
+    const posted = other.getByRole("article").filter({ hasText: "Please check this draft." })
+    await expect(posted).toHaveCount(0)
+    await send.click()
+    await expect(posted).toHaveCount(1)
+    await expect(posted.locator(tile)).toHaveCount(0)
+  })
+
   test("a story's paperclip stays the image picker", async ({ page }) => {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const story = await admin((api) => api.CreateChat({ title: "Story paperclip" }))
