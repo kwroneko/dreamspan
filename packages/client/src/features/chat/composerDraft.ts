@@ -30,7 +30,8 @@ import {
   keepCopy,
   makeCopy,
   type PageEnv,
-  pendingOf
+  pendingOf,
+  replaceCopies
 } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
@@ -87,15 +88,19 @@ export interface Leftover {
   readonly save: ComposerSave
   readonly copy: Copy
 }
-const leftovers = new Map<string, Leftover>()
+/**
+ * By chat, then by composer: two panes showing the same swept chat each keep their own text,
+ * under a copy and an operation of its own, so neither replaces the other's.
+ */
+const leftovers = new Map<string, Map<object, Leftover>>()
 /** Text carried into a fresh chat's composer, by that chat: its box starts with it. */
-const carried = new Map<string, Leftover>()
+const carried = new Map<string, ReadonlyArray<Leftover>>()
 
-/** The text typed after `chatId` was swept, taken: none when nothing was typed since. */
-export const takeLeftover = (chatId: string) => {
-  const left = leftovers.get(chatId) ?? null
+/** The texts typed after `chatId` was swept, in each composer showing it, taken. */
+export const takeLeftover = (chatId: string): ReadonlyArray<Leftover> => {
+  const all = [...(leftovers.get(chatId)?.values() ?? [])]
   leftovers.delete(chatId)
-  return left
+  return all
 }
 
 /**
@@ -104,20 +109,19 @@ export const takeLeftover = (chatId: string) => {
  * goes only once the server has it.
  */
 export const fileLeftover = (chatId: string, save: (payload: ComposerSave) => Promise<{ readonly ok: boolean }>) => {
-  const left = takeLeftover(chatId)
-  if (left === null) return
-  void save(left.save).then(
-    (saved) => {
-      if (saved.ok) void dropCopy(left.copy)
-    },
-    () => {}
-  )
+  for (const left of takeLeftover(chatId))
+    void save(left.save).then(
+      (saved) => {
+        if (saved.ok) void dropCopy(left.copy)
+      },
+      () => {}
+    )
 }
 
 /** The tab opened `to` in place of the swept `from`: what was typed after the sweep goes there. */
 export const carryLeftover = (from: string, to: string) => {
   const left = takeLeftover(from)
-  if (left !== null) carried.set(to, left)
+  if (left.length > 0) carried.set(to, [...(carried.get(to) ?? []), ...left])
 }
 
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
@@ -376,15 +380,15 @@ export class ComposerDraft {
     const left = carried.get(this.chatId)
     carried.delete(this.chatId)
     if (left !== undefined) {
-      this.type(
-        this.text === ""
-          ? left.content
-          : `${this.text}
-
-${left.content}`
-      )
-      // This box's own copy holds it now (`type` kept it first, so the store keeps one of them).
-      void dropCopy(left.copy)
+      this.type([this.text, ...left.map((one) => one.content)].filter((text) => text !== "").join("\n\n"))
+      // This box's own copy holds it now: the swept chat's copies go in the same transaction
+      // that keeps it, so a failed one keeps them, and they're replayed as any other copy.
+      const mine = this.pending
+      if (mine !== null)
+        void replaceCopies(
+          mine,
+          left.map((one) => one.copy)
+        )
     }
     if (this.unsaved) this.schedule(0)
   }
@@ -529,10 +533,18 @@ ${left.content}`
   private remember() {
     const stopped = this.stopped
     if (stopped === null) return
-    const previous = leftovers.get(this.chatId) ?? null
+    const mine = leftovers.get(this.chatId) ?? new Map<object, Leftover>()
+    leftovers.set(this.chatId, mine)
+    const previous = mine.get(this) ?? null
+    // A copy of a save typed before the sweep was known (made while that save was out): its
+    // text is this box's, kept from now on as the text typed after the sweep, or not at all.
+    const stale = this.pending
+    this.pending = null
+    const replaced = [previous?.copy, stale].filter((copy) => copy != null)
     if (this.text.trim() === "" || this.text === this.filed) {
-      leftovers.delete(this.chatId)
-      if (previous !== null) void dropCopy(previous.copy)
+      mine.delete(this)
+      if (mine.size === 0) leftovers.delete(this.chatId)
+      for (const copy of replaced) void dropCopy(copy)
       return
     }
     // In this browser at once, under a save of its own: the text replaces the one kept before.
@@ -546,8 +558,8 @@ ${left.content}`
     )
     const save = pendingOf(copy)
     if (save?.kind !== "composer") return
-    leftovers.set(this.chatId, { content: this.text, save: save.payload, copy })
-    void keepCopy(copy, previous?.copy ?? null)
+    mine.set(this, { content: this.text, save: save.payload, copy })
+    void replaceCopies(copy, replaced)
   }
 
   private cancelTimer() {
@@ -844,7 +856,7 @@ ${left.content}`
    * files nothing more.
    */
   private beaconLeftover() {
-    const left = leftovers.get(this.chatId)
+    const left = leftovers.get(this.chatId)?.get(this)
     if (left === undefined) return
     const body = JSON.stringify({ drafts: [], composers: [left.save] })
     if (new Blob([body]).size > KEEPALIVE_LIMIT) return

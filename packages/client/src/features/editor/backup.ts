@@ -199,6 +199,13 @@ export const keepCopy = (copy: Copy, replaced: Copy | null = null) =>
     if (replaced !== null) store.delete(replaced.key)
   })
 
+/** Puts `copy` and deletes every one of `replaced`, in one transaction: all of it, or none. */
+export const replaceCopies = (copy: Copy, replaced: ReadonlyArray<Copy>) =>
+  run("readwrite", (store) => {
+    store.put(copy)
+    for (const old of replaced) if (old.key !== copy.key) store.delete(old.key)
+  })
+
 /** Acknowledgement names the copy, never reconstructed text or version metadata. */
 export const dropCopy = (copy: Copy) => run("readwrite", (store) => store.delete(copy.key))
 
