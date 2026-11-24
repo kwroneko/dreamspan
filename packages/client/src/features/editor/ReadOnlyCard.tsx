@@ -70,9 +70,6 @@ export function ReadOnlyCardEditor({ store, call }: { store: EditorStore; call: 
                 </CardHeaderPortrait>
               }
             >
-              <h2 data-card-header-row className="text-2xl leading-8 font-semibold [overflow-wrap:anywhere]">
-                {name}
-              </h2>
               <div data-card-header-row className="col-span-full">
                 <RemoteCardLine card={{ entityId: ref.entityId, name }} onAdded={(_entityId, refId) => own(refId)} />
               </div>
