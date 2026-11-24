@@ -3,7 +3,7 @@
 // and "We also need to avoid layout shifts." Every tab shows the same buttons in the same places
 // (Include personas and Group forks disabled with why where they do nothing), so switching tabs
 // moves neither the sort nor its direction button, and nothing invisible sits between buttons.
-// GRID_TOGGLES_SHOTS=<folder> keeps a 1340 px dark window screenshot of each tab there.
+// GRID_TOGGLES_SHOTS=<folder> keeps 1340 and 390 px dark window screenshots of each tab there.
 import { createServer } from "node:net"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -158,8 +158,10 @@ for (const theme of ["light", "dark"] as const)
               .soft(Math.abs(strip.sourceCount - strip.filterCount!), `home ${width} ${tab}: cardex count gap`)
               .toBeLessThan(0.5)
           await expectLayout(page, info, `home-${tab}-${width}-${theme}`, { scope: "[data-card-grid-controls]" })
-          if (shots && width === 1340 && theme === "dark")
-            await page.screenshot({ path: join(shots, `home-${tab.replace(/ /g, "-").toLowerCase()}.png`) })
+          if (shots && (width === 1340 || width === 390) && theme === "dark")
+            await page.screenshot({
+              path: join(shots, `home-${tab.replace(/ /g, "-").toLowerCase()}${width === 390 ? "-390" : ""}.png`)
+            })
         }
 
         // The left panel: the same through its Show menu.
@@ -191,8 +193,10 @@ for (const theme of ["light", "dark"] as const)
           else same(now.sort, side.sort, `${what} sort`)
           same(now.direction, side.direction, `${what} direction`)
           await expectLayout(page, info, `side-${tab}-${width}-${theme}`, { scope: "[data-card-browse-bar]" })
-          if (shots && width === 1340 && theme === "dark")
-            await page.screenshot({ path: join(shots, `sidebar-${tab.replace(/ /g, "-").toLowerCase()}.png`) })
+          if (shots && (width === 1340 || width === 390) && theme === "dark")
+            await page.screenshot({
+              path: join(shots, `sidebar-${tab.replace(/ /g, "-").toLowerCase()}${width === 390 ? "-390" : ""}.png`)
+            })
         }
         await hideAppNavigation(page)
       }
