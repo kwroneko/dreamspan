@@ -2,7 +2,7 @@
 // trigger. An alert dialog asks for a decision, so it doesn't close on an outside click.
 import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
-import { useRef, type ReactNode } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { Button } from "./Button.tsx"
 import { TitledContainer } from "./titledContainer.tsx"
 import { WindowClose } from "./WindowClose.tsx"
@@ -12,6 +12,62 @@ const backdrop =
   "fixed inset-0 z-40 min-h-dvh bg-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none supports-[-webkit-touch-callout:none]:absolute"
 const popup =
   "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-surface p-5 text-text shadow-xl outline-none transition-[scale,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+
+/** Marks a layout column a dialog can centre on (the shell's sidebar and centre column). */
+export const DIALOG_COLUMN = "data-dialog-column"
+
+interface ColumnBox {
+  readonly left: number
+  readonly top: number
+  readonly width: number
+  readonly height: number
+}
+
+/** The popup's widest width for its size, plus the 1rem gutter each side: what a column must hold. */
+const needs = (size: "normal" | "wide", wide: boolean) => (size === "wide" ? 1500 : wide ? 1024 : 512) + 32
+
+/**
+ * The box of the column `trigger` sits in, while the dialog fits in it; null otherwise (no
+ * trigger, no column, a column narrower than the dialog, or the one-column phone layout), and
+ * the dialog centres on the window.
+ */
+function columnBox(trigger: HTMLElement | null, room: number): ColumnBox | null {
+  const column = trigger?.closest<HTMLElement>(`[${DIALOG_COLUMN}]`)
+  if (!column || !window.matchMedia("(min-width: 1024px)").matches) return null
+  const rect = column.getBoundingClientRect()
+  if (rect.width < room || rect.width >= window.innerWidth - 1) return null
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+}
+
+const sameBox = (a: ColumnBox | null, b: ColumnBox | null) =>
+  a === b ||
+  (a !== null && b !== null && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height)
+
+/** Follows the trigger's column live: a resized window or sidebar, or a collapsed one. */
+function useColumnBox(trigger: RefObject<HTMLElement | null> | undefined, room: number) {
+  // Measured in the first render, so the dialog opens where it stays.
+  const [box, setBox] = useState(() => (trigger ? columnBox(trigger.current, room) : null))
+  useLayoutEffect(() => {
+    if (!trigger) return
+    const element = trigger.current
+    const update = () =>
+      setBox((old) => {
+        const next = columnBox(element, room)
+        return sameBox(old, next) ? old : next
+      })
+    update()
+    const observer = new ResizeObserver(update)
+    const column = element?.closest(`[${DIALOG_COLUMN}]`)
+    if (column) observer.observe(column)
+    observer.observe(document.documentElement)
+    window.addEventListener("resize", update)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", update)
+    }
+  }, [trigger, room])
+  return box
+}
 
 export function Dialog({
   open,
@@ -24,6 +80,7 @@ export function Dialog({
   insetScroll = false,
   finalFocus,
   initialFocus,
+  centerOnColumnOf,
   children
 }: {
   open: boolean
@@ -45,9 +102,22 @@ export function Dialog({
   finalFocus?: (() => boolean) | undefined
   /** The element to focus on open, such as the field a link opened the dialog at. */
   initialFocus?: (() => HTMLElement | null) | undefined
+  /**
+   * Centre on the layout column this element sits in (the centre column or the sidebar) rather
+   * than the window, following its size; the window when the dialog doesn't fit in it.
+   */
+  centerOnColumnOf?: RefObject<HTMLElement | null> | undefined
   children: ReactNode
 }) {
   const content = useRef<HTMLDivElement>(null)
+  const column = useColumnBox(centerOnColumnOf, needs(size, wide))
+  const columnStyle = column
+    ? {
+        left: column.left + column.width / 2,
+        width: `calc(${column.width}px - 2rem)`,
+        ...(placement === "top" ? {} : { top: column.top + column.height / 2 })
+      }
+    : undefined
   const away = useAway()
   const focusOnOpen = () => {
     if (initialFocus) return initialFocus() ?? true
@@ -84,6 +154,8 @@ export function Dialog({
         <BaseDialog.Popup
           data-layout-overlay="Modal dialog covers the page"
           ref={content}
+          style={columnStyle}
+          data-dialog-on-column={column ? "" : undefined}
           finalFocus={finalFocus}
           initialFocus={focusOnOpen}
           className={`${popup} ${size === "wide" ? "sm:max-w-[min(94vw,1500px)] sm:max-h-[calc(100dvh-3rem)]" : wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}

@@ -26,6 +26,7 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Link, Outlet, useLocation, useMatches, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { DIALOG_COLUMN } from "../ui/Dialog.tsx"
 import { ErrorAlert } from "../actions.tsx"
 import { BrowserRecovery, RecoveryNotice } from "./editor/BrowserRecovery.tsx"
 import { appDurableFields } from "./editor/durable.tsx"
@@ -295,6 +296,7 @@ function DesktopSidebar() {
   return (
     <aside
       aria-label="Sidebar"
+      {...{ [DIALOG_COLUMN]: "" }}
       style={{ width }}
       className="relative hidden shrink-0 border-r border-border bg-surface lg:block"
     >
@@ -433,7 +435,7 @@ function Main() {
   const snapshot = useSyncExternalStore(centerColumn.subscribe, centerColumn.snapshot, centerColumn.snapshot)
   const entry = [...snapshot.entries].sort((a, b) => a.order - b.order)[0]
   return (
-    <main id="content" className="flex min-h-0 flex-1 flex-col">
+    <main id="content" {...{ [DIALOG_COLUMN]: "" }} className="flex min-h-0 flex-1 flex-col">
       {entry ? <entry.component /> : <CenterPage />}
     </main>
   )
