@@ -78,7 +78,7 @@ import { forkStart } from "../messages.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import type { Formats } from "../../importer/Formats.ts"
 import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
-import { makeLibraryExportTool } from "./libraryExport.ts"
+import { EXPORT_LAST_FILE_NUMBER, makeLibraryExportTool } from "./libraryExport.ts"
 import { visibleDoc } from "../libraryView.ts"
 import {
   type ConflictChoice,
@@ -1191,7 +1191,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const stem = asked.full.slice(0, asked.full.length - ext.length)
         let place = asked
         for (let n = 2; yield* attempt(() => statPath(place.root.hostRoot, place.segments)); n++) {
-          if (n > 100) throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
+          if (n > EXPORT_LAST_FILE_NUMBER)
+            throw new FilePathRefused(`${asked.full} and its numbered names are taken. Give another path.`)
           place = resolveIn(ctx, `${stem} (${n})${ext}`, start, roots, true)
         }
         const done = yield* replaceFile(ctx, account, place.full, place.root, place.segments, () => content, "create")

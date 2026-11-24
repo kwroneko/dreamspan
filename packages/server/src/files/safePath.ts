@@ -14,7 +14,7 @@ const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_DIRECTORY, O_NOFOLLOW, O_NONBLOCK
 
 export class FilePathRefused extends Error {}
 
-const NAME_MAX = 255
+export const NAME_MAX = 255
 const PATH_MAX = 4096
 
 /** A path's components below the root, checked: no empty, `.`, `..` or NUL, within the limits. */
@@ -166,7 +166,7 @@ export const writeRegularFile = async (
   try {
     const existing = await lstat(at(dir, name)).catch(() => null)
     if (existing?.isDirectory()) throw new FilePathRefused(`“${name}” is a folder.`)
-    const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
+    const temporary = `.write.${randomBytes(6).toString("hex")}.rp-tmp`
     options.stage?.(temporary)
     const file = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, existing?.mode ?? 0o644)
     try {

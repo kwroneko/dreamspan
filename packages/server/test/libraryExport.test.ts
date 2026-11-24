@@ -119,6 +119,17 @@ describe("export_to_file", () => {
         const again = yield* run("export_to_file", { kind: "card", item: "Mara Quill", field: "description" })
         assert.include(again.text, "/files/notes/Mara Quill description (2).txt")
 
+        const longLabel = "界".repeat(100)
+        const long = yield* create("card", longLabel, cardDoc(longLabel, { description: "Exact export." }))
+        const longTarget = { kind: "card", item: long.id, field: "description" }
+        for (const suffix of ["", " (2)"]) {
+          const exported = yield* run("export_to_file", longTarget)
+          assert.isUndefined(exported.isError, exported.text)
+          const path = `/files/notes/${"界".repeat(81)}${suffix}.txt`
+          assert.strictEqual(exported.effects?.[0]?.targetId, path)
+          assert.include((yield* run("read_file", { path })).text, "Exact export.")
+        }
+
         // A greeting, and the whole card as JSON (without its skills), at a path given.
         const greeting = yield* run("export_to_file", {
           kind: "card",

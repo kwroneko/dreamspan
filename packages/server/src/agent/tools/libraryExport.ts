@@ -12,6 +12,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import type { RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
 import { Effect } from "effect"
+import { NAME_MAX } from "../../files/safePath.ts"
 import { libraryClassIds } from "../capabilities.ts"
 import { CARD_TEXT_FIELDS, findPart, visibleDoc } from "../libraryView.ts"
 import { toolResultFrame } from "../toolData.ts"
@@ -23,6 +24,7 @@ const EXPORT_TOOL = "export_to_file"
 
 /** The largest text written, as write_file's content. */
 const EXPORT_MAX_BYTES = 8 * 2 ** 20
+export const EXPORT_LAST_FILE_NUMBER = 100
 
 type Kind = "card" | "preset" | "lorebook"
 type Doc = Readonly<Record<string, unknown>>
@@ -156,17 +158,23 @@ const targetOf = (
   return { text: `${JSON.stringify(visible, null, 2)}\n`, what: `the whole ${kind}`, stem: "", ext: ".json" }
 }
 
-/** A name for a file: no slashes or control characters, no leading dots, at most 120 characters. */
+/** A safe default name with space for its extension and largest collision suffix. */
 const fileNameOf = (label: string, stem: string, ext: string, kind: Kind) => {
-  const base = [label, stem]
+  const candidate = [label, stem]
     .join(" ")
     .replace(/[\u0000-\u001f\u007f/\\]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^\.+/, "")
-    .slice(0, 120)
-    .trim()
-  return `${base === "" ? kind : base}${ext}`
+  let base = ""
+  let remainingBytes = NAME_MAX - Buffer.byteLength(` (${EXPORT_LAST_FILE_NUMBER})${ext}`)
+  for (const character of candidate) {
+    const bytes = Buffer.byteLength(character)
+    if (base.length + character.length > 120 || bytes > remainingBytes) break
+    base += character
+    remainingBytes -= bytes
+  }
+  return `${base.trim() || kind}${ext}`
 }
 
 const number = (n: number) => n.toLocaleString("en-US")
