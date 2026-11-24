@@ -34,6 +34,8 @@ const archive = (t: Locator) => t.getByRole("button", { name: /^(Unarchive|Archi
 const measure = (t: Locator) =>
   t.evaluate((el) => {
     const tile = el.getBoundingClientRect()
+    // The tile surface owns the border (9209bdbc1). The controls are inset from its inside edge.
+    const border = getComputedStyle(el)
     const read = (button: Element | null) => {
       if (!button) return null
       const r = button.getBoundingClientRect()
@@ -42,9 +44,9 @@ const measure = (t: Locator) =>
       return {
         opacity: Number(s.opacity),
         clicks: s.pointerEvents !== "none",
-        left: Math.round(r.left - tile.left),
-        right: Math.round(tile.right - r.right),
-        top: Math.round(r.top - tile.top),
+        left: Math.round(r.left - tile.left - parseFloat(border.borderLeftWidth)),
+        right: Math.round(tile.right - r.right - parseFloat(border.borderRightWidth)),
+        top: Math.round(r.top - tile.top - parseFloat(border.borderTopWidth)),
         size: `${Math.round(r.width)}×${Math.round(r.height)}`,
         backing: s.backgroundColor,
         wrapperBacking: wrapper.backgroundColor
