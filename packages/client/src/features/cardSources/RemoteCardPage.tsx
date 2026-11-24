@@ -11,6 +11,7 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { linkMenuProps } from "../../ui/linkMenuState.ts"
+import { EDITOR_BESIDE_HINT, openPageBeside, useCanOpenBeside } from "../../ui/openBeside.ts"
 import { useTitle } from "../shell.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { useCapabilities, useSourceList } from "./browse.tsx"
@@ -113,6 +114,7 @@ export function RemoteCardPage() {
   const adopt = useAdoptRemote()
   const [adopted, setAdopted] = useState<{ key: string; card: Adopted } | null>(null)
   const [adding, setAdding] = useState(false)
+  const canBeside = useCanOpenBeside()
   useEffect(() => {
     if (!info) return
     const controller = new AbortController()
@@ -152,9 +154,9 @@ export function RemoteCardPage() {
   const { summary, docJson } = current.card
   const mine =
     adopted?.key === key
-      ? { entityId: adopted.card.entityId, archived: false }
+      ? { entityId: adopted.card.entityId, refId: adopted.card.refId, archived: false }
       : summary.held
-        ? { entityId: summary.held.entityId, archived: summary.held.archived }
+        ? { entityId: summary.held.entityId, refId: summary.held.refId, archived: summary.held.archived }
         : null
   const doc = (docJson ? JSON.parse(docJson) : {}) as Definitions
   const greetings = (doc.alternate_greetings ?? []).length
@@ -238,6 +240,20 @@ export function RemoteCardPage() {
                   Open your card
                 </Link>
               </Tooltip>
+            )}
+            {/* The editor beside, as the side pane's preview tab (owner, 2026-11-24). */}
+            {canBeside && (
+              <Button
+                variant="ghost"
+                hint={EDITOR_BESIDE_HINT}
+                onClick={() =>
+                  openPageBeside(
+                    mine === null ? remoteEditorHref(sourceId, remoteId) : `/library/${encodeURIComponent(mine.refId)}`
+                  )
+                }
+              >
+                Edit beside
+              </Button>
             )}
           </div>
           {summary.tags.length > 0 && (

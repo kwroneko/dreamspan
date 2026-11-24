@@ -275,3 +275,50 @@ test("cardex cards: Edit beside opens the editor as the side pane's preview, as 
     await server.stop()
   }
 })
+
+test("cardex cards you have and the card page: Edit beside opens the editor beside", async ({ page }) => {
+  const port = await freePort()
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
+  try {
+    await setup(page, server)
+    await page.goto(server.url)
+    const main = page.getByRole("main")
+    await main.getByRole("button", { name: "cardex", exact: true }).click()
+    const tiles = main.locator("[data-remote-card]")
+    await expect(tiles.nth(1)).toBeVisible()
+    const names = await tiles.evaluateAll((nodes) =>
+      nodes.map((n) => (n.querySelector("a")?.getAttribute("aria-label") ?? "").replace(/^Open /, ""))
+    )
+    const second = await tiles.nth(1).getAttribute("data-remote-card")
+    // A card you have: Edit beside right after Open your card, opening your card's editor.
+    await choose(page, tiles.nth(0), /^Add to my cards/)
+    await expect(tiles.nth(0)).toHaveAttribute("data-held", "true")
+    await tiles.nth(0).getByRole("link").first().click({ button: "right" })
+    const texts = await page.getByRole("menuitem").allTextContents()
+    expect(texts[0]).toMatch(/^Open your card/)
+    expect(texts[1]).toMatch(/^Edit beside/)
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/held-menu.png` })
+    await page.getByRole("menuitem", { name: /^Edit beside/ }).click()
+    await expect(frames(page)).toHaveCount(2)
+    const side = frames(page).nth(1)
+    await expect(side.locator("[data-tab][data-preview]")).toHaveCount(1)
+    await expect(side.locator("[data-tab]").first()).toContainText(names[0]!)
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/held-split.png` })
+    await side.locator("[data-tab]").first().getByRole("tab").click()
+    // Your card's own editor (its id), not the source card's read-only one.
+    await expect(page).toHaveURL(/\/library\/[0-9a-f-]{36}\?/)
+
+    // The card page's own Edit beside button: the card not added opens its read-only editor beside.
+    await page.goto(`${server.url}/sources/cardex/cards/${encodeURIComponent(second!)}`)
+    const button = page.getByRole("button", { name: "Edit beside", exact: true })
+    await expect(button).toBeVisible()
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/page-button.png` })
+    await button.click()
+    await expect(frames(page)).toHaveCount(2)
+    await expect(frames(page).nth(1).locator("[data-tab][data-preview]")).toHaveCount(1)
+    await expect(frames(page).nth(1).locator("[data-tab]").first()).toContainText(names[1]!)
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/page-split.png` })
+  } finally {
+    await server.stop()
+  }
+})

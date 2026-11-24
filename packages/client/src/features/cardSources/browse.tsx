@@ -530,9 +530,10 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const character = useCharacterNavigation()
   const router = useRouter()
   // The user's own card for it (§3.7): from the results, or just added here.
-  const [added, setAdded] = useState<{ entityId: string; archived: boolean } | null>(null)
+  const [added, setAdded] = useState<{ entityId: string; refId: string; archived: boolean } | null>(null)
   const [flash, setFlash] = useState(false)
-  const mine = added ?? (card.held ? { entityId: card.held.entityId, archived: card.held.archived } : null)
+  const mine =
+    added ?? (card.held ? { entityId: card.held.entityId, refId: card.held.refId, archived: card.held.archived } : null)
   // What a click opens: your card's chat, else the draft chat. Open beside and a new browser tab open it too.
   const entity = mine?.entityId as EntityId | undefined
   const heldChat = entity === undefined ? null : character.link(entity)
@@ -596,7 +597,7 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const addToMine = () =>
     void adopt(info.id, info.name, card.remoteId).then((result) => {
       if (!result) return
-      setAdded({ entityId: result.entityId, archived: false })
+      setAdded({ entityId: result.entityId, refId: result.refId, archived: false })
       // The tile flashes once as it becomes yours.
       setFlash(true)
       window.setTimeout(() => setFlash(false), 1200)
@@ -636,7 +637,18 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
           <MenuItem icon="person" description="Opens your copy, as a click does." onClick={openMine}>
             Open your card
           </MenuItem>
-        ) : (
+        ) : null}
+        {/* Your card's editor beside, as the Library's Edit beside (owner, 2026-11-24). */}
+        {mine !== null && canBeside && (
+          <MenuItem
+            icon="edit"
+            description={EDITOR_BESIDE_HINT}
+            onClick={() => openPageBeside(`/library/${encodeURIComponent(mine.refId)}`)}
+          >
+            Edit beside
+          </MenuItem>
+        )}
+        {mine === null && (
           <MenuItem
             icon="chat"
             description="Opens a new chat with it, as a click does."
