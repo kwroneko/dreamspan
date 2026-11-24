@@ -7,25 +7,31 @@
 // A new account-wide read belongs in `accountReads` (ARCHITECTURE.md §1); test/chatReaders.test.ts
 // checks the SQL itself.
 import { assert, describe, it } from "@effect/vitest"
-import { type ChatId, type EntityId, NewVersion } from "@dreamspan/shared/chat.ts"
+import type { ChatId, EntityId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { sizedPng } from "./formats/support.ts"
 import { cardDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
-const greeting = (speaker: EntityId, content: string) =>
-  new NewVersion({
-    speakerEntityId: speaker,
-    writer: "model",
-    content,
-    status: "complete",
-    macroMode: "template",
-    origin: "greeting"
+const upload = (bytes: Uint8Array) =>
+  Effect.gen(function* () {
+    const port = yield* serverPort
+    const response = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/chat/image`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+    )
+    assert.strictEqual(response.status, 200)
+    return (yield* Effect.promise(() => response.json())) as { mediaId: string }
   })
 
 const shellView = (entity: EntityId | null) => ({
@@ -66,7 +72,13 @@ const accountReads = (userId: UserId, cards: ReadonlyArray<EntityId>, refs: Read
       GroupChats: yield* reader.GroupChats({ userId, chatId: group }),
       CardFamilyIndex: yield* reader.CardFamilyIndex({ userId }),
       CardFamily: yield* perCard((entityId) => reader.CardFamily({ userId, entityId })),
-      ListLibrary: yield* reader.ListLibrary({ userId, kind: "card", tag: null, withFilterData: true, archived: false }),
+      ListLibrary: yield* reader.ListLibrary({
+        userId,
+        kind: "card",
+        tag: null,
+        withFilterData: true,
+        archived: false
+      }),
       GetRef: yield* perRef((refId) => reader.GetRef({ userId, refId })),
       LibraryGenealogy: yield* perRef((refId) => reader.LibraryGenealogy({ userId, refId })),
       GetCardImportNote: yield* perRef((cardRefId) => reader.GetCardImportNote({ userId, cardRefId })),
@@ -113,18 +125,10 @@ const card = (userId: UserId, name: string, persona = false) =>
   })
 
 /** A pending chat as the new-chat page leaves it once the user has looked around and typed. */
-const touchedDraft = (api: Api, userId: UserId, cast: ReadonlyArray<EntityId>, persona: EntityId) =>
+const touchedDraft = (api: Api, userId: UserId, draftFor: DraftFor, persona: EntityId) =>
   Effect.gen(function* () {
-    const writer = yield* Writer
     const reader = yield* Reader
-    const chat = yield* writer.CreateChat({
-      userId,
-      kind: "rp",
-      status: "pending",
-      title: "",
-      participants: [...cast],
-      greeting: cast.length === 0 ? null : greeting(cast[0]!, "The lighthouse keeper greets you.")
-    })
+    const chat = yield* api.OpenDraftChat({ draftFor })
     yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "PlayedByMe", entityIds: [persona] } })
     yield* api.RenameChat({ chatId: chat.id, name: "Lighthouse night" })
     const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
@@ -140,8 +144,8 @@ const touchedDraft = (api: Api, userId: UserId, cast: ReadonlyArray<EntityId>, p
     yield* api.SetComposerImage({
       chatId: chat.id,
       draftId: composer.id,
-      id: "image-1",
-      mediaId: null,
+      id: crypto.randomUUID(),
+      mediaId: (yield* upload(sizedPng(64, 64))).mediaId,
       altText: "A lighthouse at dusk"
     })
     const leaf = (yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId
@@ -184,11 +188,11 @@ describe("pending chats are invisible", () => {
       const refs = [mira.ref.id, ana.ref.id, quiet.ref.id, sam.ref.id]
       const before = yield* accountReads(userId, cards, refs, group.chat.id)
 
-      yield* touchedDraft(api, userId, [mira.entityId], sam.entityId)
-      yield* touchedDraft(api, userId, [ana.entityId, mira.entityId], sam.entityId)
+      yield* touchedDraft(api, userId, `card:${mira.entityId}`, sam.entityId)
+      yield* touchedDraft(api, userId, `group:${group.chat.id}`, sam.entityId)
       // A card with no chats yet: nothing may count it used.
-      yield* touchedDraft(api, userId, [quiet.entityId], sam.entityId)
-      yield* touchedDraft(api, userId, [], sam.entityId)
+      yield* touchedDraft(api, userId, `card:${quiet.entityId}`, sam.entityId)
+      yield* touchedDraft(api, userId, "empty", sam.entityId)
 
       const after = yield* accountReads(userId, cards, refs, group.chat.id)
       for (const key of Object.keys(before) as Array<keyof typeof before>)
@@ -205,23 +209,17 @@ describe("pending chats are invisible", () => {
       const userId = (yield* api.Whoami()).id as UserId
       const writer = yield* Writer
       const mira = yield* card(userId, "Mira")
-      const chat = yield* writer.CreateChat({
-        userId,
-        kind: "rp",
-        status: "pending",
-        title: "",
-        participants: [mira.entityId],
-        greeting: greeting(mira.entityId, "Hello.")
-      })
+      const chat = yield* api.OpenDraftChat({ draftFor: `card:${mira.entityId}` })
       const forkId = (yield* (yield* Reader).GetChat({ userId, chatId: chat.id })).currentForkId!
       const refused = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         Effect.flip(effect).pipe(Effect.map((error) => (error as { _tag?: string })._tag))
-      assert.strictEqual(yield* refused(writer.SetChatPin({ userId, chatId: chat.id, pinned: true })), "NotFound")
+      assert.strictEqual(
+        yield* refused(writer.SetChatPin({ userId, chatId: chat.id, pinned: true, leaf: null })),
+        "NotFound"
+      )
       assert.strictEqual(yield* refused(writer.SetForkPinned({ userId, forkId, pinned: true })), "NotFound")
       assert.strictEqual(
-        yield* refused(
-          writer.CreateFork({ userId, chatId: chat.id, fromForkId: null, atSlotId: null })
-        ),
+        yield* refused(writer.CreateFork({ userId, chatId: chat.id, fromForkId: null, atSlotId: null })),
         "NotFound"
       )
       assert.strictEqual(yield* refused(writer.DeleteChat({ userId, chatId: chat.id })), "NotFound")

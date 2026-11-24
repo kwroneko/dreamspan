@@ -2919,6 +2919,32 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Chat,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * The new-chat page's chat (DESIGN §2.1): `StartGreetingChat`'s chat, pending, with no last
+   * message, opened for `draftFor` (`card:<entity>`, `group:<chat>`, `empty`). No reader across
+   * the account sees it until its first turn commits it (db/pendingChats.ts).
+   */
+  Rpc.make("OpenDraftChat", {
+    payload: {
+      userId: UserId,
+      draftFor: Schema.String,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title
+    },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Removes a pending chat of the user's, its typing filed to recovered texts first (as "New
+   * chat with <names>"). False: it wasn't a pending chat of theirs (committed, gone).
+   */
+  Rpc.make("SweepPendingChat", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
   Rpc.make("AgentStartChat", {
     payload: {
       userId: UserId,
@@ -5326,6 +5352,12 @@ const ReadOpsOwn = RpcGroup.make(
    * The user's chats, most recent first (DESIGN §2.1: by last message, else creation); a
    * card's, those with a message first. NotFound: the card isn't the user's.
    */
+  /** The user's pending chats (db/pendingChats.ts), oldest first: for the sweep, never listed. */
+  Rpc.make("PendingChats", {
+    payload: { userId: UserId },
+    success: Schema.Array(Schema.Struct({ chatId: ChatId, draftFor: Schema.NullOr(Schema.String) })),
+    error: StorageError
+  }),
   Rpc.make("ListChats", {
     payload: {
       userId: UserId,

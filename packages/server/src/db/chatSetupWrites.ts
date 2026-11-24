@@ -1,4 +1,5 @@
 import { refusePending } from "./chatKindPolicy.ts"
+import { sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -79,16 +80,6 @@ const reply = (speakerEntityId: EntityId | null, direction: string | null, autoP
     origin: "generated",
     ...(direction !== null && direction.trim() !== "" ? { direction } : {})
   })
-
-/**
- * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
- * The persona the user plays is left out, as the client's automatic name leaves it out
- * (`chatTitle.ts` `castCharacters`), so a 1:1 reads "Mira, Oct 31" much as an imported one does.
- */
-const titleFor = (names: ReadonlyArray<string>, at: number) =>
-  names.length > 1
-    ? names.join(" & ")
-    : `${names[0] ?? "Chat"}, ${new Date(at).toLocaleDateString("en", { day: "numeric", month: "short" })}`
 
 type WriteHandlers = Parameters<typeof WriteOps.of>[0]
 
@@ -364,13 +355,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         { discard: true }
       )
 
+    /** `draftFor`: a pending chat (the new-chat page's) opened for that entry, with no last message. */
     const greetingChat = ({
       userId,
       cards,
       persona,
       greeters,
-      title
-    }: Parameters<WriteHandlers["StartGreetingChat"]>[0]) =>
+      title,
+      draftFor
+    }: Parameters<WriteHandlers["StartGreetingChat"]>[0] & { readonly draftFor?: string }) =>
       Effect.gen(function* () {
         const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
         const loaded = yield* loadCards(sql, userId, ids)
@@ -390,9 +383,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           id: chatId,
           owner_user_id: userId,
           kind: "rp",
-          status: "active",
+          status: draftFor === undefined ? "active" : "pending",
           title: title?.trim() || titleFor(names, at),
-          created_at: at
+          created_at: at,
+          ...(draftFor === undefined ? {} : { draft_for: draftFor })
         })}`
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
@@ -442,7 +436,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           )
           const inserted = yield* graph.insertSlot(chatId, parent, greetingVersion(0), at, null, more, picked)
           const slotId = inserted.slotId as SlotId
-          yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
+          // A pending chat has no last message until it is committed: its greetings use nothing.
+          yield* draftFor === undefined
+            ? sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
+            : sql`UPDATE chats SET active_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
           root = slotId
           depth++
         }
@@ -634,6 +631,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* graph.ownedFork(input.userId, chatId, null)
           return toChat(yield* graph.ownedChat(input.userId, chatId))
         }).pipe(transaction("StartGreetingChat")),
+      OpenDraftChat: ({ userId, draftFor, cards, persona, greeters, title }) =>
+        Effect.gen(function* () {
+          const { chatId } = yield* greetingChat({ userId, cards, persona, greeters, title, draftFor })
+          yield* graph.ownedFork(userId, chatId, null)
+          return toChat(yield* graph.ownedChat(userId, chatId))
+        }).pipe(transaction("OpenDraftChat")),
+      SweepPendingChat: ({ userId, chatId }) =>
+        sweepPendingChat(sql, bin.recover, userId, chatId).pipe(transaction("SweepPendingChat")),
       StartChat: ({ guidance, userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const { chatId, root } = yield* greetingChat({ userId, cards, persona, greeters, title })

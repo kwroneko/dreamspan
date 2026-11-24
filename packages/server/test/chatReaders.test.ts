@@ -29,7 +29,8 @@ const sources = (dir: string): ReadonlyArray<string> =>
 /** Schema files: their triggers and views are checked by the schema's own tests. */
 const schema = (file: string) => /(^|\/)(baseline|migration\w*|listedChats)\.ts$/.test(file)
 
-const reaches = /\b(?:FROM|JOIN)\s+chats\b|\bcard_chat_membership\b|\bversion_participants\b|\bversions_fts\b|\bchat_pins\b/g
+const reaches =
+  /\b(?:FROM|JOIN)\s+chats\b|\bcard_chat_membership\b|\bversion_participants\b|\bversions_fts\b|\bchat_pins\b/g
 const covered = /\blisted(?:Sql|Or)?\(|\bcommitted(?:Sql)?\(|\bstatus\s*=\s*'active'|chat:includes-pending:\s*\S/
 
 /** The template or string the match is in, as far as the nearest backticks. */
@@ -153,4 +154,25 @@ it("every reader across a user's chats says how it treats pending chats", () => 
     "A reader reaches across chats without saying how it treats pending chats (see this file's header). " +
       `The counts found now: ${JSON.stringify(sorted, null, 2)}`
   )
+})
+
+/**
+ * A chat's status changes in one place, so a pending chat is committed by the write that makes
+ * its first turn and by nothing else (db/pendingChats.ts); and only that module and the bin's
+ * purge delete a chat row (a pending chat is never in the bin: its writes refuse it).
+ */
+it("only pendingChats.ts changes a chat's status, and only it and the bin delete chats", () => {
+  const status: Array<string> = []
+  const deletes: Array<string> = []
+  for (const path of sources(root)) {
+    const file = relative(root, path)
+    if (schema(file)) continue
+    const text = readFileSync(path, "utf8")
+    for (const match of text.matchAll(/\bUPDATE\s+chats\s+SET\b/g)) {
+      if (/\bstatus\s*=/.test(statementAt(text, match.index))) status.push(file)
+    }
+    for (const _ of text.matchAll(/\bDELETE\s+FROM\s+chats\b/g)) deletes.push(file)
+  }
+  assert.deepStrictEqual([...new Set(status)], ["db/pendingChats.ts"])
+  assert.deepStrictEqual([...new Set(deletes)].sort(), ["db/bin.ts", "db/pendingChats.ts"])
 })

@@ -78,6 +78,12 @@ export class ChatHub extends Context.Service<
      * event but streamed text and the cache estimate, which follows from the others.
      */
     readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
+    /**
+     * Whether a tab may still have the chat open: someone is subscribed, or the last one left
+     * less than `graceMs` ago (or the server started less than that ago, as after a deploy,
+     * while tabs reconnect). A pending chat is swept only when nobody has it (db/pendingChats.ts).
+     */
+    readonly held: (chatId: ChatId, graceMs: number) => boolean
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -90,6 +96,9 @@ export class ChatHub extends Context.Service<
         const subscribers = new Map<ChatId, Set<Subscriber>>()
         const listeners = new Set<(chatId: ChatId, event?: ChatEvent) => void>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
+        // When each chat's last subscriber left, for `held`: kept a while, then forgotten.
+        const left = new Map<ChatId, number>()
+        const startedAt = Date.now()
         let timer: ReturnType<typeof setTimeout> | undefined
 
         const flush = () => {
@@ -127,6 +136,12 @@ export class ChatHub extends Context.Service<
             }
             subscribers.delete(chatId)
           },
+          held: (chatId, graceMs) => {
+            if ((subscribers.get(chatId)?.size ?? 0) > 0) return true
+            const now = Date.now()
+            for (const [id, at] of left) if (now - at >= graceMs) left.delete(id)
+            return now - Math.max(startedAt, left.get(chatId) ?? 0) < graceMs
+          },
           listen: (listener) =>
             Effect.acquireRelease(
               Effect.sync(() => listeners.add(listener)),
@@ -150,6 +165,7 @@ export class ChatHub extends Context.Service<
                     if (set?.size === 0) {
                       subscribers.delete(chatId)
                       pending.delete(chatId)
+                      left.set(chatId, Date.now())
                     }
                   })
               )

@@ -147,7 +147,7 @@ const draftCardOf = (entityId: EntityId, docJson: string) => {
  * time macros frozen, whatever the client sent: the values it saw in the preview are kept, and
  * any it didn't send are drawn now. `PreviewChat` draws the same way.
  */
-const drawGreeters = <E>(
+export const drawGreeters = <E>(
   reader: Reader["Service"],
   id: UserId,
   input: Pick<StartChatPayload, "cards" | "persona" | "greeting"> & {
