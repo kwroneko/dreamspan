@@ -16,13 +16,13 @@ const dayFormat = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "
 /** How the row is related to the card, in a few words. */
 const relationText = (item: RemoteRelative) =>
   item.relation === "parent"
-    ? "Forked from"
+    ? "Original"
     : item.relation === "earlier"
       ? "Earlier listing"
       : item.relation === "fork"
         ? "Fork"
         : item.current
-          ? "Current version"
+          ? "Newer version"
           : "Older version"
 
 const detailsOf = (item: RemoteRelative) =>

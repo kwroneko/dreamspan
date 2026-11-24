@@ -889,15 +889,23 @@ export const familyOf = (
   for (const entry of Array.isArray(detail.earlier_origins) ? detail.earlier_origins.filter(isRecord) : []) {
     const listing = isRecord(entry.listing) ? entry.listing : null
     const was = isRecord(entry.origin) ? entry.origin : null
+    const slug = was?.card_slug ?? listing?.card_slug
+    // A former listing can now serve a newer version of the viewed card.
+    const history = Array.isArray(listing?.versions) ? listing.versions.filter(isRecord) : []
+    const newer = history.some((version) => version.slug === remoteId && version.is_current === false)
+      ? history.find((version) => version.slug === slug && version.is_current === true)
+      : undefined
     add(
       relativeOf(
-        "earlier",
+        newer ? "version" : "earlier",
         {
-          slug: was?.card_slug ?? listing?.card_slug,
+          slug,
           name: listing?.name,
           creator: listing?.author,
           site: earlierSite(listing?.source_label, listing?.source ?? was?.source),
-          at: entry.active_from,
+          at: newer?.active_from ?? entry.active_from,
+          current: newer?.is_current,
+          versionLabel: isRecord(newer?.meta) ? newer.meta.character_version : undefined,
           thumb: isRecord(listing?.cover) ? listing.cover.thumb_url : undefined
         },
         origin
