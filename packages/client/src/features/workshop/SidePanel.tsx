@@ -204,17 +204,8 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
         storyFork={storyFork}
         header={header}
         onCreated={onCreated}
-        render={(chat, draft) => (
-          <SideChat
-            key={chat.id}
-            chat={chat}
-            storyFork={storyFork}
-            focusComposer={false}
-            header={header}
-            onGone={gone}
-            draft={draft}
-          />
-        )}
+        onGone={gone}
+        Surface={PendingSideSurface}
       />
     )
   return (
@@ -226,6 +217,25 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       header={header}
       onGone={gone}
     />
+  )
+}
+
+/** A workshop not started yet, in the tab's own chat surface. */
+function PendingSideSurface({
+  chat,
+  draft,
+  storyFork,
+  header,
+  onGone
+}: {
+  chat: Chat
+  draft: SideDraftHost
+  storyFork: ForkId | null
+  header: ReactNode
+  onGone: () => void
+}) {
+  return (
+    <SideChat chat={chat} storyFork={storyFork} focusComposer={false} header={header} onGone={onGone} draft={draft} />
   )
 }
 

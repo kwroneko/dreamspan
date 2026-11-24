@@ -6,7 +6,7 @@
 import type { Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
@@ -33,15 +33,23 @@ export function PendingSideDraft({
   storyFork,
   header,
   onCreated,
-  render
+  onGone,
+  Surface
 }: {
   story: ChatId
   /** The story branch shown: the workshop's first branch goes with it. */
   storyFork: ForkId | null
   header: ReactNode
   onCreated: (chat: Chat) => void
+  onGone: () => void
   /** The tab's chat surface for a chat, as for a saved one. */
-  render: (chat: Chat, host: SideDraftHost) => ReactNode
+  Surface: ComponentType<{
+    chat: Chat
+    draft: SideDraftHost
+    storyFork: ForkId | null
+    header: ReactNode
+    onGone: () => void
+  }>
 }) {
   const draftFor = `side:${story}:${storyFork ?? ""}` as DraftFor
   const [named, setNamed] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "draft"), "")
@@ -115,7 +123,8 @@ export function PendingSideDraft({
     }),
     [onCreated]
   )
-  if (chat !== null) return render(chat, host)
+  if (chat !== null)
+    return <Surface key={chat.id} chat={chat} draft={host} storyFork={storyFork} header={header} onGone={onGone} />
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
