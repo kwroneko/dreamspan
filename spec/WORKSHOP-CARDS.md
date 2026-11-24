@@ -161,7 +161,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
 
 **The delta here.**
 
-1. **Small items are inlined; large ones are referenced.** An attached item whose whole text fits the **inline limit** is in the message whole; above it the message holds a reference, with reference-harness's summary view inside it. The inline limit is 8,000 tokens by the model's local tokenizer (owner [D]), lowered to 20% of the model's window where that is less (reference-harness's adaptive share), so a small local model isn't flooded. Both are frozen with the version at send (it's history): the cache never breaks for them and causal order holds.
+1. **Attachments share one inline budget per turn.** The inline limit is 8,000 tokens by the model's local tokenizer (owner [D]), lowered to 20% of the model's window where that is less (reference-harness's adaptive share). The budget for all library attachments together is at most that limit and must fit the input space left for the newest message after the fixed prompt, tools, output reserve, user text and other attachments are counted. Count the rendered elements, including tags and references. Reserve a compact reference for each item first, then expand items in attachment order to their whole text where it fits, or to a bounded summary where there is room. A compact reference identifies the item and pinned revision for a paged tool read. If even the compact references cannot fit, reject the send before storing the message and ask the user to remove attachments. Freeze the chosen renderings with the message version at send so history and cache order hold.
 
    ```
    <attached_card name="Mara Quill" id="ref_3k9…" revision="7" tokens="3,140">
@@ -175,7 +175,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
    </attached_card>
    ```
 
-   Lorebooks and presets follow the same rule: inline when the whole book or preset fits, otherwise a reference with its index (a book's entries by title with their keys and tokens, at most 50, then "38 more: read_lorebook with view index"; a preset's prompts by name, on or off, and tokens).
+   Lorebooks and presets draw from the same turn budget. A reference can include a bounded index where space permits (a book's entries by title with their keys and tokens, at most 50, then "38 more: read_lorebook with view index"; a preset's prompts by name, on or off, and tokens).
 
 2. **Reads are the same model for attached and found items.** `read_card`, `read_lorebook` and `read_preset` gain reference-harness's views, reading the library head (or a revision, §9), in tokens rather than characters since every count here is a local-tokenizer count:
    - `view: "summary"` (the default when the item is over the inline limit; otherwise the default is `"whole"`): the reference's lines above.
@@ -189,7 +189,7 @@ Owner [D] (2026-11-24): "8000 tokens is fine, but remember that the way of readi
 
 ### 4.4 What's stored [P]
 
-- `version_attachments` gains kind `library` with `ref_id` and `revision_id` (the head at send); `composer_images` gains the same kind for the draft (a card attached and not sent yet survives a reload, as files do). One additive migration.
+- `version_attachments` gains kind `library` with `ref_id`, `revision_id` (the head at send) and the frozen rendering; `composer_images` gains the same kind for the draft (a card attached and not sent yet survives a reload, as files do). One additive migration.
 - Being in view is derived, never granted: the set of `library` attachments on the reply's path up to its user message, plus the cast and the path's creation effects (§2.1). No grant row, so a branch, a swipe or a fork can't disagree with what the user sees on that branch.
 - The pending workshop's `workshopAttach` URL list (with `workshopCard` and `workshopPersona`), dropped of ids the library doesn't have, as the start card already does.
 
@@ -325,7 +325,7 @@ The same model, with their existing tools and diffs:
 
 | What | Where | Change |
 |---|---|---|
-| An attached item on a message | `version_attachments` kind `library`, `ref_id`, `revision_id` | Additive migration |
+| An attached item on a message | `version_attachments` kind `library`, `ref_id`, `revision_id`, frozen rendering | Additive migration |
 | An attached item in a draft | `composer_images` kind `library`, `ref_id` | The same migration |
 | Allow in this chat | `workshop_grants (chat, capability, target '', allow)` | None (built) |
 | Allow (this reply) | `tool_approvals` answer with `scope: reply`, held on the run | None (prompt JSON) |
@@ -340,7 +340,7 @@ The same model, with their existing tools and diffs:
 | Unit | What | Depends on |
 |---|---|---|
 | C1 | New workshop with this card in card menus | — |
-| C2 | `library` attachments: migration, writer validation (owned, live), assembly of the frozen element (whole or reference with summary), in-view derivation (story cast and books included), the "changed since" tail line | — |
+| C2 | `library` attachments: migration, writer validation (owned, live), turn budget and frozen whole items or bounded references, in-view derivation (story cast and books included), the "changed since" tail line | — |
 | C2b | Paged reads: `view`, `offset`, `max_tokens`, indexes and `to_file` on `read_card`, `read_lorebook`, `read_preset` | — |
 | C3 | The paperclip menu in workshops, the multi-select card picker and the lorebook and preset pickers | C2 |
 | C4 | `CARD_DRAG` and library links dropped on a workshop composer | C2 |
