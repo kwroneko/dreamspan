@@ -22,6 +22,8 @@ import { preloadChatPage } from "./chatPageLoader.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
+import { carryLeftover, takeLeftover } from "./composerDraft.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { rememberDraftFor } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 
@@ -53,6 +55,11 @@ function DraftChat({
   const started = useRef(false)
   // Opening another after the shown one was deleted.
   const replacing = useRef(false)
+  // The chat shown, for what its composer has left when another replaces it.
+  const shownId = useRef<ChatId | null>(null)
+  useEffect(() => {
+    shownId.current = chat?.id ?? null
+  }, [chat])
   useEffect(preloadChatPage, [])
   useEffect(() => {
     let live = true
@@ -70,8 +77,10 @@ function DraftChat({
         if (replacing.current) setChat(null)
         return
       }
-      replacing.current = false
       const value = opened.value
+      // What was typed in the swept chat after its saving stopped goes on in this one.
+      if (replacing.current && shownId.current !== null) carryLeftover(shownId.current, value.id)
+      replacing.current = false
       // The chat the URL names was started meanwhile (in another tab, say): it's that chat now.
       if (value.status !== "pending") {
         started.current = true
@@ -115,6 +124,11 @@ function DraftChat({
     if (chatId === null) return
     return () => {
       if (!started.current) void call((client) => client("LeaveDraftChat", { chatId }))
+      // Typed after the chat was swept and not carried into another: filed to the recovered
+      // texts once, as the sweep filed the rest.
+      const left = takeLeftover(chatId)
+      if (left !== null)
+        void call((client) => client("SaveComposer", { ...left.save, operationId: uuidv7(), content: left.content }))
     }
   }, [chatId, call])
   // A new chat asked for with Guidance on (New chat with this cast) starts with it on, once.
