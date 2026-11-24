@@ -2,7 +2,7 @@
 // a small quota is refused new writes and commands with how much it uses, the usage RPC says
 // so, an admin's quota lifts it, and retention removes old versions and the media only they
 // named. Synthetic data only.
-import { link, mkdir, symlink, truncate, writeFile } from "node:fs/promises"
+import { link, mkdir, rename, lstat, symlink, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
@@ -242,6 +242,30 @@ describe("the cached figure between walks", () => {
       assert.strictEqual((yield* quota.usage("u")).usedBytes, next.usedBytes)
     })
   )
+
+  for (const counted of [3_000, 5_000]) {
+    it.live(`retains only unmeasured upload bytes when a walk counted ${counted} bytes under the temporary name`, () =>
+      Effect.gen(function* () {
+        const { quota, gate, root } = yield* Effect.promise(() => setup("quota-upload-inode"))
+        const first = yield* quota.usage("u")
+        const upload = quota.hold("u")
+        assert.isTrue(upload.reserve(counted, first.quotaBytes))
+        const temporary = join(root, "files", ".upload.rp-tmp")
+        yield* Effect.promise(() => writeFile(temporary, Buffer.alloc(counted)))
+        const file = yield* Effect.promise(() => lstat(temporary))
+        gate.arm()
+        const walking = yield* Effect.forkChild(quota.measure("u"))
+        yield* Effect.promise(() => gate.reached)
+        assert.isTrue(upload.reserve(5_000 - counted, first.quotaBytes))
+        yield* Effect.promise(() => truncate(temporary, 5_000))
+        yield* Effect.promise(() => rename(temporary, join(root, "files", "upload")))
+        upload.landed(file)
+        gate.open()
+        const measured = yield* Fiber.join(walking)
+        assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 5_000 - counted)
+      })
+    )
+  }
 
   it.live("an entry found smaller than a walk began with is logged and removed, not a failure", () =>
     Effect.gen(function* () {

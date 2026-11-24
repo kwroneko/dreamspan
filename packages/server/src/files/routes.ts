@@ -996,7 +996,7 @@ export const filesRoutes = Layer.unwrap(
           return true
         }
         const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
-        yield* Effect.tryPromise(async () => {
+        const uploaded = yield* Effect.tryPromise(async () => {
           const handle = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
           let received = 0
           let idle: NodeJS.Timeout | undefined
@@ -1028,10 +1028,12 @@ export const filesRoutes = Layer.unwrap(
           })
           idle = setTimeout(() => counter.destroy(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
           try {
+            const file = await handle.stat()
             // The write stream owns the handle: it syncs (`flush`) and closes it when done. With
             // `autoClose: false` the pipeline would wait for a close that never comes.
             await pipeline(message, counter, handle.createWriteStream({ flush: true }))
             if (refused) throw refused
+            return file
           } catch (error) {
             await handle.close().catch(() => undefined)
             await unlink(at(dir, temporary)).catch(() => undefined)
@@ -1072,7 +1074,7 @@ export const filesRoutes = Layer.unwrap(
                 quota.unfreed(userId, freeToken)
                 throw error
               }
-              held.landed()
+              held.landed(uploaded)
             })
             return true
           })
