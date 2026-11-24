@@ -526,7 +526,7 @@ interface Panel {
 }
 
 /** The panels the bar has a control for, in the archive's order; any other group renders nothing. */
-const PANEL_KEYS = ["Creators", "Sites", "Kind", "Rating", "Tokens", "Added", "Created"]
+const PANEL_KEYS = ["Authors", "Sources", "Kind", "NSFW", "Tokens", "Added", "Created"]
 
 /** The bar from the capabilities: the panels, the checkboxes, and what sits by the search. */
 const layoutOf = (caps: SourceCapabilities) => {
@@ -614,26 +614,26 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
     (first.kind === "choice" ? first.options.find((o) => o.value === value)?.label : undefined) ?? value
   const exclude = first.kind === "choice" ? first.excludeId : undefined
   switch (panel.key) {
-    case "Creators": {
+    case "Authors": {
       const { mode, chosen } = creatorChoice(caps, filters)
-      if (chosen.length === 0) return "Any creator"
-      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "creator" : "creators"}`
-      return chosen.length === 1 ? "By 1 creator" : `Any of ${chosen.length} creators`
+      if (chosen.length === 0) return "Any author"
+      if (mode === "not") return `Not by ${chosen.length} ${chosen.length === 1 ? "author" : "authors"}`
+      return chosen.length === 1 ? "By 1 author" : `Any of ${chosen.length} authors`
     }
-    case "Sites": {
+    case "Sources": {
       const names = (values: ReadonlyArray<string>) =>
-        values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sites`
+        values.length <= 2 ? values.map((v) => labelOf(v)).join(", ") : `${values.length} sources`
       const shown = [
         list(first.id).length ? names(list(first.id)) : "",
         list(exclude).length ? `Exclude ${names(list(exclude))}` : ""
       ].filter(Boolean)
-      return shown.length ? shown.join("; ") : "All sites"
+      return shown.length ? shown.join("; ") : "All sources"
     }
     case "Kind": {
       const value = text(first.id)
       return value && value !== "both" ? labelOf(value) : "All kinds"
     }
-    case "Rating": {
+    case "NSFW": {
       const value = text(first.id) || caps.ratings?.default || "include"
       return value === "exclude" ? "NSFW hidden" : value === "only" ? "NSFW only" : "NSFW included"
     }
@@ -1049,7 +1049,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
     <div className={`flex min-h-0 flex-col gap-2 ${popover ? "" : "w-full"}`} data-creator-picker>
       {c.excludeFilterId && (
         <Segmented
-          label="Creator mode"
+          label="Author mode"
           inlineDescription={false}
           value={mode}
           onValueChange={(next) => {
@@ -1057,23 +1057,23 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
             if (chosen.length) write(next, chosen)
           }}
           options={[
-            { value: "by", label: "By any of", description: "Only cards by one of the creators chosen." },
-            { value: "not", label: "Not by any of", description: "Leaves out the cards of the creators chosen." }
+            { value: "by", label: "By any of", description: "Only cards by one of the authors chosen." },
+            { value: "not", label: "Not by any of", description: "Leaves out the cards of the authors chosen." }
           ]}
         />
       )}
-      <Field label={mode === "not" ? "Creator to leave out" : "Add a creator"} labelHidden>
+      <Field label={mode === "not" ? "Author to leave out" : "Add an author"} labelHidden>
         <Input
           type="search"
           value={text}
           placeholder={
-            mode === "not" ? "Creator to leave out…" : chosen.length ? "Add another creator…" : "Add a creator…"
+            mode === "not" ? "Author to leave out…" : chosen.length ? "Add another author…" : "Add an author…"
           }
           onChange={(event) => setText(event.currentTarget.value)}
         />
       </Field>
       <ul
-        aria-label="Creators"
+        aria-label="Authors"
         // Each row: the name filling and truncating, then the site, the count in a fixed
         // right-aligned column and the mark, with one gap between them however wide the list.
         className={`flex flex-col ${
@@ -1115,7 +1115,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
           )
         })}
         {!suggestions.loading && !suggestions.problem && suggestions.items.length === 0 && (
-          <li className="px-3 py-1.5 text-sm text-muted">{text.trim() ? "No creators match" : "No creators listed"}</li>
+          <li className="px-3 py-1.5 text-sm text-muted">{text.trim() ? "No authors match" : "No authors listed"}</li>
         )}
         <li>
           <LoadMore suggestions={suggestions} />
@@ -1123,7 +1123,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
       </ul>
       {chosen.length > 0 && (
         <ul
-          aria-label="Chosen creators"
+          aria-label="Chosen authors"
           data-layout-audit-ignore="inset: A chip's remove button sits in the pill's compact end, as in MultiSelect"
           className={`flex flex-wrap content-start items-start gap-1.5 ${popover ? "max-h-24 shrink-0 overflow-y-auto" : ""}`}
         >
@@ -1140,7 +1140,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
               </span>
               <IconButton
                 label={`Remove ${nameOf(identity)}`}
-                hint="Takes this creator out of the filter."
+                hint="Takes this author out of the filter."
                 icon="close"
                 className="size-6! shrink-0"
                 onClick={() =>
@@ -1175,16 +1175,16 @@ function PanelBody({
   const filters = browse.remote.filters
   const first = panel.filters[0]!
   switch (panel.key) {
-    case "Creators":
+    case "Authors":
       return creatorIds(caps).includes(first.id) ? <CreatorsPanel browse={browse} set={set} popover={popover} /> : null
-    case "Sites":
+    case "Sources":
       return first.kind === "choice" && first.excludeId ? (
         <IncludeExcludePanel panel={panel} browse={browse} set={set} />
       ) : first.kind === "choice" ? (
         <ChecksPanel filter={first} filters={filters} set={set} />
       ) : null
     case "Kind":
-    case "Rating":
+    case "NSFW":
       return first.kind === "choice" && !first.multi ? (
         <ChoicePanel filter={first} filters={filters} set={set} browse={browse} />
       ) : null

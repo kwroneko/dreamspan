@@ -406,22 +406,22 @@ export const remoteMediaOf = (id: string): { readonly sourceId: string; readonly
   return match ? { sourceId: match[1]!, key: match[2]! } : null
 }
 
-/** The sites cardex finds cards on, by its API v1 name (its `source` filter), as people call them. */
+/** The sites cardex finds cards on, by its API v1 name (its `source` filter), as cardex names them. */
 export const CARDEX_SITE_LABELS: Readonly<Record<string, string>> = {
   chub: "Chub",
   char_tavern: "Character Tavern",
-  risuai: "RisuRealm",
+  risuai: "RisuAI",
   janitorai: "JanitorAI",
   venusai: "VenusAI",
-  nyaime: "Nyai.me",
-  booru: "Booru",
+  nyaime: "Nyaime",
+  booru: "booru.plus",
   webring: "Webring",
   catbox: "Catbox",
-  generic: "Other sites",
-  botbooru: "BotBooru",
+  generic: "Other",
+  botbooru: "Botbooru",
   pygmalion: "Pygmalion",
-  aicc: "AI Character Cards",
-  backyard: "Backyard AI",
+  aicc: "AICC",
+  backyard: "Backyard",
   wyvern: "Wyvern",
   pephop: "PepHop",
   caveduck: "Caveduck",
