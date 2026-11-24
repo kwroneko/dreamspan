@@ -57,11 +57,12 @@ export function NewCardDialog({
     "Names",
     JSON.stringify({ name: "", nickname: "", version: "" })
   )
-  // An older persona draft has no nickname or version.
+  // Older persona drafts can also carry a description.
   const names = { name: "", nickname: "", version: "", ...(JSON.parse(durable.text) as object) } as {
     name: string
     nickname: string
     version: string
+    description?: string
   }
   const { name, nickname, version } = names
   const setName = (name: string) => durable.setText(JSON.stringify({ ...names, name }))
@@ -83,7 +84,7 @@ export function NewCardDialog({
               name: trimmed,
               nickname,
               version: version.trim(),
-              ...(persona ? { persona: true } : {})
+              ...(persona ? { persona: true, description: names.description ?? "" } : {})
             })
           }),
         ["library"]

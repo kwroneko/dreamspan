@@ -21,9 +21,10 @@ export const libraryAtom = allOf({
   card: listAtom("card"),
   lorebook: listAtom("lorebook"),
   preset: listAtom("preset"),
-  note: listAtom("note"),
   /** Archived presets, for the presets' Archived view (the other kinds have none yet). */
   archivedPresets: libraryListAtom("preset", true),
   castCards: castCardsAtom,
   exportFormats: AppClient.query("ListExportFormats", undefined, { reactivityKeys: ["library"] })
 })
+
+export const libraryNotesAtom = listAtom("note")

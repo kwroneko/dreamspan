@@ -199,6 +199,39 @@ test("choosing the same jump after reload replaces the restored reading position
   await expectFlashedThenUnmarked(page, article(page, target))
 })
 
+test("Back during an interrupted jump does not replay a consumed flash", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await recordFlashes(page)
+  const data = await seed("interrupted-jump")
+  const target = data.slots[3]!
+  let release: (() => void) | undefined
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message)) as { tag?: string; payload?: { range?: { slot?: string } } }
+      if (request.tag === "ReadPath" && request.payload?.range?.slot === data.slots[1] && !release)
+        release = () => upstream.send(message)
+      else upstream.send(message)
+    })
+    upstream.onMessage((message) => socket.send(message))
+  })
+  await page.goto(`${server().url}/chats/${data.chatId}?slot=${target}&panel=history`)
+  await expectFlashedThenUnmarked(page, article(page, target))
+  await expect.poll(() => page.evaluate(() => window.history.state.chatFlashed)).toBe(`${data.chatId}/${target}`)
+  await clearFlashes(page)
+
+  await page.getByRole("textbox", { name: "Find", exact: true }).fill("beacon")
+  await expect(page.getByRole("status").filter({ hasText: "1 in messages" })).toBeVisible()
+  await page.getByRole("button", { name: "Next", exact: true }).click()
+  await expect.poll(() => release !== undefined).toBe(true)
+  await page.goBack()
+  await expect(page).toHaveURL(new RegExp(`slot=${target}`))
+  await expect(article(page, target)).toBeInViewport()
+  release!()
+  await expectNoFlash(page)
+})
+
 // Opening the same character again is a fresh link to the same chat/fork/slot.
 test("choosing the same character link starts a fresh jump", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

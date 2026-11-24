@@ -39,7 +39,7 @@ import { shellAtom, type ShellLibrary } from "../characters/shellData.tsx"
 import { useTitle } from "../shell.tsx"
 import { PRESET_VIEWS, type PresetView, presetDetail, presetsInView } from "../pickers/presetList.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { LISTED, libraryAtom } from "./data.ts"
+import { LISTED, libraryAtom, libraryNotesAtom } from "./data.ts"
 import { itemName, LibraryItemActions } from "./itemActions.tsx"
 import { libraryActions, libraryPanels } from "./slots.ts"
 import { useSession } from "../../session.ts"
@@ -604,6 +604,7 @@ export function LibraryPage() {
   useTitle("Library")
   const [prefs, setPrefs] = usePrefs()
   const shell = useAtomValue(shellAtom)
+  const notes = useAtomValue(libraryNotesAtom)
   const usage = new Map(
     AsyncResult.isSuccess(shell) ? [...shell.value.cards, ...shell.value.personas].map((c) => [c.card.entityId, c]) : []
   )
@@ -629,14 +630,12 @@ export function LibraryPage() {
               label="Library sections"
               value={prefs.kind}
               onValueChange={(kind) => setPrefs({ kind })}
-              tabs={LISTED.map(({ kind, title }) => ({
-                value: kind,
-                label: `${title} · ${lists[kind].length.toLocaleString()}`,
-                panel: (
+              tabs={LISTED.map(({ kind, title }) => {
+                const section = (refs: ReadonlyArray<LibraryRef>) => (
                   <Section
                     kind={kind}
                     title={title}
-                    all={lists[kind].map((entry) => ({
+                    all={refs.map((entry) => ({
                       entry,
                       card: cards.get(entry.entityId),
                       usage: usage.get(entry.entityId)?.card,
@@ -648,7 +647,21 @@ export function LibraryPage() {
                     formats={lists.exportFormats}
                   />
                 )
-              }))}
+                const count =
+                  kind === "note" ? (AsyncResult.isSuccess(notes) ? notes.value.length : undefined) : lists[kind].length
+                return {
+                  value: kind,
+                  label: count === undefined ? title : `${title} · ${count.toLocaleString()}`,
+                  panel:
+                    kind === "note" ? (
+                      <AsyncView atom={libraryNotesAtom} loading="Loading notes…">
+                        {section}
+                      </AsyncView>
+                    ) : (
+                      section(lists[kind])
+                    )
+                }
+              })}
             />
           )
         }}

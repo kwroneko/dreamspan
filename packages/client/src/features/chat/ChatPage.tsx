@@ -87,7 +87,7 @@ declare module "@tanstack/react-router" {
 /** What MessageList flashed last, kept across its remounts (a timeline layout switch). */
 export interface Flashes {
   opened: number
-  again: boolean
+  repeat: { index: number; fork: ForkId | null; slot: SlotId } | null
 }
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
@@ -494,9 +494,18 @@ export function MessageList({
     pendingFlash.current = null
     if (jump === null) return
     const key = `${session.id}/${jump}`
-    const again = flashed.again
-    flashed.again = false
-    if (router.state.location.state.chatFlashed === key && !again) return
+    const location = router.state.location
+    const repeat = flashed.repeat
+    flashed.repeat = null
+    if (
+      location.state.chatFlashed === key &&
+      !(
+        repeat?.index === location.state.__TSR_index &&
+        repeat.fork === (location.search.fork ?? null) &&
+        repeat.slot === jump
+      )
+    )
+      return
     pendingFlash.current = flashWhenShown(list, jump, () => {
       if (router.state.location.state.chatFlashed !== key)
         void navigate({
@@ -974,12 +983,12 @@ function ChatSurface({
   const [originalTarget] = useState({ fork, slot })
   const [restoring, setRestoring] = useState(true)
   const reading = restoring && originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
-  const flashes = useRef<Flashes>({ opened: 0, again: false })
+  const flashes = useRef<Flashes>({ opened: 0, repeat: null })
   // An explicit jump replaces a restored reading position, even at the URL's existing slot.
   const reopen = useCallback(
     (target: SlotId) => {
       setRestoring(false)
-      flashes.current.again = true
+      flashes.current.repeat = { index: router.state.location.state.__TSR_index, fork, slot: target }
       void navigate({
         to: ".",
         search: (prev: Record<string, unknown>) => prev,
@@ -990,7 +999,7 @@ function ChatSurface({
       })
       void session.open(target)
     },
-    [navigate, session]
+    [fork, navigate, router, session]
   )
   // Another message or fork of the open chat moves the window; a URL catching up with
   // where the window already is doesn't. A fresh link to the same message is a new jump;
@@ -999,6 +1008,8 @@ function ChatSurface({
     if (pending) return
     const before = shown.current
     shown.current = { fork, slot, index: entry.__TSR_index }
+    if (fork !== before.fork || slot !== before.slot || entry.__TSR_index !== before.index)
+      flashes.current.repeat = null
     const current = view.forkId
     const already = fork === null ? current !== null && current === view.chat?.currentForkId : fork === current
     const fresh =
@@ -1011,7 +1022,6 @@ function ChatSurface({
       session.showFork(fork, slot)
     } else if (slot !== before.slot || fresh) {
       setRestoring(false)
-      if (fresh) flashes.current.again = true
       void session.open(slot)
     }
   }, [session, fork, slot, view.forkId, view.chat, entry, pending])

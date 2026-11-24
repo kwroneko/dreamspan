@@ -54,7 +54,7 @@ describe("the workbench portrait column", () => {
 
   it("closes only the selected picture when another revision of the same card is open", () => {
     const { sources, left, right, copy } = setup()
-    const shared = sources.viewer(sources.snapshot(), "left", left.viewer)
+    const shared = sources.viewer(sources.snapshot())!
     shared.close(shared.shown.find((entry) => entry.portrait.mediaId === original.mediaId)!.portrait.id)
     expect(left.viewer.set).toHaveBeenCalledWith([])
     expect(copy.viewer.set).toHaveBeenCalledWith([])

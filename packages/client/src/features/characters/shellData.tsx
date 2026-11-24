@@ -42,6 +42,11 @@ export type ShellFork = Omit<ShellForkRow, "cast" | "added" | "thread"> & {
 export type ShellLibrary = ShellCards
 
 const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
+const shellRetry = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("15 seconds")]).pipe(
+  Schedule.setInputType<{ readonly _tag: string }>(),
+  Schedule.while(({ input }) => input._tag === "RpcClientError" || input._tag === "ServerError"),
+  Schedule.modifyDelay(({ input, duration }) => Effect.succeed(input._tag === "RpcClientError" ? "1 second" : duration))
+)
 
 /** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
 export const shellAtom = Atom.keepAlive(
@@ -50,9 +55,7 @@ export const shellAtom = Atom.keepAlive(
       Stream.unwrap(
         Effect.map(AppClient, (client) =>
           client("WatchShellCards", undefined).pipe(
-            Stream.retry(($) =>
-              $(Schedule.spaced("1 second")).pipe(Schedule.while(({ input }) => input._tag === "RpcClientError"))
-            ),
+            Stream.retry(shellRetry),
             Stream.scan(
               (): ShellCards => ({ cards: [], personas: [], archived: [], pinsCollapsed: false }),
               applyShellCards
@@ -98,9 +101,7 @@ const shellForksAtom = Atom.family((key: string) =>
         Stream.unwrap(
           Effect.map(AppClient, (client) =>
             client("WatchShellForks", JSON.parse(key) as ShellForksView).pipe(
-              Stream.retry(($) =>
-                $(Schedule.spaced("1 second")).pipe(Schedule.while(({ input }) => input._tag === "RpcClientError"))
-              ),
+              Stream.retry(shellRetry),
               Stream.scan(
                 () =>
                   ({
