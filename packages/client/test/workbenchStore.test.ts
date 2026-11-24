@@ -171,6 +171,41 @@ it("an editor's panel follows its source view when the same chat is open twice",
   vi.runAllTimers()
 })
 
+it("an editor's panel stays bound to its fork when the source view changes branches", () => {
+  vi.useFakeTimers()
+  const store = new WorkbenchStore(
+    "user",
+    createMemoryHistory({ initialEntries: ["/chats/a?fork=one"] }),
+    null,
+    () => {}
+  )
+  const source = focusedTab(store.layout)!.id
+  store.pin(source)
+  const sourceHistory = createMemoryHistory({ initialEntries: ["/chats/a?fork=one"] })
+  const detach = store.attach(source, sourceHistory)
+  const frame = store.frames()[0]!.id
+  store.split(frame, "row")
+  const sameFork = focusedTab(store.layout)!.id
+  store.pin(sameFork)
+  const removeSource = store.addPanelTab(source)
+  const removeSame = store.addPanelTab(sameFork)
+  const other = store.open("/chats/b", { preview: false })
+  const removeOther = store.addPanelTab(other)
+  store.open(`/library/p?chat=a&chatFork=one&chatTab=${source}`, { frame, preview: false })
+  expect(store.panelOwner(true)).toBe(source)
+  sourceHistory.replace("/chats/a?fork=two")
+  expect(findTab(store.layout, source)?.href).toBe("/chats/a?fork=two")
+  expect(findTab(store.layout, sameFork)?.href).toBe("/chats/a?fork=one")
+  expect(store.panelOwner(true)).toBe(sameFork)
+  store.close(sameFork)
+  expect(store.panelOwner(true)).toBe(other)
+  detach()
+  removeSource()
+  removeSame()
+  removeOther()
+  vi.runAllTimers()
+})
+
 // Kind affinity in the store's open path (owner, 2026-11-23): a link followed in the chat's tab
 // opens the request inspector where one is showing, and the chat stays; phones are unchanged.
 const inspectorKind = () =>

@@ -5085,6 +5085,16 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(FoldableEvent),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** State and the resolved position for UI reads that also load positional documents. */
+  Rpc.make("StateAtDisplayPosition", {
+    payload: { userId: UserId, chatId: ChatId, slotId: Schema.NullOr(SlotId), forkId: Schema.NullOr(ForkId) },
+    success: Schema.Struct({
+      slotId: Schema.NullOr(SlotId),
+      forkId: Schema.NullOr(ForkId),
+      events: Schema.Array(FoldableEvent)
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetDraft", {
     payload: { userId: UserId, key: DraftKey },
     success: Schema.NullOr(Draft),

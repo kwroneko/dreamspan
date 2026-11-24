@@ -4,8 +4,8 @@ import { Schema } from "effect"
 import { revisionNumber } from "./revisionNumbers.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { inFork, viewAt } from "./forkState.ts"
-import { stateEventsThrough } from "./stateRead.ts"
-import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
+import { stateEventRowsThrough } from "./stateRead.ts"
+import { agentWrittenNotes, notesCreated } from "./agentNotes.ts"
 import { chatFork, readSnippet } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@dreamspan/shared/editorApi.ts"
@@ -214,15 +214,18 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           return owner?.card ?? null
         }
         // A note an agent reply wrote (its first revision is the reply's) belongs to that reply
-        // (DESIGN §7.3 [D]): it's listed only where an event names it, which the reply's own
-        // `note.activate` does wherever the reply is shown, so another swipe or branch never lists it.
+        // (DESIGN §7.3 [D]): its creation event must be on the path, whatever the current switch.
         const byAgent = yield* agentWrittenNotes(
           sql,
           notes.filter((n) => cardOf(n.doc) === null).map((n) => n.row.entity_id)
         )
         const named =
           byAgent.size > 0
-            ? notesNamed(yield* stateEventsThrough(sql, chatId, slotId, yield* viewAt(sql, chatId, slotId)))
+            ? yield* notesCreated(
+                sql,
+                yield* stateEventRowsThrough(sql, chatId, slotId, yield* viewAt(sql, chatId, slotId)),
+                byAgent
+              )
             : new Set<string>()
         const listed = notes.filter((n) => !byAgent.has(n.row.entity_id) || named.has(n.row.entity_id))
         // A linked slot shows its shared note's text, as the assembler sends it.

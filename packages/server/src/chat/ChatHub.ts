@@ -50,7 +50,11 @@ const coalesce = (events: ReadonlyArray<ChatEvent>): Array<ChatEvent> => {
     const index = lastDelta.get(key)
     const previous = index === undefined ? undefined : out[index]
     if (previous?._tag === event._tag && previous.offset + previous.text.length === event.offset) {
-      out[index!] = { ...previous, text: previous.text + event.text }
+      out[index!] = {
+        ...previous,
+        text: previous.text + event.text,
+        ...(event.sequence === undefined ? {} : { sequence: event.sequence })
+      }
     } else {
       lastDelta.set(key, out.length)
       out.push(event)

@@ -14,13 +14,12 @@ export const chatNotesAt = (
   at: { readonly chatId: ChatId; readonly slotId: SlotId | null; readonly forkId?: ForkId | null | undefined }
 ) =>
   Effect.gen(function* () {
-    const { chatId, slotId, forkId } = at
-    const events = yield* reader.StateEventsAt({
+    const { chatId } = at
+    const { events, slotId, forkId } = yield* reader.StateAtDisplayPosition({
       userId: id,
       chatId,
-      slotId,
-      forkId: forkId ?? null,
-      displayEnd: true
+      slotId: at.slotId,
+      forkId: at.forkId ?? null
     })
     const state = foldState(events)
     // Every card of the cast, the ones the user plays included: a persona note is a card's note.
@@ -29,7 +28,7 @@ export const chatNotesAt = (
     const entries = yield* reader.ChatNoteEntries({
       userId: id,
       chatId,
-      forkId: forkId ?? null,
+      forkId,
       slotId,
       cards: cards as Array<EntityId>
     })

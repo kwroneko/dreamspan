@@ -299,6 +299,7 @@ export class PathWindow extends Schema.Class<PathWindow>("PathWindow")({
 }) {}
 
 const LiveReplace = Schema.optionalKey(Schema.Boolean)
+const LiveSequence = Schema.optionalKey(Schema.Int)
 
 /** Pushed to a chat's subscribers. Streamed text comes as deltas, never as whole messages. */
 export const ChatEvent = Schema.Union([
@@ -308,6 +309,8 @@ export const ChatEvent = Schema.Union([
       Schema.Struct({
         versionId: VersionId,
         text: Schema.String,
+        /** The last text update included in this snapshot, across all three streams of a version. */
+        sequence: LiveSequence,
         waitingCache: Schema.optionalKey(Schema.Boolean),
         /** The reasoning streamed so far, when there is any. */
         reasoning: Schema.optionalKey(Schema.String),
@@ -323,7 +326,13 @@ export const ChatEvent = Schema.Union([
    * `replace`: the shown text from `offset` on is now `text`, as regex scripts rewrote the text
    * so far (ARCHITECTURE §12, "Live rewrites"); the text may get shorter.
    */
-  Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String, replace: LiveReplace }),
+  Schema.TaggedStruct("Delta", {
+    versionId: VersionId,
+    offset: Schema.Int,
+    text: Schema.String,
+    replace: LiveReplace,
+    sequence: LiveSequence
+  }),
   /** A generating agent reply's steps, all of them as they stand (spec/AGENTIC.md §5.1). */
   Schema.TaggedStruct("Steps", {
     versionId: VersionId,
@@ -336,14 +345,16 @@ export const ChatEvent = Schema.Union([
     versionId: VersionId,
     offset: Schema.Int,
     text: Schema.String,
-    replace: LiveReplace
+    replace: LiveReplace,
+    sequence: LiveSequence
   }),
   /** Reply-section text appended at `offset` of the panel's text (`sectionsDisplay`), as `Delta` is. */
   Schema.TaggedStruct("Section", {
     versionId: VersionId,
     offset: Schema.Int,
     text: Schema.String,
-    replace: LiveReplace
+    replace: LiveReplace,
+    sequence: LiveSequence
   }),
   Schema.TaggedStruct("RequestNotice", { versionId: VersionId, message: Schema.String }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),

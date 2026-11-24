@@ -511,6 +511,30 @@ export const makeReadHandlers = Effect.gen(function* () {
       return yield* withoutPurged(sql, events)
     })
 
+  const statePosition = Effect.fnUntraced(function* ({
+    userId,
+    chatId,
+    slotId,
+    forkId,
+    leafSlotId,
+    displayEnd
+  }: {
+    readonly userId: UserId
+    readonly chatId: ChatId
+    readonly slotId: SlotId | null
+    readonly forkId?: ForkId | null
+    readonly leafSlotId?: SlotId | null
+    readonly displayEnd?: boolean
+  }) {
+    const chat = yield* ownedChat(userId, chatId)
+    if (slotId !== null) yield* liveSlot(chatId, slotId)
+    if (leafSlotId != null) yield* liveSlot(chatId, leafSlotId)
+    const fork = forkId ?? ((yield* forkAt(sql, chatId, leafSlotId ?? slotId)) as ForkId | null)
+    const viewed = fork !== null && (forkId != null || displayEnd) ? yield* liveFork(chat, fork) : null
+    const at = displayEnd && viewed?.tip_slot_id === slotId ? yield* displayEndOf(sql, chatId, viewed) : slotId
+    return { slotId: at as SlotId | null, forkId: fork }
+  })
+
   const handlers = {
     WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
     // --- Parallel threads (spec/THREADS.md §4.3)
@@ -579,19 +603,18 @@ export const makeReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ExportVersions")),
 
-    StateEventsAt: ({ userId, chatId, slotId, forkId, leafSlotId, displayEnd }) =>
+    StateEventsAt: (input) =>
       Effect.gen(function* () {
-        const chat = yield* ownedChat(userId, chatId)
-        if (slotId !== null) yield* liveSlot(chatId, slotId)
-        if (leafSlotId != null) yield* liveSlot(chatId, leafSlotId)
-        const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, leafSlotId ?? slotId)
-        let at = slotId
-        if (displayEnd && fork !== null) {
-          const viewed = yield* liveFork(chat, fork as ForkId)
-          if (viewed.tip_slot_id === slotId) at = (yield* displayEndOf(sql, chatId, viewed)) as SlotId | null
-        }
-        return yield* decodedState(chatId, at, fork, "StateEventsAt")
+        const { slotId, forkId } = yield* statePosition(input)
+        return yield* decodedState(input.chatId, slotId, forkId, "StateEventsAt")
       }).pipe(query("StateEventsAt")),
+
+    StateAtDisplayPosition: (input) =>
+      Effect.gen(function* () {
+        const at = yield* statePosition({ ...input, displayEnd: true })
+        const events = yield* decodedState(input.chatId, at.slotId, at.forkId, "StateAtDisplayPosition")
+        return { ...at, events }
+      }).pipe(query("StateAtDisplayPosition")),
 
     ListBin: ({ userId, limit, before }) =>
       sql<Parameters<typeof toBinItem>[0]>`

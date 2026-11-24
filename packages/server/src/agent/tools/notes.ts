@@ -46,30 +46,18 @@ export type NotesPosition = Pick<ToolContext, "userId" | "chatId" | "forkId" | "
 }
 
 /**
- * The chat's state where the reply is being written: the parent's, with the reply's own effects
- * so far (spec/AGENTIC.md §4.3, mid-rollout reads), which apply while it's shown.
- */
-const stateHere = (context: NotesPosition) =>
-  Effect.gen(function* () {
-    const { userId, chatId, forkId, slotId, reader, displayEnd } = context
-    const events = yield* reader.StateEventsAt({
-      userId,
-      chatId,
-      slotId,
-      forkId,
-      ...(displayEnd ? { displayEnd } : {})
-    })
-    return { events, state: foldState(events) }
-  })
-
-/**
  * The notes the assembler reads at the position, as the chat's notes list shows them: a note an
  * agent reply wrote only where that reply is shown.
  */
 export const notesAt = (context: NotesPosition) =>
   Effect.gen(function* () {
-    const { userId, chatId, forkId, slotId, reader } = context
-    const { events, state } = yield* stateHere(context)
+    const { userId, chatId, reader, displayEnd } = context
+    const position = { userId, chatId, forkId: context.forkId, slotId: context.slotId }
+    // During a rollout, stay at the reply being written, including its own effects so far.
+    const { events, slotId, forkId } = displayEnd
+      ? yield* reader.StateAtDisplayPosition(position)
+      : { ...position, events: yield* reader.StateEventsAt(position) }
+    const state = foldState(events)
     const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]
     const switches = noteSwitches(events)
     const entries = yield* reader.ChatNoteEntries({

@@ -79,17 +79,21 @@ export const stateEventsThrough = (
   )
 
 /**
- * The fork preview additionally needs event identity and human/version provenance; on the
- * fork's display path, as `stateEventsThrough`.
+ * Events with identity and provenance on the fork's display path, as `stateEventsThrough`.
  */
-export const stateEventRowsThrough = (sql: SqlClient.SqlClient, chatId: ChatId, slotId: SlotId | null, fork: string) =>
+export const stateEventRowsThrough = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  slotId: SlotId | null,
+  fork: string | null
+) =>
   Effect.flatMap(displayIn(sql, chatId, slotId, fork), (shown) =>
-    eventsOnPath<ProvenancedEventRow>(
+    eventsOnPath<ProvenancedEventRow & { readonly origin_ref: string | null }>(
       sql,
       chatId,
       slotId,
       fork,
-      "ev.id, ev.origin, ev.version_id, ev.slot_id, ev.key, ev.scope, ev.value_json",
+      "ev.id, ev.origin, ev.origin_ref, ev.version_id, ev.slot_id, ev.key, ev.scope, ev.value_json",
       shown
     )
   )
