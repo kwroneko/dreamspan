@@ -22,7 +22,7 @@ import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
 import { carryLeftover, fileLeftover } from "./composerDraft.ts"
-import { rememberDraftFor } from "./chatStarted.ts"
+import { rememberDraftFor, rememberReplaced } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { FinishMeantTitle, meantTitle } from "./meantTitle.tsx"
 
@@ -79,6 +79,8 @@ function DraftChat({
       const value = opened.value
       // What was typed in the swept chat after its saving stopped goes on in this one.
       if (replacing.current && shownId.current !== null) carryLeftover(shownId.current, value.id)
+      // The chat this one takes the place of: swept while shown, or before a reload.
+      const replaced = replacing.current ? shownId.current : reopen !== null && value.id !== reopen ? reopen : null
       replacing.current = false
       // The chat the URL names was started meanwhile (in another tab, say): it's that chat now.
       if (value.status !== "pending") {
@@ -92,6 +94,7 @@ function DraftChat({
         return
       }
       rememberDraftFor(value.id, draftFor)
+      if (replaced !== null) rememberReplaced(value.id, replaced)
       setChat(value)
       // A reopened one too: a reload before the rename this tab meant for it still names it.
       onOpened?.(value, value.id === reopen)

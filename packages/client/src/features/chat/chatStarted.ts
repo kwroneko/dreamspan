@@ -21,3 +21,12 @@ export const rememberDraftFor = (chatId: string, draftFor: DraftFor) => void dra
 export const draftEntryOf = (chatId: string) => draftEntries.get(chatId) ?? null
 /** A group's new chat: its persona pickers have no persona lock, which is a single chat's. */
 export const isGroupDraft = (chatId: string) => draftEntries.get(chatId)?.startsWith("group:") ?? false
+
+/**
+ * The pending chat each one opened in this tab took the place of (DraftChatPage.tsx): the one
+ * shown, swept meanwhile, or the one its URL named, swept before a reload.
+ */
+const replaced = new Map<string, string>()
+export const rememberReplaced = (chatId: string, replacedId: string) => void replaced.set(chatId, replacedId)
+/** The pending chat `chatId` took the place of in this tab, if any. */
+export const replacedDraftOf = (chatId: string) => replaced.get(chatId) ?? null
