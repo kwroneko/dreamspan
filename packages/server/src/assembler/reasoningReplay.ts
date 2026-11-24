@@ -285,7 +285,7 @@ export const reasoningReplayStage = (
         )
         for (const entry of batch) {
           const found = read.get(entry.versionId)
-          if (!found?.reasoning) continue
+          if (!found || (!found.reasoning && found.native === null)) continue
           chosen.push({ entry, native: found.native })
           if (chosen.length === n) break
         }
