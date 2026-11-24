@@ -48,6 +48,7 @@ import {
 import { CardSourcesApi } from "./cardSources.ts"
 import { PanelDataApi } from "./panelDataApi.ts"
 import { PersonaLockApi } from "./personaLockApi.ts"
+import { DraftChatApi } from "./draftChatApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -446,6 +447,8 @@ export const AuthenticatedWorkshopPresetApi = WorkshopPresetApi.middleware(Authe
 export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authentication)
 /** The persona locked to a character (personaLockApi.ts, DESIGN §2.2). */
 export const AuthenticatedPersonaLockApi = PersonaLockApi.middleware(Authentication)
+/** The new-chat page's pending chat (draftChatApi.ts, DESIGN §2.1). */
+export const AuthenticatedDraftChatApi = DraftChatApi.middleware(Authentication)
 
 /** Card sources (cardSources.ts): browsing an archive through the server. */
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
@@ -552,6 +555,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedThinkingApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedPersonaLockApi)
+  .merge(AuthenticatedDraftChatApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)

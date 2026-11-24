@@ -180,9 +180,7 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
           // Inserting adds a message: the fork is chatted in (ARCHITECTURE §3.8).
           yield* graph.chatIn(fork.id, at)
           const [chat] = yield* sql<ChatRow>`
-            UPDATE chats SET last_message_at = ${at},
-              status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-              row_version = row_version + 1
+            UPDATE chats SET last_message_at = ${at}, row_version = row_version + 1
             WHERE id = ${chatId} RETURNING *`
           const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork.id}`
           const pieces = yield* pathPieces(sql, chatId, fork.id, tip!.tip)

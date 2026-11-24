@@ -1,3 +1,4 @@
+import { commitPendingChat, commitPendingChatOf } from "./pendingChats.ts"
 import { kindAllows } from "./chatKindPolicy.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -156,6 +157,10 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       })}`
       const [insertedRow] = yield* sql<VersionRow>`SELECT * FROM version_records WHERE id = ${id}`
       const inserted = insertedRow!
+      // Anything but a greeting is a pending chat's first turn: a reply, a Continue or swipe of a
+      // greeting, a saved edit of one. It commits the chat here, in the write that makes it.
+      // (Within insertSlot the slot isn't there yet: insertSlot commits.)
+      if (version.origin !== "greeting") yield* commitPendingChatOf(sql, slotId, at)
       if (version.images !== undefined) {
         const [chat] = yield* sql<{
           owner: string
@@ -226,6 +231,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         created_at: at,
         ...(inserted ? { inserted: 1 } : {})
       })}`
+      if (version.origin !== "greeting") yield* commitPendingChat(sql, chatId, at)
       // A workshop beside a story records where the story stands (spec/WORKSHOP-BRANCHES.md §2.2).
       yield* recordStoryAt(
         sql,
@@ -500,9 +506,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${fork.id}`
       if (chatted) yield* chatIn(fork.id, at)
       const [chat] = yield* sql<ChatRow>`
-          UPDATE chats SET last_message_at = ${at},
-            status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-            row_version = row_version + 1
+          UPDATE chats SET last_message_at = ${at}, row_version = row_version + 1
           WHERE id = ${chatId} RETURNING *`
       // The composer is the fork's, so text typed while something else was appended stays
       // in view without moving.

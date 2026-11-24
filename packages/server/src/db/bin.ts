@@ -1682,14 +1682,21 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     })
 
   /** Saves draft text that a commit or discard would otherwise lose. Never shown as a toast. */
-  const recover = (userId: UserId, key: DraftKey, texts: ReadonlyArray<string>, reason: "commit" | "discard") =>
+  const recover = (
+    userId: UserId,
+    key: DraftKey,
+    texts: ReadonlyArray<string>,
+    reason: "commit" | "discard",
+    /** Where it came from, when the source is about to go (a pending chat swept); else read from it. */
+    sourceName?: string
+  ) =>
     Effect.gen(function* () {
       // `texts` come newest first; inserting oldest first keeps "newest first" listings right.
       // A value draft of `null` removed a list element (a lorebook entry, say): it holds no text.
       const removal = (t: string) => key.field.startsWith("=") && t === "null"
       const unique = [...new Set(texts)].filter((t) => t.trim().length > 0 && !removal(t)).reverse()
       if (unique.length === 0) return
-      const label = yield* sourceLabel(key)
+      const label = sourceName ?? (yield* sourceLabel(key))
       const now = Date.now()
       for (const content of unique) {
         yield* sql`INSERT INTO recovered_texts ${sql.insert({
