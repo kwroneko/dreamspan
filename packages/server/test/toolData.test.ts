@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   pendingOperationResult,
   pendingOperationReceipt,
@@ -95,6 +96,28 @@ const context = (messages: ReadonlyArray<AgentMessage>) =>
   }) as unknown as ToolContext
 const read = (ctx: ToolContext, args: unknown) => runTools[0]!.execute(ctx, args as never)
 
+it.effect("accepts old v1 cursors into either the stored envelope or the decoded body", () =>
+  Effect.gen(function* () {
+    const body = `${hostile} remainder`
+    const wrapped = toolData(body)
+    const ctx = context(transcript(wrapped))
+    const call = 'call</step>"'
+    const tool = "read_card"
+    const prefix = `${JSON.stringify({ call, tool })}\n{}\n`
+    for (const result of [wrapped, body]) {
+      const payload = prefix + result
+      const offset = prefix.length + 10
+      const digest = createHash("sha256")
+        .update(JSON.stringify([ctx.userId, ctx.chatId, ctx.forkId, ctx.rolloutId, 1, call, tool, payload]))
+        .digest("hex")
+        .slice(0, 24)
+      const out = yield* read(ctx, { message: 0, call: `page:v1:1:${offset}:${digest}` })
+      assert.isUndefined(out.isError, out.text)
+      assert.strictEqual(unquote(out.text), payload.slice(offset))
+    }
+  })
+)
+
 it.effect("ordinary story read_run retains the pre-boundary result bytes", () =>
   Effect.gen(function* () {
     const out = yield* read(
@@ -121,7 +144,7 @@ it.effect("run page cursors bind owner, chat and source run even for identical s
   Effect.gen(function* () {
     const ctx = context(transcript("x".repeat(20_000)))
     const out = yield* read(ctx, { message: 0, max_tokens: 200 })
-    const call = out.text.match(/call "(page:v1:[^"]+)"/)![1]!
+    const call = out.text.match(/call "(page:v2:[^"]+)"/)![1]!
     for (const changed of [{ userId: "other-owner" }, { chatId: "other-chat" }, { rolloutId: "other-run" }]) {
       const refused = yield* read({ ...ctx, ...changed } as ToolContext, { message: 0, call })
       assert.isTrue(refused.isError)
@@ -198,7 +221,7 @@ it.effect("read_run pages the cap-boundary tail and oversized arguments without 
         assert.strictEqual(budgetResult(out.text), out.text)
         assert.notInclude(out.text, 'call="call</step>')
         recovered.push(unquote(out.text))
-        call = out.text.match(/call "(page:v1:[^"]+)"/)?.[1]
+        call = out.text.match(/call "(page:v2:[^"]+)"/)?.[1]
       } while (call)
       assert.strictEqual(
         recovered.join(""),
@@ -211,7 +234,7 @@ it.effect("read_run pages the cap-boundary tail and oversized arguments without 
 it.effect("a cursor cannot read a changed result or restore a withheld story read", () =>
   Effect.gen(function* () {
     const out = yield* read(context(transcript(hostile.repeat(500))), { message: 0, max_tokens: 200 })
-    const call = out.text.match(/call "(page:v1:[^"]+)"/)![1]!
+    const call = out.text.match(/call "(page:v2:[^"]+)"/)![1]!
     const stale = yield* read(context(transcript("Different result")), { message: 0, call })
     assert.isTrue(stale.isError)
     const positioned: ToolContext = {
@@ -384,7 +407,7 @@ it.effect("read_run pages a stored quoted result from its original: quoted once,
       assert.isAtMost(out.text.split(TOOL_DATA_NOTICE).length, 2)
       assert.notInclude(out.text, "&amp;lt;")
       recovered.push(unquote(out.text))
-      call = out.text.match(/call "(page:v1:[^"]+)"/)?.[1]
+      call = out.text.match(/call "(page:v2:[^"]+)"/)?.[1]
     } while (call)
     assert.strictEqual(
       recovered.join(""),
