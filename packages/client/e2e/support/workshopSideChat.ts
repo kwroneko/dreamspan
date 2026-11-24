@@ -518,7 +518,7 @@ export function workshopSideChatChangesTests() {
             .click()
           await expect(stateMarker).toHaveCount(0)
           await expect(changes.locator('[data-effect-kind="chat.change"]')).toContainText("Undone")
-          await changes.getByRole("button", { name: "Undo all of this reply", exact: true }).click()
+          await changes.getByRole("button", { name: "Revert all of this reply", exact: true }).click()
           await expect(changes.locator('[data-effect-kind="changeset.apply"]')).toContainText("Undone")
           await expectLayout(page, info, `side-changes-undone-${width}-${theme}`, { scope: "[data-side-chat]" })
           const texts = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
