@@ -1,8 +1,7 @@
 import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { useSidePanelPlace, useWorkbenchTab } from "../workbench/tab.tsx"
 import { greetingPick } from "@dreamspan/shared/greetings.ts"
-import { useUserDraft, UserDraftNotices, UserDraftStatus, UserDraftUndo } from "../editor/userDraft.tsx"
-import { Input } from "../../ui/Field.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingAttachmentScope,
@@ -26,8 +25,8 @@ import {
 // group-chats.js: the group's members in order, a member without a greeting skipped), each
 // greeting with its card's alternates to pick from; the reply comes from the character
 // picked, and the chat is titled with the group's name, so it's one of the group's chats.
-import type { CastCard, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
-import type { CardForChat, ChatGroup } from "@dreamspan/shared/chatSetupApi.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
+import type { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { showAdopted } from "../cardSources/remote.ts"
 import type { FrozenValues } from "@dreamspan/shared/macros/expand.ts"
@@ -55,7 +54,7 @@ import { IconButton, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
-import { type Copy, dropCopy, keepCopy, pendingChatCopy, pendingGroupChatCopy } from "../editor/backup.ts"
+import { type Copy, dropCopy, keepCopy, pendingChatCopy } from "../editor/backup.ts"
 import { useTitle } from "../shell.tsx"
 import { CastContext, type CastView, castView } from "./cast.ts"
 import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
@@ -67,7 +66,6 @@ import { composerKeyDown, composerSubmitKey } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
-import { EMPTY_CHAT_TITLE } from "./ChatsPage.tsx"
 import { chatColumns, pendingPersonaPickerRows } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { seedSplitChats } from "./splitChats.ts"
@@ -156,28 +154,13 @@ function Greeting({
   )
 }
 
-/** A chat with nobody in it yet (the Chats page's New chat): its title, typed here, and what it says first. */
-interface EmptyStart {
-  /** The title typed ("" the server's default, after its characters or the date). */
-  readonly title: string
-  /** Where its messages will be, until characters join or the first send. */
-  readonly intro: ReactNode
-  /** The title was used: its draft ends. */
-  readonly sent: () => Promise<unknown>
-}
-
 function Pending({
   pending,
-  card,
-  groupMembers,
-  empty = null
+  card
 }: {
   pending: PendingChat
-  /** The card that greets first: the chat's card, or the group's first character; none for an empty chat. */
-  card: CardForChat | null
-  /** A group's characters as the group names them: its pending copy's key. */
-  groupMembers: ReadonlyArray<string> | null
-  empty?: EmptyStart | null
+  /** The card that greets first: the source's card. */
+  card: CardForChat
 }) {
   const composerId = useId()
   const action = useAction()
@@ -207,9 +190,8 @@ function Pending({
     })
   // This browser's copy of the text, and the text on its way in the first send.
   const userId = useSession().user.id
-  // An empty chat's copy is the one new chat without characters, whoever joins before the send.
-  const entityId = card?.card.entityId ?? EMPTY_CHAT
-  const copyKey = group === null ? pendingChatCopy(entityId) : pendingGroupChatCopy(group.name, groupMembers ?? [])
+  const entityId = card.card.entityId
+  const copyKey = pendingChatCopy(entityId)
   const durable = useUserDraft(copyKey, "First message", "")
   // The saved chat's page, ready before the first send opens it.
   useEffect(preloadChatPage, [])
@@ -234,7 +216,7 @@ function Pending({
       userId,
       destination.current.chatId,
       entityId,
-      group?.name ?? card?.card.name ?? (empty?.title.trim() || "New chat"),
+      group?.name ?? card.card.name,
       content,
       previous,
       destination.current.composer
@@ -301,7 +283,7 @@ function Pending({
   const urlPanel = useIsPanelTab(askedPanel) ? askedPanel! : null
   const { panel, show, wide } = usePanel(urlPanel, view)
   const place = useSidePanelPlace(wide)
-  const title = empty?.title.trim() || pendingTitle(pending, state)
+  const title = pendingTitle(pending, state)
   const prefs = viewPrefs.prefs
   // Cards from a card source, added by the first turn (spec/CARD-SOURCES.md §4.5).
   const adding = greeters.filter((greeter) => remoteOf(greeter.card.entityId) !== null).map((greeter) => greeter.card)
@@ -400,7 +382,7 @@ function Pending({
             cards: greeters.map((greeter) => greeter.card.entityId),
             persona: personaId,
             greeting: null,
-            ...(group !== null ? { title: group.name } : empty !== null ? { title: empty.title } : {}),
+            ...(group !== null ? { title: group.name } : {}),
             greeters: greeterChoices(),
             first:
               first === "send"
@@ -482,7 +464,6 @@ function Pending({
     // Whatever the first send didn't take goes along too: to the composer of the fork it made.
     await attachments?.carry(result.value.chat.id, result.value.composer.key.field)
     await durable.commit(durable.text, async () => true)
-    await empty?.sent()
     // Restore tab-strip focus only if it is still there as this route is replaced; typing
     // in the composer or clicking Send keeps the normal destination focus behaviour.
     const panelFocused = Boolean(document.activeElement?.closest("[data-chat-panel-tabs]"))
@@ -560,8 +541,6 @@ function Pending({
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {/* The message list's column, its padding and its gap between rows. */}
               <div className="chat-column flex flex-col gap-1.5 py-4">
-                {/* A chat without characters: what it is, and its title, until someone joins. */}
-                {empty !== null && greeters.length === 0 && empty.intro}
                 {options.every((list) => list.length === 0) && greeters.length > 0 && (
                   <p className="px-3 text-sm text-muted">
                     {members === null
@@ -678,114 +657,29 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   )
 }
 
-/** The pending copy of a chat without characters (`pendingChatCopy`): there's one at a time. */
-const EMPTY_CHAT = "new"
-
-/** Holds the pending chat for as long as the page shows this card or group. */
+/** Holds the pending chat for as long as the page shows this card. */
 function PendingFor({
   card,
   cards,
-  greeters,
-  group,
   defaultPersona,
-  lock = null,
-  empty = null
+  lock = null
 }: {
-  card: CardForChat | null
-  empty?: EmptyStart | null
+  card: CardForChat
   defaultPersona: EntityId | null
   /** The persona locked to a single chat's character (DESIGN §2.2), if any. */
   lock?: EntityId | null
   cards: ReadonlyArray<CastCard>
-  greeters: ReadonlyArray<CardForChat>
-  group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
 }) {
   const call = useCaller()
   const search = useSearch({ strict: false }) as { guidance?: string }
   const [pending] = useState(
-    () =>
-      new PendingChat(
-        cards,
-        greeters,
-        group && { name: group.name, chatId: group.chatId },
-        call,
-        defaultPersona,
-        search.guidance === "on",
-        lock
-      )
+    () => new PendingChat(cards, [card], null, call, defaultPersona, search.guidance === "on", lock)
   )
   // Attachments are kept by the key the first message's text is (Pending's `copyKey`).
-  const copyKey =
-    group === null
-      ? pendingChatCopy(card?.card.entityId ?? EMPTY_CHAT)
-      : pendingGroupChatCopy(group.name, group.members)
   return (
-    <PendingAttachmentScope scope={copyKey}>
-      <Pending pending={pending} card={card} groupMembers={group?.members ?? null} empty={empty} />
+    <PendingAttachmentScope scope={pendingChatCopy(card.card.entityId)}>
+      <Pending pending={pending} card={card} />
     </PendingAttachmentScope>
-  )
-}
-
-/** /cards/$entityId/chat: a new chat with a card, made on its first send. */
-export function StartChatPage() {
-  const { entityId } = useParams({ strict: false }) as { entityId: EntityId }
-  const action = useAction()
-  const [loaded, setLoaded] = useState<{
-    card: CardForChat
-    defaultPersona: EntityId | null
-    lock: EntityId | null
-    cards: ReadonlyArray<CastCard>
-  } | null>(null)
-  useTitle(loaded ? loaded.card.card.name : "New chat")
-  // Asking again after a failure or a load that takes too long.
-  const [attempt, setAttempt] = useState(0)
-  const retry = () => {
-    action.clearError()
-    setAttempt((n) => n + 1)
-  }
-  useEffect(() => {
-    void action
-      .run((client) =>
-        Effect.all({
-          card: client("GetCardForChat", { entityId }),
-          cards: client("ListCards", undefined),
-          defaults: client("GetGenerationDefaults", undefined),
-          lock: client("GetPersonaLock", { entityId })
-        })
-      )
-      .then((result) => {
-        if (result.ok)
-          setLoaded({
-            card: result.value.card,
-            cards: result.value.cards.filter((c) => c.entityId !== entityId),
-            defaultPersona: result.value.defaults.persona ?? null,
-            lock: result.value.lock?.entityId ?? null
-          })
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
-  }, [entityId, attempt])
-  return (
-    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {loaded ? (
-        <PendingFor
-          key={entityId}
-          card={loaded.card}
-          cards={loaded.cards}
-          greeters={[loaded.card]}
-          group={null}
-          defaultPersona={loaded.defaultPersona}
-          lock={loaded.lock}
-        />
-      ) : action.error ? (
-        <div className="chat-column pt-4">
-          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
-        </div>
-      ) : (
-        <div className="chat-column pt-4">
-          <Loading label="Loading the card…" onRetry={retry} />
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -845,8 +739,6 @@ export function RemoteStartChatPage() {
           key={loaded.card.card.entityId}
           card={loaded.card}
           cards={loaded.cards}
-          greeters={[loaded.card]}
-          group={null}
           defaultPersona={loaded.defaultPersona}
           lock={loaded.lock}
         />
@@ -857,154 +749,6 @@ export function RemoteStartChatPage() {
       ) : (
         <div className="chat-column pt-4">
           <Loading label="Loading the card…" onRetry={retry} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * /new/chat: a chat with nobody in it yet (the Chats page's New chat), made on its first send
- * (owner, 2026-11-17: "The chat is created when the first message is sent"). It's the pending
- * chat as for a card, with no characters: its title is typed where its greeting would be, and
- * characters can join from the Cast tab before the send, greeting as they would.
- */
-export function StartEmptyChatPage() {
-  const action = useAction()
-  const titleDraft = useUserDraft(EMPTY_CHAT_TITLE, "Title", "")
-  const [loaded, setLoaded] = useState<{ defaultPersona: EntityId | null; cards: ReadonlyArray<CastCard> } | null>(null)
-  useTitle("New chat")
-  const [attempt, setAttempt] = useState(0)
-  const retry = () => {
-    action.clearError()
-    setAttempt((n) => n + 1)
-  }
-  useEffect(() => {
-    void action
-      .run((client) =>
-        Effect.all({ cards: client("ListCards", undefined), defaults: client("GetGenerationDefaults", undefined) })
-      )
-      .then((result) => {
-        if (result.ok) setLoaded({ cards: result.value.cards, defaultPersona: result.value.defaults.persona ?? null })
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per attempt
-  }, [attempt])
-  const empty: EmptyStart = {
-    title: titleDraft.text,
-    sent: () => titleDraft.commit(titleDraft.text, async () => true),
-    intro: (
-      <div data-empty-chat-intro="" className="mx-3 flex flex-col gap-2 rounded-lg bg-surface-raised px-3 py-2">
-        <p className="text-sm text-muted">
-          A chat with no characters yet: for notes, or trying a model. Characters can join from the Cast tab. Your first
-          message starts the chat.
-        </p>
-        <UserDraftStatus draft={titleDraft} />
-        <Input
-          aria-label="Title of the new chat"
-          placeholder="Title (optional)"
-          value={titleDraft.text}
-          disabled={!titleDraft.ready}
-          onChange={(event) => titleDraft.setText(event.currentTarget.value)}
-        />
-      </div>
-    )
-  }
-  return (
-    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {loaded ? (
-        <PendingFor
-          card={null}
-          cards={loaded.cards}
-          greeters={[]}
-          group={null}
-          defaultPersona={loaded.defaultPersona}
-          empty={empty}
-        />
-      ) : action.error ? (
-        <div className="chat-column pt-4">
-          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
-        </div>
-      ) : (
-        <div className="chat-column pt-4">
-          <Loading label="Loading…" onRetry={retry} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** /groups/$chatId/new: a new chat with a group's characters, made on its first send. */
-export function StartGroupChatPage() {
-  const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
-  const action = useAction()
-  const [loaded, setLoaded] = useState<{
-    group: ChatGroup
-    defaultPersona: EntityId | null
-    cards: ReadonlyArray<CardForChat>
-    all: ReadonlyArray<CastCard>
-  } | null>(null)
-  useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
-  const [attempt, setAttempt] = useState(0)
-  const retry = () => {
-    action.clearError()
-    setAttempt((n) => n + 1)
-  }
-  useEffect(() => {
-    void action
-      .run((client) =>
-        Effect.gen(function* () {
-          const { group } = yield* client("ListGroupChats", { chatId })
-          // Every member's greetings: each greets in turn.
-          const { greeters, cards, defaults } = yield* Effect.all(
-            {
-              greeters: Effect.forEach(
-                group.members,
-                (member) => client("GetCardForChat", { entityId: member.entityId }),
-                { concurrency: "unbounded" }
-              ),
-              cards: client("ListCards", undefined),
-              defaults: client("GetGenerationDefaults", undefined)
-            },
-            { concurrency: "unbounded" }
-          )
-          return { group, greeters, cards, defaults }
-        })
-      )
-      .then((result) => {
-        if (!result.ok) return
-        const { group, greeters, cards, defaults } = result.value
-        const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        setLoaded({
-          group,
-          cards: greeters,
-          all: cards.filter((c) => !inGroup.has(c.entityId)),
-          defaultPersona: defaults.persona ?? null
-        })
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group and attempt
-  }, [chatId, attempt])
-  return (
-    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {loaded ? (
-        <PendingFor
-          key={chatId}
-          card={loaded.cards[0]!}
-          cards={loaded.all}
-          defaultPersona={loaded.defaultPersona}
-          greeters={loaded.cards}
-          group={{
-            name: loaded.group.name,
-            chatId,
-            members: loaded.group.members.map((member) => member.entityId)
-          }}
-        />
-      ) : action.error ? (
-        <div className="chat-column pt-4">
-          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
-        </div>
-      ) : (
-        <div className="chat-column pt-4">
-          <Loading label="Loading the group…" onRetry={retry} />
         </div>
       )}
     </div>

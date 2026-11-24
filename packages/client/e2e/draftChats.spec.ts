@@ -1,5 +1,6 @@
 // New chats are pending chats (DESIGN §2.1, owner 2026-11-23): the new-chat page opens a real
 // chat the server keeps out of every list until its first turn, shown by the chat page itself.
+import { expectLayout } from "./support/layoutAudit.ts"
 import { expect, test, type Page } from "@playwright/test"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
@@ -134,6 +135,85 @@ test("sending a message starts the chat with the greeting and the message", asyn
   expect(await listed(draft)).toBe(true)
 })
 
+const NOT_STARTED = "Available once the chat is started: send a message first."
+const SHOTS = process.env.DRAFT_SHOTS
+
+/** Where the header's controls are, by name: nothing may move as the chat starts. */
+const headerBoxes = (page: Page) =>
+  page
+    .locator("[data-chat-main]")
+    .first()
+    .evaluate((main) => {
+      const header = main.querySelector("header") ?? main.firstElementChild!
+      const boxes: Record<string, [number, number, number]> = {}
+      for (const control of header.querySelectorAll("button, a")) {
+        const name = control.getAttribute("aria-label") ?? control.textContent ?? ""
+        // The branch control names the branch, whose label may change; its box may not.
+        const key = name.startsWith("Branch:") ? "branch" : name
+        const r = control.getBoundingClientRect()
+        // Where each starts: the title may take the room its "new" badge leaves.
+        if (r.width > 0) boxes[key] = [Math.round(r.x), Math.round(r.y), Math.round(r.height)]
+      }
+      return boxes
+    })
+
+for (const width of [1340, 390])
+  test(`a new chat's refused controls stay in place, disabled, saying why, at ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
+    await page.addInitScript(() => localStorage.setItem("dreamspan.theme", "dark"))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const card = await importCard(page, { name: `Mira Controls ${width}`, first_mes: "Mira opens the door." })
+    const draft = await openDraft(page, `/cards/${card.entityId}/chat`)
+    const greeting = page.getByRole("article").filter({ hasText: "Mira opens the door." })
+    await expect(greeting).toContainText(`Mira Controls ${width}`)
+    await expect(page.getByRole("button", { name: /^Branch: / })).toBeVisible()
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/draft-${width}-dark.png` })
+    await expectLayout(page, info, `draft-${width}-dark`)
+    const before = await headerBoxes(page)
+    if (width > 640) {
+      const pin = page.getByRole("button", { name: "Pin this branch", exact: true })
+      await expect(pin).toHaveAttribute("aria-disabled", "true")
+      await pin.hover()
+      await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(NOT_STARTED)
+    }
+    // The ⋯ menu lists what a started chat has, disabled, each saying why.
+    await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+    for (const name of ["Branches…", "Export…"]) {
+      const item = page.getByRole("menuitem", { name, exact: true })
+      await expect(item).toHaveAttribute("aria-disabled", "true")
+      await item.hover()
+      // Beside the list on a wide screen; under the label on a phone.
+      await expect(
+        width > 640 ? page.locator("[data-explanation]") : item.getByText(NOT_STARTED, { exact: true })
+      ).toHaveText(NOT_STARTED)
+    }
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/draft-menu-${width}-dark.png` })
+    await expectLayout(page, info, `draft-menu-${width}-dark`)
+    await page.keyboard.press("Escape")
+    // A message's own: Branch from here and Delete, the same.
+    await showActions(greeting)
+    await greeting.getByRole("button", { name: "More actions" }).click()
+    for (const name of [/^Branch from here/, /^Delete message/]) {
+      const item = page.getByRole("menuitem", { name })
+      await expect(item).toHaveAttribute("aria-disabled", "true")
+      // Its reason is a note under the label, in this menu.
+      await expect(item.getByText(NOT_STARTED, { exact: true })).toBeVisible()
+    }
+    await page.keyboard.press("Escape")
+    await composer(page).fill("Hello, Mira.")
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page).toHaveURL(chatUrl(draft))
+    await expect(page.getByRole("article").filter({ hasText: "Hello, Mira." })).toBeVisible()
+    await page.mouse.move(0, 0)
+    if (width > 640) await expect(page.getByRole("button", { name: "Pin this branch", exact: true })).toHaveCount(0)
+    const after = await headerBoxes(page)
+    for (const [name, box] of Object.entries(before))
+      if (name !== "new" && after[name] !== undefined) expect([name, after[name]]).toEqual([name, box])
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/started-${width}-dark.png` })
+    void info
+  })
+
 for (const kind of ["group", "empty"] as const)
   test(`a new ${kind} chat is a draft the same way`, async ({ page }) => {
     await start(page)
@@ -152,11 +232,21 @@ for (const kind of ["group", "empty"] as const)
       entry = `/groups/${group.chat.id}/new`
     }
     const before = await accountState()
-    const draft = await openDraft(page, entry)
+    let draft: string
     if (kind === "group") {
+      draft = await openDraft(page, entry)
       await expect(page.getByRole("article").filter({ hasText: "Ana says hi." })).toBeVisible()
       await expect(page.getByRole("article").filter({ hasText: "Ben nods." })).toBeVisible()
-    } else await expect(page.locator("[data-empty-chat-intro]")).toBeVisible()
+    } else {
+      // The Chats page's start card: its title names the chat it opens.
+      await page.goto(`${server().url}/chats`)
+      await page.getByRole("textbox", { name: "Title of the new chat", exact: true }).fill("Notes on tea")
+      await page.getByRole("button", { name: "New chat", exact: true }).click()
+      await expect.poll(() => draftOf(page)).not.toBeNull()
+      draft = draftOf(page)!
+      await expect(page.locator("[data-empty-chat-intro]")).toBeVisible()
+      await expect(page.locator("[data-chat-main]").getByText("Notes on tea", { exact: true }).first()).toBeVisible()
+    }
     expect(await accountState()).toBe(before)
     await composer(page).fill("The first words.")
     await page.getByRole("button", { name: "Send", exact: true }).click()

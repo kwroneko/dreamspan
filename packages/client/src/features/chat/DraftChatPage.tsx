@@ -14,10 +14,13 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { useCaller } from "../editor/caller.ts"
+import { useUserDraft } from "../editor/userDraft.tsx"
+import { EMPTY_CHAT_TITLE } from "./ChatsPage.tsx"
 import { useTitle } from "../shell.tsx"
 import { type DraftHost, OpenChat } from "./ChatPage.tsx"
 import { preloadChatPage } from "./chatPageLoader.ts"
 import { useIsPanelTab } from "./panels.tsx"
+import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 
@@ -27,7 +30,14 @@ export const DRAFT_PARAM = "draft"
 /** One open per page and attempt, even when React runs the effect twice. */
 const opening = new Map<string, Promise<ActionResult<Chat>>>()
 
-function DraftChat({ draftFor }: { draftFor: DraftFor }) {
+function DraftChat({
+  draftFor,
+  onOpened
+}: {
+  draftFor: DraftFor
+  /** A fresh pending chat was opened for the page (not one its URL named). */
+  onOpened?: ((chat: Chat) => void) | undefined
+}) {
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const named =
     typeof search[DRAFT_PARAM] === "string" && search[DRAFT_PARAM] !== "" ? (search[DRAFT_PARAM] as ChatId) : null
@@ -63,6 +73,7 @@ function DraftChat({ draftFor }: { draftFor: DraftFor }) {
         return
       }
       setChat(value)
+      if (value.id !== reopen) onOpened?.(value)
       if (value.id !== reopen)
         void navigate({
           to: ".",
@@ -99,6 +110,8 @@ function DraftChat({ draftFor }: { draftFor: DraftFor }) {
           newer: view.newer,
           cast: view.cast
         })
+        // Focus on the panel's tabs stays on the same tab of the chat's own page.
+        carryPanelFocus(view.chat.id, Boolean(document.activeElement?.closest("[data-chat-panel-tabs]")))
         void navigate({
           to: "/chats/$chatId",
           params: { chatId: view.chat.id },
@@ -139,12 +152,12 @@ function DraftChat({ draftFor }: { draftFor: DraftFor }) {
   )
 }
 
-function DraftChatPage({ draftFor }: { draftFor: DraftFor }) {
+function DraftChatPage({ draftFor, onOpened }: { draftFor: DraftFor; onOpened?: (chat: Chat) => void }) {
   useTitle("New chat")
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Another entry is another chat. */}
-      <DraftChat key={draftFor} draftFor={draftFor} />
+      <DraftChat key={draftFor} draftFor={draftFor} onOpened={onOpened} />
     </div>
   )
 }
@@ -163,5 +176,21 @@ export function GroupDraftChatPage() {
 
 /** /new/chat: a chat with nobody in it yet (the Chats page's New chat). */
 export function EmptyDraftChatPage() {
-  return <DraftChatPage draftFor="empty" />
+  // The title typed on the Chats page's start card names the chat it opens (a rename, which
+  // starts nothing); the title's draft ends once it's the chat's.
+  const title = useUserDraft(EMPTY_CHAT_TITLE, "Title", "")
+  const call = useCaller()
+  const [opened, setOpened] = useState<Chat | null>(null)
+  const renamed = useRef(false)
+  useEffect(() => {
+    if (opened === null || !title.ready || renamed.current) return
+    renamed.current = true
+    const name = title.text.trim()
+    if (name === "") return
+    void call((client) => client("RenameChat", { chatId: opened.id, name })).then((result) => {
+      if (result.ok) void title.commit(title.text, async () => true)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when both are here
+  }, [opened, title.ready])
+  return <DraftChatPage draftFor="empty" onOpened={setOpened} />
 }

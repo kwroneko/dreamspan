@@ -1752,9 +1752,11 @@ export class ChatSession {
   /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
   async changeCast(change: CastChange): Promise<Outcome<Cast>> {
     const { forkId, leafSlotId } = this.view
-    const result = await this.call((client) =>
-      client("ChangeCast", { chatId: this.chatId, slotId: leafSlotId, forkId, change })
-    )
+    // A pending chat's cast is its start's (DESIGN §2.1): nothing is said yet, so a persona or
+    // character picked before the first send applies before the greetings, and `{{user}}` in
+    // them follows it, then and once started.
+    const slotId = this.view.chat?.status === "pending" ? null : leafSlotId
+    const result = await this.call((client) => client("ChangeCast", { chatId: this.chatId, slotId, forkId, change }))
     // The save's snapshot may predate another pin. Read the current cast after it commits.
     if (result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId) {
       this.forgetPositions()

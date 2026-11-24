@@ -20,6 +20,7 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { notStarted } from "./chatStarted.ts"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
@@ -444,6 +445,8 @@ export function BranchControl(props: BranchControlProps) {
   const context: BranchControlContext | null = forks === null ? null : { session, view, forks, shown }
   const ready = context !== null && parts.every((part) => part.ready?.(context) ?? true)
   const many = ready && forks !== null && forks.length > 1
+  // A new chat not started yet has one branch and can make no other (chatStarted.ts).
+  const refused = notStarted(view.chat)
   const named = !ready ? null : (parts.map((part) => part.trigger?.(context) ?? null).find(Boolean) ?? null)
   const kind = named?.kind ?? "Branch"
   const icon = named?.icon ?? "branch"
@@ -473,7 +476,7 @@ export function BranchControl(props: BranchControlProps) {
                 ? "Switches between this chat’s branches."
                 : !ready
                   ? "Loading…"
-                  : "No other branches yet."
+                  : (refused ?? "No other branches yet.")
           }
           type="button"
           aria-label={!ready ? "Loading…" : `${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
@@ -514,7 +517,8 @@ export function BranchControl(props: BranchControlProps) {
           ? "Loading…"
           : named
             ? named.hint
-            : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`
+            : (refused ??
+              `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`)
       }
 
       hintSide="bottom"

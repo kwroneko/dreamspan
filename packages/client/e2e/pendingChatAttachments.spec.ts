@@ -1,7 +1,8 @@
-// A chat not made yet attaches as a saved chat does: the same paperclip in the same row, paste
-// and drop, the thumbnails above the text, which stays put; a reload keeps them, and the first send makes the
-// chat with them on its first message. Generate leaves them, and they move to the saved chat's
-// composer. At 1440 and 390 with the layout audit. Synthetic cards and a drawn image only.
+// A new chat (a pending chat until its first send, DraftChatPage.tsx) attaches with the chat's own
+// composer: the paperclip in its row, paste and drop, the thumbnails above the text, which stays
+// put; a reload keeps them, and the first send starts the chat with them on its first message.
+// Generate leaves them in the composer. At 1440 and 390 with the layout audit. Synthetic cards
+// and a drawn image only.
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { composerPlaces, expectGrewUpward, expectImageTile } from "./support/attachments.ts"
@@ -41,13 +42,16 @@ const transfer = (page: Page, kind: "paste" | "drop", name: string, base64: stri
       data.items.add(new File([bytes], name, { type: "image/png" }))
       const target =
         kind === "paste"
-          ? document.querySelector('[data-testid="composer"]')!
-          : document.querySelector("[data-chat-main] .overflow-y-auto")!
+          ? // The composer's editor content, in its editor's shadow root: the editor sees the paste first.
+            [...document.querySelector("[data-composer-text]")!.querySelectorAll("*")]
+              .map((element) => element.shadowRoot?.querySelector('[data-testid="composer"]'))
+              .find((element) => element)!
+          : document.querySelector('[data-testid="messages"]')!
       if (kind === "drop")
         target.dispatchEvent(new DragEvent("dragover", { dataTransfer: data, bubbles: true, cancelable: true }))
       target.dispatchEvent(
         kind === "paste"
-          ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+          ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true })
           : new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
       )
     },
@@ -104,7 +108,7 @@ for (const width of [1440, 390]) {
     await box.fill("Here's the harbor.")
     await expect(page.getByRole("button", { name: /^Send/ })).toBeEnabled()
 
-    // A reload keeps them, and still nothing is made.
+    // A reload keeps them, and still nothing is listed.
     await page.waitForTimeout(800)
     await page.reload()
     await expect(attached(page).getByRole("img")).toHaveCount(3, { timeout: 30_000 })
@@ -112,7 +116,7 @@ for (const width of [1440, 390]) {
     expect((await chats()).length).toBe(before)
     await expectLayout(page, info, `pending-attachments-reloaded-${width}`)
 
-    // The first send makes the chat, with them on its first message.
+    // The first send starts the chat, with them on its first message.
     await page.getByRole("button", { name: /^Send/ }).click()
     await expect(page).toHaveURL(/\/chats\/[^/?]+/)
     const sent = page.getByRole("article").filter({ hasText: "Here's the harbor." })
@@ -129,7 +133,7 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("Generate leaves the attachments, and they move to the saved chat's composer", async ({ page }) => {
+test("Generate leaves the attachments in the started chat's composer", async ({ page }) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -146,7 +150,7 @@ test("Generate leaves the attachments, and they move to the saved chat's compose
   await expect(generate).toBeEnabled()
   await generate.click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+/)
-  // Attached to the saved chat's draft on the server: it's there without this browser's copy.
+  // Attached to the chat's draft on the server: it's there without this browser's copy.
   await expect(page.getByRole("button", { name: "Remove kept.png" })).toBeVisible({ timeout: 30_000 })
   await page.waitForTimeout(800)
   await page.evaluate(

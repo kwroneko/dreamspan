@@ -64,6 +64,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.branches",
+    needsStarted: true,
     label: "Branches…",
     description: "Switch to, rename or delete this chat's branches.",
     order: 2,
@@ -73,6 +74,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.split",
+    needsStarted: true,
     // Its new chat's name is typed text: a reload opens the dialog again (editor/durable.tsx).
     dialogInUrl: true,
     label: "Make this branch its own chat",
@@ -85,6 +87,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.merge",
+    needsStarted: true,
     dialogInUrl: true,
     label: "Merge another chat…",
     description: "Brings another chat's messages into this one, after the newest message.",
@@ -111,6 +114,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.export",
+    needsStarted: true,
     label: "Export…",
     description: "Downloads the branch shown as a SillyTavern chat file or plain text.",
     order: 4,
@@ -127,6 +131,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.delete-group",
+    needsStarted: true,
     label: "Delete chat",
     description: "Moves this chat's branches to the bin, from which they can be restored later.",
     order: 90,
@@ -138,6 +143,7 @@ export const registerChatHeader = () => [
   // Chats without split groups keep the existing immediate delete.
   chatCommands.register({
     id: "chat.delete",
+    needsStarted: true,
     label: "Delete chat",
     description: "Moves this chat and all its branches to the bin, from which it can be restored later.",
     order: 90,

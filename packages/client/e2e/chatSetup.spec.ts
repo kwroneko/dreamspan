@@ -4,12 +4,14 @@
 // sent during a reply wait, post when it ends or is stopped, and can be withdrawn; and a
 // new chat of a group, from its tile. Every card here is made up.
 import { join } from "node:path"
+import { showActions } from "./support/message.ts"
+import { pickReply } from "./support/strip.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
-import { closePanel, openPanel } from "./support/panel.ts"
+import { openPanel } from "./support/panel.ts"
 import { addToCast, pickPendingPersona } from "./support/cast.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -105,14 +107,16 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).click()
-  const greeting = page.getByRole("article", { name: /^Greeting from / })
+  // The new chat's greeting is its first message (DraftChatPage.tsx).
+  const greeting = replies(page).first()
   await expect(greeting).toContainText("The bell rings for Ana.")
-  // Opening a card made no chat (DESIGN §2.1).
+  // Opening a card lists no chat (DESIGN §2.1).
   await page.goto(`${server().url}/chats`)
   await expect(page.getByText(/^No chats yet\./)).toBeVisible()
   await page.goBack()
 
-  await greeting.getByRole("button", { name: "Next greeting" }).click()
+  await showActions(greeting)
+  await greeting.getByRole("button", { name: "Next swipe", exact: true }).click()
   await expect(greeting).toContainText("Mira waves at Ana from the pier.")
   await pickPendingPersona(page, "Bo")
   await expect(greeting).toContainText("Mira waves at Bo from the pier.")
@@ -331,47 +335,22 @@ test("text typed while Generate is on its way stays in the composer", async ({ p
 })
 
 test("a saved greeting keeps its card's fields and the date it showed", async ({ page }) => {
-  await page.clock.setFixedTime(new Date("2026-03-01T12:00:00Z"))
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Wren" }).click()
-  const greeting = page.getByRole("article", { name: /^Greeting from / })
-  await expect(greeting).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
+  const greeting = replies(page).first()
+  // The server drew its date when it opened the new chat (frozen macros).
+  await expect(greeting).toContainText(/A lighthouse keeper\. The log says Wren, \d{4}-\d{2}-\d{2}\./)
+  const shown = /The log says Wren, (\d{4}-\d{2}-\d{2})\./.exec(await greeting.innerText())![1]!
+  const said = `A lighthouse keeper. The log says Wren, ${shown}.`
   await composer(page).fill("Hello, keeper.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
-  const first = replies(page).first()
-  await expect(first).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
-  // A day later, it still says what it said.
-  await page.clock.setFixedTime(new Date("2026-03-02T12:00:00Z"))
+  await expect(replies(page).first()).toContainText(said)
+  // Days later, it still says what it said.
+  await page.clock.setFixedTime(new Date(Date.parse(`${shown}T12:00:00Z`) + 3 * 86_400_000))
   await page.reload()
-  await expect(replies(page).first()).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
-  await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-})
-
-test("text typed while the first send makes the chat goes along to the chat's composer", async ({ page }) => {
-  // Holds the StartChat request until the test lets it through.
-  let release: (() => void) | null = null
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const server = socket.connectToServer()
-    socket.onMessage((message) => {
-      if (release === null && String(message).includes('"tag":"StartChat"')) release = () => server.send(message)
-      else server.send(message)
-    })
-    server.onMessage((message) => socket.send(message))
-  })
-  await login(page)
-  await page.goto(`${server().url}/library`)
-  await page.getByRole("link", { name: "Start a chat with Tobin" }).click()
-  await composer(page).fill("Take me across.")
-  await page.getByRole("button", { name: /^Send/ }).click()
-  await expect.poll(() => release !== null).toBe(true)
-  await expectTextBox(composer(page), "")
-  await composer(page).fill("And bring the lantern.")
-  release!()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
-  await expect(page.getByRole("article", { name: "Your message" })).toContainText("Take me across.")
-  await expectTextBox(composer(page), "And bring the lantern.")
+  await expect(replies(page).first()).toContainText(said)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
@@ -379,7 +358,7 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Crowd" }).click()
-  await expect(page.getByRole("article", { name: /^Greeting from / })).toContainText("1/1001")
+  await expect(replies(page).first()).toContainText("1/1001")
   await composer(page).fill("Hello, everyone.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
@@ -405,16 +384,17 @@ test("a new chat of a group: each character greets in turn, and the first send m
   )
   await page.goto(`${server().url}/`)
   await page.goto(`${server().url}/groups/${chatId}/new`)
-  await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
+  await expect(page).toHaveURL(new RegExp(`/groups/${chatId}/new\\?draft=`))
   // The chat page, under the name it's saved with, marked new until the first send.
   await expect(page.getByRole("heading", { level: 1, name: "The Pier" })).toBeVisible()
   await expect(page.locator("header").getByText("new", { exact: true })).toBeVisible()
   // Each member's greeting, in the group's order, as ST starts a group chat; each has its alternates.
-  const greetings = page.getByRole("article", { name: /^Greeting from / })
+  const greetings = replies(page)
   await expect(greetings).toHaveCount(2)
   await expect(greetings.nth(0)).toContainText("Mira")
   // ST draws an initial greeting; choose the first for this assertion.
-  const previous = greetings.nth(0).getByRole("button", { name: "Previous greeting from Mira" })
+  await showActions(greetings.nth(0))
+  const previous = greetings.nth(0).getByRole("button", { name: "Previous swipe", exact: true })
   if (await previous.isEnabled()) await previous.click()
   await expect(greetings.nth(0)).toContainText("The bell rings for Ana.")
   await expect(greetings.nth(0)).toContainText("1/2")
@@ -423,27 +403,25 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await page.goto(`${server().url}/groups/${chatId}`)
   await expect(page.getByRole("heading", { level: 2, name: "Chats (1)" })).toBeVisible()
   await page.getByRole("main").getByRole("link", { name: "New chat", exact: true }).click()
-  await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
+  await expect(page).toHaveURL(new RegExp(`/groups/${chatId}/new\\?draft=`))
 
-  // What's typed is kept in this browser, per group, until it's sent.
+  // What's typed is kept with the new chat until it's sent, and a reload reopens that chat.
   await composer(page).fill("Is the ferry running?")
   await page.reload()
   await expectTextBox(composer(page), "Is the ferry running?")
-  // Who answers first is picked in the Cast tab, as who replies is in a saved chat.
-  const cast = await openPanel(page, "Cast")
-  // The label has its (i) beside it now, so the picker is named by role (settingscopy).
-  await cast.getByRole("combobox", { name: "Reply from" }).click()
-  await page.getByRole("option", { name: "Tobin" }).click()
-  await closePanel(page)
+  // Who answers first is picked with the strip's Next chip, as in any group chat.
+  await pickReply(page, "Tobin")
   // Reply from is independent of the speaker that Generate writes (named Generate again: composerrow, DESIGN §2.2 [D]).
   await expect(page.getByRole("button", { name: "Generate Ana" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
   // Reopening draws again. Pick the alternate explicitly before sending.
-  const before = greetings.nth(0).getByRole("button", { name: "Previous greeting from Mira" })
+  await showActions(greetings.nth(0))
+  const before = greetings.nth(0).getByRole("button", { name: "Previous swipe", exact: true })
   if (await before.isEnabled()) await before.click()
   // Mira's alternate greeting, picked before the send, is the one the chat shows.
-  await greetings.nth(0).getByRole("button", { name: "Next greeting from Mira" }).click()
+  await showActions(greetings.nth(0))
+  await greetings.nth(0).getByRole("button", { name: "Next swipe", exact: true }).click()
   await expect(greetings.nth(0)).toContainText("Mira waves at Ana from the pier.")
   await page.getByRole("button", { name: "Send as Ana" }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)

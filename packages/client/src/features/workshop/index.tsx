@@ -165,6 +165,7 @@ export const register = () => [
   }),
   chatCommands.register({
     id: "workshop.talk-about",
+    needsStarted: true,
     label: TALK_ABOUT,
     description: "Opens a workshop beside this chat to talk about it out of character",
     order: 3.5,

@@ -28,6 +28,7 @@ import { Menu, MenuItemWithCheckbox, MenuSeparator } from "../../ui/Menu.tsx"
 import { linkMenuProps } from "../../ui/linkMenuState.ts"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
+import { notStarted } from "./chatStarted.ts"
 
 export interface MessageActionContext {
   readonly entry: PathEntry
@@ -90,6 +91,8 @@ export interface MessageAction {
   readonly onMerges?: boolean
   /** Temporary unavailability keeps the button in place and explains why. */
   readonly disabled?: (context: MessageActionContext) => string | null
+  /** The server refuses it on a new chat not started yet: shown disabled there, saying so (chatStarted.ts). */
+  readonly needsStarted?: boolean
   /** Shown on the message as a button until the user unticks it. */
   readonly pinned?: boolean
   /** Still usable while the message or its thinking is edited: it only reads the saved message. */
@@ -149,7 +152,12 @@ export const availableMessageActions = (context: MessageActionContext, snapshot 
 /** Resolve the effective action, including plugin disablement and availability. */
 export const invokeMessageAction = (id: string, context: MessageActionContext, source: "button" | "keyboard") => {
   const action = messageActions.get(id)
-  if (action?.available?.(context) === false || action?.disabled?.(context)) return
+  if (
+    action?.available?.(context) === false ||
+    action?.disabled?.(context) ||
+    (action?.needsStarted === true && notStarted(context.session.snapshot().chat))
+  )
+    return
   if (context.entry.version.origin === "merge" && action?.onMerges !== true) return
   return action?.run?.(context, source)
 }
@@ -321,7 +329,8 @@ export function MessageActions({
   }, [held])
   const explain = (action: MessageAction, view: MessageActionView): MessageActionView => {
     if (locked !== undefined && action.duringEdit !== true) return { ...view, disabled: locked }
-    const reason = action.disabled?.(context)
+    const reason =
+      (action.needsStarted === true ? notStarted(context.session.snapshot().chat) : null) ?? action.disabled?.(context)
     return reason ? { ...view, disabled: reason } : view
   }
   const props: MessageActionProps = {

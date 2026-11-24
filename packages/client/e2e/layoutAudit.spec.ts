@@ -7,7 +7,6 @@ import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { workshopDocumentTests } from "./support/workshopDocuments.ts"
 import { workshopSummaryTests } from "./support/workshopSummaries.ts"
 import { workshopRewriteTests } from "./support/workshopRewrite.ts"
-import { draftRequestTests } from "./support/draftRequest.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
@@ -87,7 +86,6 @@ if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") {
 }
 if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_SUMMARIES_ONLY === "1") workshopSummaryTests()
-if (process.env.LAYOUT_AUDIT_DRAFT_ONLY === "1") draftRequestTests()
 if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
   cardexCriteriaTests()
   cardexCreatorTests()

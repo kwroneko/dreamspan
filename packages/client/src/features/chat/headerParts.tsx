@@ -12,10 +12,14 @@ import type { ChatHeaderActionProps } from "./ChatHeader.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { useShellForks } from "../characters/shellData.tsx"
 import { PanelToggles } from "./ChatPanels.tsx"
+import { notStarted } from "./chatStarted.ts"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { ChatCommandMenu, type ChatCommandDialogProps, chatCommands, shortcutText } from "./commands.tsx"
 
 /** The pin: pins the fork shown, from its shell row (this chat's forks only). */
 export function HeaderPin({ view }: ChatHeaderActionProps) {
+  // A new chat not started yet has no row to pin: the pin stays in its place, saying why.
+  const refused = notStarted(view.chat)
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   const fork = useShellForks({
     entity: null,
@@ -32,6 +36,12 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
     )
   // A narrow header (a phone, or a narrow chat column) keeps its room for the name; the chat
   // lists' rows have the pin too.
+  if (refused !== null)
+    return (
+      <span className="flex @max-[40rem]/header:hidden">
+        <IconButton label="Pin this branch" hint={refused} icon="pin" disabled focusableWhenDisabled />
+      </span>
+    )
   return fork ? (
     <span className="flex @max-[40rem]/header:hidden">
       <PinButton fork={fork} branch />
