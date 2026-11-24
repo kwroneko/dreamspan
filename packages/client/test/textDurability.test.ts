@@ -244,7 +244,6 @@ const INPUTS: Readonly<Record<string, ReadonlyArray<Site>>> = {
   "features/chat/MergeChatDialog.tsx": [search("chats to merge"), kept("useDurableForm", "merge title")],
   "features/chat/NameDialog.tsx": [kept("useUserDraft", "chat, group and split names")],
   "features/chat/SpeakerSwitcher.tsx": [search("filter the speakers")],
-  "features/chat/StartChatPage.tsx": [kept("useUserDraft", "title of the new chat")],
   "features/chat/VersionPicker.tsx": [search("find in versions")],
   "features/chat/agent/ToolsSection.tsx": [kept("useDurableText", "model requests per reply, until it's saved")],
   "features/chat/htmlTextField.tsx": [kept("useDurableText", "a text input in a message's HTML")],
