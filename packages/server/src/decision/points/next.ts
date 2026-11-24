@@ -2,8 +2,8 @@
 // reply whose speaker Auto picked is written, in a chat with two or more characters the user
 // doesn't play, one choice question: which present character speaks next, over the last few
 // messages. The model's pick becomes the reply's speaker, recorded on the version with how sure it
-// was; below the threshold, on a timeout, an error or a malformed answer, Auto's pick stays. It
-// runs for each reply of a round too, at its turn, so a round follows the scene as it goes. A pick
+// was; below the threshold, on a timeout, an error or a malformed answer, Auto uses an eligible
+// fallback. It runs for each reply of a round too, at its turn, so a round follows the scene. A pick
 // under Next, No one, Generate and Speak now never come here: their versions aren't Auto's pick.
 import type { EntityId, Version } from "@dreamspan/shared/chat.ts"
 import type { DecisionQuestion } from "@dreamspan/shared/decisions.ts"
@@ -97,7 +97,7 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
       if (version.speakerPick?.by !== "auto" || auto === null || reply.parentSlotId === null) return false
       const state = foldState(reply.events)
       const characters = state.participants.filter((entity) => !state.playedByMe.includes(entity))
-      if (characters.length < 2) return false
+      if (characters.length === 0 || (characters.length === 1 && characters[0] === auto)) return false
       const window = yield* reader.ReadPath({
         userId: reply.userId,
         chatId: reply.chatId,
@@ -113,13 +113,23 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
       const present = characters.filter(
         (entity) => !state.absent.includes(entity) && !away.includes(entity) && entity !== lastId
       )
-      if (present.length < 2) return false
+      const fallback = present.includes(auto) ? auto : present[0]
+      if (fallback === undefined) return false
+      const settleFallback = () =>
+        fallback !== auto
+          ? writer.SettleSpeaker({
+              userId: reply.userId,
+              versionId: reply.versionId,
+              speakerEntityId: fallback as EntityId
+            })
+          : Effect.succeed(false)
+      if (present.length < 2) return yield* settleFallback()
       // Auto's pick first, so a cap never drops it.
-      const candidates = [...new Set([...(present.includes(auto) ? [auto] : []), ...present])].slice(0, MAX_CANDIDATES)
+      const candidates = [...new Set([fallback, ...present])].slice(0, MAX_CANDIDATES)
       const speakers = window.entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : []))
       const cards = yield* reader.CastCards({
         userId: reply.userId,
-        entityIds: [...new Set([auto, ...candidates, ...speakers])] as Array<EntityId>
+        entityIds: [...new Set([...candidates, ...speakers])] as Array<EntityId>
       })
       const names = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
       const nameOf = (entity: string | null, writer?: Version["writer"]) =>
@@ -134,12 +144,12 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
               }
             ]
       )
-      if (recent.length === 0) return false
+      if (recent.length === 0) return yield* settleFallback()
       const outcome = yield* evaluate<NextInput, NextPick>(
         "next",
         {
           candidates: candidates.map((entity) => ({ entity, name: nameOf(entity) })),
-          fallback: { entity: auto, name: nameOf(auto) },
+          fallback: { entity: fallback, name: nameOf(fallback) },
           lastSpeaker: last ? nameOf(lastId, last.version.writer) : "User",
           recent
         },
@@ -151,7 +161,8 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
           requestClass: "interactive"
         }
       )
-      if (outcome.source !== "model" || !outcome.rolloutId || outcome.value.confidence === null) return false
+      if (outcome.source !== "model" || !outcome.rolloutId || outcome.value.confidence === null)
+        return yield* settleFallback()
       // Recorded even when it agrees with Auto, so the reply says the model chose it.
       return yield* writer.PickSpeaker({
         userId: reply.userId,

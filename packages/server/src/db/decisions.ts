@@ -213,11 +213,14 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           return true
         }).pipe(transaction(sql, "PickSpeaker")),
 
-      SettleSpeaker: ({ userId, versionId }) =>
+      SettleSpeaker: ({ userId, versionId, speakerEntityId }) =>
         Effect.gen(function* () {
+          if (speakerEntityId !== undefined) yield* graph.checkSpeaker(userId, speakerEntityId)
           const settled = yield* sql<{ readonly id: string }>`
-            UPDATE versions SET speaker_pick_json = ${JSON.stringify({ by: "order" })}, updated_at = ${Date.now()}
+            UPDATE versions SET speaker_entity_id = coalesce(${speakerEntityId ?? null}, speaker_entity_id),
+              speaker_pick_json = ${JSON.stringify({ by: "order" })}, updated_at = ${Date.now()}
             WHERE id = ${versionId} AND json_extract(speaker_pick_json, '$.by') = 'auto'
+              AND status = 'generating' AND content_length = 0 AND deleted_at IS NULL
               AND slot_id IN (SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id WHERE c.owner_user_id = ${userId})
             RETURNING id`
           return settled.length > 0

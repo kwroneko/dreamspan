@@ -4583,12 +4583,12 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   }),
   /**
    * A reply whose speaker the decision model was to choose, once it didn't (nothing to ask, or no
-   * answer sure enough): Auto's pick stands, and the reply shows it. False when already settled.
+   * answer sure enough): the reply shows Auto's pick, or an eligible replacement. False when settled.
    */
   Rpc.make("SettleSpeaker", {
-    payload: { userId: UserId, versionId: VersionId },
+    payload: { userId: UserId, versionId: VersionId, speakerEntityId: Schema.optionalKey(EntityId) },
     success: Schema.Boolean,
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */
   Rpc.make("ApplyDecisionEffect", {

@@ -316,4 +316,37 @@ describe("who replies next", () => {
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("a queued turn settles to the only eligible speaker after the model changes the first turn", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* mockWith(choose("c1", 0.9))
+      const api = yield* client()
+      const { version, events, characters, mira } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        characters: ["Wren"],
+        auto: { speaker: "Mira", round: ["Wren"] },
+        before: () => decisionConnection(api, mock.url, ON)
+      })
+      const second = () =>
+        events.find(
+          (event) =>
+            event._tag === "Version" &&
+            event.version.id !== version.id &&
+            event.version.status === "complete" &&
+            event.version.writer === "model"
+        )
+      yield* eventually(() => second() !== undefined)
+      assert.strictEqual(version.speakerEntityId, characters[0]!.entityId)
+      const reply = second()!
+      assert(reply._tag === "Version")
+      assert.strictEqual(reply.version.speakerEntityId, mira.entityId)
+      assert.deepStrictEqual(reply.version.speakerPick, { by: "order" })
+      assert.lengthOf(decides(mock.requests()), 1)
+      const completions = mock.requests().filter((request) => request.path === "/v1/chat/completions")
+      assert.lengthOf(completions, 2)
+      assert.include(JSON.stringify(completions[1]!.body), "Mira keeps the ledger for Tobin.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })
