@@ -1184,7 +1184,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               input.revisionId,
               input.fields
             )
-            const unchanged = { result: "", effects: [] }
+            const unchanged = {
+              result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." }),
+              effects: []
+            }
             const conflictValue = (field: string, value: unknown) =>
               before.kind === "card" && unitPath(field)[0] === "extensions"
                 ? (visibleDoc("card", { extensions: value }).extensions ?? null)
@@ -1202,11 +1205,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   }))
                 })
               }
-            if (plan.doc === null || plan.fields.length === 0)
-              return {
-                ...unchanged,
-                result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." })
-              }
+            if (plan.doc === null || plan.fields.length === 0) return unchanged
             const head = yield* lib.loadDoc(before.head_revision_id)
             const valid = validateDoc(before.kind, guarded(before.kind, head, plan.doc as Doc))
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
@@ -1219,6 +1218,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
+            if (change.ref.headRevisionId === before.head_revision_id) return unchanged
             const reversalId = yield* insertReversal(sql, {
               userId: input.userId,
               chatId,
@@ -1239,27 +1239,24 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 revision: change.ref.headRevisionId,
                 fields: plan.fields.map(unitName)
               }),
-              effects:
-                change.ref.headRevisionId === before.head_revision_id
-                  ? []
-                  : [
-                      {
-                        kind: "library.revise",
-                        targetKind: "entity",
-                        targetId: before.entity_id,
-                        title: `Reverted a change to the ${before.kind} ${before.label}`,
-                        undo: {
-                          refId: before.id,
-                          before: before.head_revision_id,
-                          exactDocument: true,
-                          reversalId,
-                          archivedAt: before.archived_at,
-                          beforeRowVersion: before.row_version,
-                          head: change.ref.headRevisionId,
-                          rowVersion: change.ref.rowVersion
-                        }
-                      }
-                    ]
+              effects: [
+                {
+                  kind: "library.revise",
+                  targetKind: "entity",
+                  targetId: before.entity_id,
+                  title: `Reverted a change to the ${before.kind} ${before.label}`,
+                  undo: {
+                    refId: before.id,
+                    before: before.head_revision_id,
+                    exactDocument: true,
+                    reversalId,
+                    archivedAt: before.archived_at,
+                    beforeRowVersion: before.row_version,
+                    head: change.ref.headRevisionId,
+                    rowVersion: change.ref.rowVersion
+                  }
+                }
+              ]
             }
           })
         ),
