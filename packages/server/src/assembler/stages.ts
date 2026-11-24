@@ -2640,6 +2640,8 @@ const composeStage = sync("compose", (assembly) => {
   }
   const first = projected[start]?.entry
   const startDepth = first?.depth ?? need(assembly, "target").depth
+  if (historyRequested && start > 0)
+    assembly.historyCut = { first: projected[0]!.entry.depth, last: projected[start - 1]!.entry.depth }
   // Pins hold while the history's start does: when it moves (a cut, a restore, LCM's cursor),
   // entries kept only by their pin go, and what matched this turn is pinned in their place.
   const released = lore.filter((e) => e.pinnedOnly)

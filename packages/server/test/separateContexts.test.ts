@@ -164,6 +164,57 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 }
 
 describe("separate contexts", () => {
+  it.live("does not report a size cut when the next speaker missed the first message", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const chat = yield* t.writer.CreateChat({
+          userId: t.userId,
+          kind: "rp",
+          status: "active",
+          title: "The crossing",
+          participants: [t.wren, t.mira],
+          greeting: null
+        })
+        const forkId = chat.currentForkId!
+        const event = (slotId: SlotId | null, data: StateEventData) =>
+          t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: chat.id,
+            forkId,
+            slotId,
+            versionId: null,
+            scope: null,
+            data
+          })
+        yield* event(null, { key: "context.per_speaker", value: "separate" })
+        yield* event(null, { key: "away.set", value: { entity: t.wren, away: true } })
+        const send = (parentSlotId: SlotId | null, content: string) =>
+          Effect.gen(function* () {
+            const sent = yield* t.api.SendMessage({
+              chatId: chat.id,
+              parentSlotId,
+              branch: false,
+              content,
+              reply: false
+            })
+            if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+            return sent.entry
+          })
+        const missed = yield* send(null, "The lantern went out while Wren was away.")
+        yield* event(missed.slotId, { key: "away.set", value: { entity: t.wren, away: false } })
+        const heard = yield* send(missed.slotId, "Wren returned to the crossing.")
+        const preview = yield* t.api.GetNextContext({ chatId: chat.id, forkId, leafSlotId: heard.slotId })
+        assert.deepStrictEqual(preview.historyStart, {
+          slotId: heard.slotId,
+          depth: 1,
+          cutThrough: null,
+          hiddenBefore: null
+        })
+      })
+    )
+  )
+
   it.live("a character's reply leaves out what it missed; another's and a rebuild keep their own", () =>
     run(
       Effect.gen(function* () {
