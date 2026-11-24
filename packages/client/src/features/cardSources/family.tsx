@@ -2,7 +2,7 @@
 // forked from or listed as before, its versions and its forks, as the source lists them. Each
 // can be inspected or tried in a draft chat without adding it; the user's own are marked and
 // open their card. Shown on a source card's page and, on request, in a card's Sources.
-import type { RemoteRelative } from "@dreamspan/shared/cardSources.ts"
+import { remoteEntityId, type RemoteRelative } from "@dreamspan/shared/cardSources.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -35,10 +35,9 @@ const detailsOf = (item: RemoteRelative) =>
     .filter((part) => part !== null)
     .join(" · ")
 
-const actionClass = `${buttonClass("ghost")} h-7 px-2 text-xs`
-
-function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: string }) {
+function RelativeRow({ item, sourceId, inEditor }: { item: RemoteRelative; sourceId: string; inEditor: boolean }) {
   const params = { sourceId, remoteId: item.remoteId }
+  const actionClass = `${buttonClass("ghost")} ${inEditor ? "px-2 pointer-coarse:h-11" : "h-7 px-2 text-xs"}`
   return (
     <li data-family-card={item.remoteId} className="flex min-w-0 items-center gap-3 py-2">
       <Avatar
@@ -48,8 +47,11 @@ function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: strin
         {...(item.thumb ? { src: remoteImageUrl(sourceId, item.thumb) } : {})}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span data-layout-name className="truncate text-sm font-medium">
+        <span className={`flex min-w-0 items-center gap-1.5 ${inEditor ? "flex-wrap" : ""}`}>
+          <span
+            data-layout-name
+            className={`text-sm font-medium ${inEditor ? "[overflow-wrap:anywhere]" : "truncate"}`}
+          >
             {item.name}
           </span>
           {item.held && (
@@ -58,8 +60,21 @@ function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: strin
             </Badge>
           )}
         </span>
-        <span className="truncate text-xs text-muted">{detailsOf(item)}</span>
-        <span className="flex flex-wrap gap-1 pt-2">
+        <span className={`text-xs text-muted ${inEditor ? "[overflow-wrap:anywhere]" : "truncate"}`}>
+          {detailsOf(item)}
+        </span>
+        <span className={`flex flex-wrap gap-1 ${inEditor ? "pt-1" : "pt-2"}`}>
+          {inEditor && (
+            <Tooltip label={`Shows ${item.name}’s fields in the card editor.`}>
+              <Link
+                to="/library/$refId"
+                params={{ refId: remoteEntityId(sourceId, item.remoteId) }}
+                className={actionClass}
+              >
+                Open in editor
+              </Link>
+            </Tooltip>
+          )}
           {item.held ? (
             <Tooltip label={`Opens your ${item.name}.`}>
               <Link to="/cards/$entityId" params={{ entityId: item.held.entityId }} className={actionClass}>
@@ -73,11 +88,13 @@ function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: strin
               </Link>
             </Tooltip>
           )}
-          <Tooltip label={`Shows ${item.name}'s definitions without starting a chat.`}>
-            <Link to="/sources/$sourceId/cards/$remoteId" params={params} className={actionClass}>
-              Inspect
-            </Link>
-          </Tooltip>
+          {!inEditor && (
+            <Tooltip label={`Shows ${item.name}'s definitions without starting a chat.`}>
+              <Link to="/sources/$sourceId/cards/$remoteId" params={params} className={actionClass}>
+                Inspect
+              </Link>
+            </Tooltip>
+          )}
         </span>
       </div>
     </li>
@@ -89,12 +106,14 @@ export function SourceFamily({
   sourceId,
   sourceName,
   remoteId,
-  name
+  name,
+  inEditor = false
 }: {
   sourceId: string
   sourceName: string
   remoteId: string
   name: string
+  inEditor?: boolean
 }) {
   const call = useSourceCall()
   const key = `${sourceId}\u0000${remoteId}`
@@ -129,7 +148,7 @@ export function SourceFamily({
           {current.problem.reason !== "not_found" && (
             <Button
               variant="ghost"
-              className="h-7 px-2 text-xs"
+              className={inEditor ? "pointer-coarse:h-11" : "h-7 px-2 text-xs"}
               hint={`Asks ${sourceName} for this card's family again.`}
               onClick={() => setAttempt((n) => n + 1)}
             >
@@ -145,7 +164,12 @@ export function SourceFamily({
         <>
           <ul className="flex min-w-0 flex-col divide-y divide-border">
             {current.items.map((item) => (
-              <RelativeRow key={`${item.relation}:${item.remoteId}`} item={item} sourceId={sourceId} />
+              <RelativeRow
+                key={`${item.relation}:${item.remoteId}`}
+                item={item}
+                sourceId={sourceId}
+                inEditor={inEditor}
+              />
             ))}
           </ul>
           {current.more && <p className="text-xs text-muted">{sourceName} lists more; these are the first.</p>}

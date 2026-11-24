@@ -175,7 +175,8 @@ export const makeEditorHandlers = Effect.gen(function* () {
           usedByChats: 0,
           drafts: yield* reader.RemoteCardDrafts({ userId: user.id, targetId: `${from.sourceId}:${from.remoteId}` }),
           revisionNumber: 0,
-          variants: []
+          variants: [],
+          remoteSummary: summary
         })
       }),
     EditorDraftHistory: ({ field, limit, before }: Parameters<typeof handlers.EditorDraftHistory>[0], from, user) =>

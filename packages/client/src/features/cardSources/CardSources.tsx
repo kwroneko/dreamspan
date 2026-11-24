@@ -4,6 +4,7 @@ import { useMemo, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { CardexDetails } from "./CardexDetails.tsx"
 import { cardSources, sourceRecognizers, type CardSource, type SourceInput } from "./sources.ts"
 import { SourceFamily } from "./family.tsx"
 import { CheckForNewer, useOrigin } from "./updates.tsx"
@@ -15,7 +16,7 @@ function FamilyOnSource({ entityId, name }: { entityId: string; name: string }) 
   if (!origin) return null
   return (
     <div data-card-source-family className="flex min-w-0 flex-col gap-1 px-2 pt-2">
-      <div>
+      <div className="flex flex-wrap gap-2">
         <Button
           aria-expanded={open}
           hint={
@@ -27,6 +28,7 @@ function FamilyOnSource({ entityId, name }: { entityId: string; name: string }) 
         >
           Versions and forks on {origin.sourceName}
         </Button>
+        {origin.sourceId === "cardex" && <CardexDetails name={name || "this card"} remoteId={origin.remoteId} />}
       </div>
       {open && (
         <SourceFamily

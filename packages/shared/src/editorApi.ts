@@ -14,6 +14,7 @@ import { BinItem } from "./bin.ts"
 import { EditingOrigin, ObservedDeletion, Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { CardFamily, Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
+import { RemoteSummary } from "./remoteSummary.ts"
 
 /** A selection in a saved original or its existing moved replacement. */
 export const MoveToOwnTurnNoteFields = {
@@ -84,6 +85,8 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
   revisionNumber: Schema.Int,
   /** Non-card upstream and variants, this one included; empty for cards. */
   variants: Schema.Array(LibraryRef),
+  /** The listing for a card opened from a source, alongside the card file's editable fields. */
+  remoteSummary: Schema.optionalKey(RemoteSummary),
   /**
    * A chat's own note opened at a position: the branch its drafts belong to (sent back as each
    * draft call's `scope`), and what its editor says about where a change applies.
