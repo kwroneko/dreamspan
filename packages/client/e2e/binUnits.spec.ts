@@ -36,7 +36,7 @@ for (const width of [390, 1440]) {
     await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
     await size.fill("9007199254740991")
     await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
-    await size.fill("1.5")
+    await size.fill(width === 390 ? "1,5" : "1.5")
     await form.getByRole("button", { name: "Save", exact: true }).click()
     await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
     expect((await admin((api) => api.GetBinLimits())).deletedBytes).toBe(1610612736)

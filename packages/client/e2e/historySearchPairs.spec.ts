@@ -12,6 +12,56 @@ test.beforeAll(async () => {
   cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
 })
 
+test("a replacement in one search box clears only match skips on changed revisions", async ({ page }) => {
+  const [name, ...value] = cookie.split("=")
+  await page.context().addCookies([{ name: name!, value: value.join("="), url: server().url }])
+  const { chat, leaf } = await withCookie(server(), cookie, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Match skips" })
+      const first = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "cat cat cat"
+      })
+      if (first._tag !== "Posted") throw new Error("queued")
+      const second = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: first.entry.slotId,
+        branch: false,
+        content: "cat stays"
+      })
+      if (second._tag !== "Posted") throw new Error("queued")
+      return { chat, leaf: second.entry.slotId }
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}?panel=history`)
+  const panel = page.locator("[data-history-panel]")
+  const first = panel.getByRole("region", { name: "Search and replace 1", exact: true })
+  await first.getByRole("textbox", { name: "Find", exact: true }).fill("cat")
+  await first.getByRole("textbox", { name: "Replace with", exact: true }).fill("dog")
+  const changed = first.getByLabel("Skip match 2 in message 1", { exact: true })
+  const unchanged = first.getByLabel("Skip match 1 in message 2", { exact: true })
+  await changed.check()
+  await unchanged.check()
+
+  await panel.getByRole("button", { name: "Add search and replace", exact: true }).click()
+  const second = panel.getByRole("region", { name: "Search and replace 2", exact: true })
+  await second.getByRole("textbox", { name: "Find", exact: true }).fill("cat")
+  await second.getByRole("textbox", { name: "Replace with", exact: true }).fill("bird")
+  await second.getByRole("button", { name: "Replace", exact: true }).click()
+  await expect(first.getByRole("status")).toContainText("3 in messages")
+  await expect(changed).not.toBeChecked()
+  await expect(unchanged).toBeChecked()
+  await expect(first.getByRole("status")).toContainText("1 match skip cleared")
+  await first.getByRole("button", { name: "Replace all", exact: true }).click()
+  await expect(first.getByRole("status")).toContainText("1 in messages")
+  const path = await withCookie(server(), cookie, (api) =>
+    api.ReadPath({ chatId: chat.id, leafSlotId: leaf, range: { _tag: "Bottom" }, limit: 10 })
+  )
+  expect(path.entries.map((entry) => entry.version.content)).toEqual(["bird dog dog", "cat stays"])
+})
+
 for (const width of [390, 1024, 1440])
   for (const theme of ["light", "dark"] as const)
     test(`independent search boxes reveal, remove and replace each scope at ${width} ${theme}`, async ({ page }) => {

@@ -1,4 +1,4 @@
-import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
+import { planningContext, summaryChunkBudget } from "./lcmModelBudget.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { workshopText, workshopTranscript } from "./workshopTranscript.ts"
@@ -281,39 +281,40 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const defaults = yield* readDefaults(sql, userId)
         const settings = resolveLcm(state.lcm, defaults.lcm)
         const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
-        const leafInput = Math.min(
-          chunkSize(settings.leafInput, recent),
-          yield* summaryChunkRoom({
-            sql,
-            assembler,
-            layer,
-            model,
-            reply: built,
-            settings,
-            configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
-            chatId
-          })
-        )
+        const summaryBudget = yield* summaryChunkBudget({
+          sql,
+          assembler,
+          layer,
+          model,
+          reply: built,
+          settings,
+          configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
+          chatId,
+          countPrefix: settings.withPreset === "specific"
+        })
+        const leafInput = Math.min(chunkSize(settings.leafInput, recent), summaryBudget.room)
         if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) {
           const blocked = blockedWith("runway")
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
-        // What opens every request: the messages that are neither history nor summaries, nor
-        // what only a reply sends (a conditioned prompt, the end-of-request message or its fallback:
-        // a summary request sends neither, DESIGN §2.2).
-        const notPrefix = new Set<number>()
-        const replyOnly = new Map<number, boolean>()
-        for (const piece of built.pieces) {
-          if (piece.source.kind === "message" || piece.source.kind === "summary")
-            for (const message of piece.messages) notPrefix.add(message)
-          const only =
-            (piece.source.kind === "preset" &&
-              (piece.source.condition !== undefined || endOfRequestText(piece.source.identifier) !== undefined)) ||
-            (piece.source.kind === "assembler" && piece.id === "assembler:last-turn")
-          for (const message of piece.messages) replyOnly.set(message, (replyOnly.get(message) ?? true) && only)
+        let prefix = summaryBudget.prefix ?? 0
+        if (settings.withPreset === "current") {
+          // The current preset can reuse the reply prefix, excluding history, summaries and
+          // reply-only prompts such as the end-of-request message (DESIGN §2.2).
+          const notPrefix = new Set<number>()
+          const replyOnly = new Map<number, boolean>()
+          for (const piece of built.pieces) {
+            if (piece.source.kind === "message" || piece.source.kind === "summary")
+              for (const message of piece.messages) notPrefix.add(message)
+            const only =
+              (piece.source.kind === "preset" &&
+                (piece.source.condition !== undefined || endOfRequestText(piece.source.identifier) !== undefined)) ||
+              (piece.source.kind === "assembler" && piece.id === "assembler:last-turn")
+            for (const message of piece.messages) replyOnly.set(message, (replyOnly.get(message) ?? true) && only)
+          }
+          for (const [message, only] of replyOnly) if (only) notPrefix.add(message)
+          prefix = built.request.messages.reduce((n, m, at) => n + (notPrefix.has(at) ? 0 : tokensOf(m)), 0)
         }
-        for (const [message, only] of replyOnly) if (only) notPrefix.add(message)
-        const prefix = built.request.messages.reduce((n, m, at) => n + (notPrefix.has(at) ? 0 : tokensOf(m)), 0)
         const speed = yield* recentSpeed(sql, userId, model.modelId)
         const [priced] = yield* sql<{ write: number | null }>`
           SELECT json_extract(upstream_json, '$.price.cacheWrite') AS write FROM models WHERE id = ${model.modelId}`

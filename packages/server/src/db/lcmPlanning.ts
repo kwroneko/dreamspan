@@ -1,4 +1,4 @@
-import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
+import { planningContext, summaryChunkBudget } from "./lcmModelBudget.ts"
 import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { workshopText, workshopTranscript } from "./workshopTranscript.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
@@ -158,19 +158,17 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         // A chunk that doesn't fit twice in the band plans nothing: the Summaries section says so
         // under the chunk size, and it's the user's setting, not a failure.
         if (configured < 1 || configured * 2 > recent.maximum - recent.target) return empty
-        const leafInput = Math.min(
-          configured,
-          yield* summaryChunkRoom({
-            sql,
-            assembler,
-            layer: sources.layer,
-            model: usable,
-            reply: built,
-            settings,
-            configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
-            chatId
-          })
-        )
+        const { room } = yield* summaryChunkBudget({
+          sql,
+          assembler,
+          layer: sources.layer,
+          model: usable,
+          reply: built,
+          settings,
+          configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
+          chatId
+        })
+        const leafInput = Math.min(configured, room)
         if (leafInput < 1) return empty
         const leafPlanner = assembler.leafPlanners.get("leaf")
         const maintenancePlanner = assembler.maintenancePlanners.get("maintenance")

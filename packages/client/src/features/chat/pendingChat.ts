@@ -73,9 +73,11 @@ export class PendingChat {
     this.call = call
     const only = greeters.length === 1 ? greeters[0]!.card : null
     const single = only !== null && remoteOf(only.entityId) === null
-    const known = [...cards, ...greeters.map((item) => item.card)]
+    const characters = greeters.map((item) => item.card)
+    const known = [...cards, ...characters]
     const persona = startingPersona({
       single,
+      characters: characters.map((card) => card.entityId),
       lock,
       defaultPersona,
       live: (id) => known.some((card) => card.entityId === id && card.persona)

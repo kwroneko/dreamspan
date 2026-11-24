@@ -15,6 +15,13 @@ import { SummaryViewer, summaryViewers } from "./SummaryViewer.tsx"
 
 type Record = typeof HistoryRecord.Type
 const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
+const revisionKeyOf = (hit: HistoryHit) => `${keyOf(hit)}:${hit.beforeId}`
+interface HistorySkips {
+  readonly targets: ReadonlySet<string>
+  readonly matches: ReadonlyMap<string, ReadonlySet<number>>
+  readonly clearedMatches: number
+}
+const noSkips: HistorySkips = { targets: new Set(), matches: new Map(), clearedMatches: 0 }
 const initial: HistorySearch = {
   pairs: [{ find: "", replace: "" }],
   matchCase: false,
@@ -280,7 +287,7 @@ function HistorySearchPair({
   const [search, setSearch] = useState(initial)
   const [hits, setHits] = useState<ReadonlyArray<HistoryHit>>([])
   const [summaryIds, setSummaryIds] = useState<ReadonlyArray<string>>([])
-  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
+  const [skipped, setSkipped] = useState(noSkips)
   const [cost, setCost] = useState<{ messages: number; summaries: number; tokens: number } | null>(null)
   const [error, setError] = useState("")
   const [scanning, setScanning] = useState(false)
@@ -308,9 +315,8 @@ function HistorySearchPair({
       }
       setError("")
       setScanning(true)
-      // A new search starts with nothing skipped; the summaries or the history start reading
-      // again (opening the Summaries tab, say) keeps what was skipped.
-      if (searched.current !== search) setSkipped(new Set())
+      // Only a change to the search options clears every skip.
+      if (searched.current !== search) setSkipped(noSkips)
       searched.current = search
       let cursor: typeof HistoryCursor.Type | undefined
       const all: HistoryHit[] = []
@@ -343,6 +349,18 @@ function HistorySearchPair({
         }
       } while (cursor)
       setHits(all)
+      setSkipped((old) => {
+        if (!old.matches.size) return old
+        const revisions = new Set(all.map(revisionKeyOf))
+        const matches = new Map(old.matches)
+        let clearedMatches = 0
+        for (const [key, indices] of old.matches) {
+          if (revisions.has(key)) continue
+          matches.delete(key)
+          clearedMatches += indices.size
+        }
+        return clearedMatches ? { ...old, matches, clearedMatches } : old
+      })
       setSummaryIds([...searchedSummaries])
       const raw = all.filter((h) => h.kind === "version_replace" && h.selected)
       const summaries = view.lcm?.layer ?? []
@@ -374,9 +392,10 @@ function HistorySearchPair({
   const included = useMemo(
     () =>
       hits
-        .filter((h) => !skipped.has(keyOf(h)))
+        .filter((h) => !skipped.targets.has(keyOf(h)))
         .flatMap((h) => {
-          const matches = h.matches.filter((_, i) => !skipped.has(`${keyOf(h)}:${i}`))
+          const excluded = skipped.matches.get(revisionKeyOf(h))
+          const matches = h.matches.filter((_, i) => !excluded?.has(i))
           if (!matches.length) return []
           let after = "",
             end = 0
@@ -409,7 +428,7 @@ function HistorySearchPair({
         applications: [
           {
             ...target,
-            summariesIncluded: !one && search.summaries && skipped.size === 0,
+            summariesIncluded: !one && search.summaries && !skipped.targets.size && !skipped.matches.size,
             ...(separate ? { summaryIds } : {}),
             edits: edits.map(({ kind, targetId, beforeId, before, after }) => ({
               kind,
@@ -429,7 +448,6 @@ function HistorySearchPair({
     }
     groupRef.current = result.value.groupId
     await onApplied(result.value.changesetIds[0]!)
-    setSearch((s) => ({ ...s }))
   }
   const counts = (test: (h: HistoryHit) => boolean) => hits.filter(test).reduce((n, h) => n + h.matches.length, 0)
   const openHit = (hit: HistoryHit) => {
@@ -568,6 +586,10 @@ function HistorySearchPair({
           : scanning
             ? "Searching…"
             : `${counts((h) => h.kind === "version_replace" && h.selected)} in messages, ${counts((h) => h.kind === "version_replace" && !h.selected)} in swipes, ${counts((h) => h.kind === "summary_revision")} in summaries`}
+        {!idle &&
+          !scanning &&
+          skipped.clearedMatches > 0 &&
+          `. ${skipped.clearedMatches} match ${skipped.clearedMatches === 1 ? "skip" : "skips"} cleared because the search results changed.`}
       </p>
       {!idle && !scanning && (
         <p className="text-muted">
@@ -600,15 +622,16 @@ function HistorySearchPair({
                   <label className="flex gap-1">
                     <input
                       type="checkbox"
-                      checked={skipped.has(keyOf(hit))}
-                      onChange={(e) =>
+                      checked={skipped.targets.has(keyOf(hit))}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked
                         setSkipped((old) => {
-                          const next = new Set(old)
-                          if (e.target.checked) next.add(keyOf(hit))
-                          else next.delete(keyOf(hit))
-                          return next
+                          const targets = new Set(old.targets)
+                          if (checked) targets.add(keyOf(hit))
+                          else targets.delete(keyOf(hit))
+                          return { ...old, targets }
                         })
-                      }
+                      }}
                     />
                     Skip
                   </label>
@@ -619,16 +642,20 @@ function HistorySearchPair({
                       <input
                         type="checkbox"
                         aria-label={`Skip match ${i + 1} in message ${hit.depth + 1}`}
-                        checked={skipped.has(`${keyOf(hit)}:${i}`)}
-                        onChange={(e) =>
+                        checked={skipped.matches.get(revisionKeyOf(hit))?.has(i) ?? false}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked
                           setSkipped((old) => {
-                            const next = new Set(old)
-                            const key = `${keyOf(hit)}:${i}`
-                            if (e.target.checked) next.add(key)
-                            else next.delete(key)
-                            return next
+                            const key = revisionKeyOf(hit)
+                            const matches = new Map(old.matches)
+                            const indices = new Set(matches.get(key))
+                            if (checked) indices.add(i)
+                            else indices.delete(i)
+                            if (indices.size) matches.set(key, indices)
+                            else matches.delete(key)
+                            return { ...old, matches }
                           })
-                        }
+                        }}
                       />
                       <span>
                         Skip “{hit.before.slice(match.start, match.end)}” → “{match.replacement}”
