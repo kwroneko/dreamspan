@@ -1,6 +1,6 @@
 # Tab history: back and forward in each tab
 
-**Status**: Proposed, 2026-11-24 (job `tabhistory1`). Everything here is **[P]** unless it cites a **[D]** (DESIGN §10.1, "Every tab has its own back and forward", owner 2026-11-24). It is a delta from master `50493640a`: ARCHITECTURE §5 "The workbench: frames and tabs" (each tab its own router over a memory history, the browser's URL following the focused tab, the least frame size of minframe1 and minframe2). reference-harness has no tabs or frames, so there's nothing to take from it.
+**Status**: Proposed, 2026-11-24 (job `tabhistory1`). **Built** (tabhistory1, 2026-11-24) for wide screens, §1 to §7 and §9: obsolete as an implementation proposal; ARCHITECTURE §5 "The workbench" ("Tab history", "Back and forward in the strip") records it. §8 (phones) stays open. Everything here is **[P]** unless it cites a **[D]** (DESIGN §10.1, "Every tab has its own back and forward", owner 2026-11-24). It is a delta from master `50493640a`: ARCHITECTURE §5 "The workbench: frames and tabs" (each tab its own router over a memory history, the browser's URL following the focused tab, the least frame size of minframe1 and minframe2). reference-harness has no tabs or frames, so there's nothing to take from it.
 
 ## 1. The problem
 
@@ -28,7 +28,7 @@ A tab's history is a list of entries and the index of the one shown. Each entry 
 
 ## 4. The arrows
 
-- In every frame's strip on a wide screen, right after the hidden sidebar's Show button (which keeps the strip's corner, as the shell's), before the first tab: ← Back and → Forward, the strip's icon buttons, a little smaller than Maximize and ⋯ (28 px) so the pair takes 62 px.
+- In every frame's strip on a wide screen, right after the hidden sidebar's Show button (which keeps the strip's corner, as the shell's), before the first tab: ← Back and → Forward, the strip's icon buttons, a little smaller than Maximize and ⋯ (28 px): with its padding and the divider after it the pair takes 67 px.
 - Always present while the strip shows; disabled when there's nowhere to go, so nothing shifts and no gap opens. A disabled arrow keeps its look on hover and explains itself, as a disabled split button does: "Nothing to go back to" / "Nothing to go forward to". An enabled one names its destination: "Back to <label>" / "Forward to <label>".
 - A label is what the tab was called while the entry was shown (`useTitle`), or the place a view names for its entry: Home names a search ("cardex search: elf knight", "Characters search: elf", the source alone while nothing is typed). An entry never shown in this page (restored from storage without a label) uses its kind's default title.
 - They act on the frame's selected tab and focus the frame, as a click on its strip does.
@@ -39,7 +39,7 @@ A tab's history is a list of entries and the index of the one shown. Each entry 
 
 ## 5. Scroll
 
-When a tab leaves an entry (a step, or ← / →), the scroll positions inside the tab are taken with it: each scrolled element as its path from the tab's element (child indices, and its tag and classes to check it's the same element). Coming back to an entry whose view keeps no history state of its own puts them back once the page is long enough, trying each animation frame for up to 3 s while results load; any wheel, touch, key or pointer press in the tab stops it. A view that keeps its own place in its history state (a chat's reading place) restores itself, so its entries are left to it.
+When a tab leaves an entry (a step, or ← / →), the scroll positions inside the tab are taken with it: each scrolled element as its path from the tab's element (child indices, and its tag and classes to check it's the same element). Coming back to an entry whose view keeps no history state of its own puts them back once the page is long enough, trying each animation frame for up to 3 s while results load, and again while what loads above moves them (the browser's scroll anchoring) until the page's length holds still; any wheel, touch, key or pointer press in the tab stops it. A view that keeps its own place in its history state (a chat's reading place) restores itself, so its entries are left to it.
 
 ## 6. Where history lives
 
@@ -50,7 +50,7 @@ When a tab leaves an entry (a step, or ← / →), the scroll positions inside t
 
 ## 7. Width
 
-The strip's fixed parts grow by the arrows' 62 px. The least frame width (`MIN_FRAME_WIDTH`, minframe1) goes from 320 to 360 px, measured in the browser: the hidden sidebar's Show, the arrows, the shown tab's 96 px, Maximize, ⋯ and the panel's toggle come to 327 px, and the rest is room for the title. The room checks, the splits refused and the overflow scroll follow the constant, and `e2e/workbenchMinFrame.spec.ts` checks the arrows whole inside the strip.
+The strip's fixed parts grow by the arrows' 67 px. The least frame width (`MIN_FRAME_WIDTH`, minframe1) goes from 320 to 344 px, measured in the browser: the hidden sidebar's Show (48), the arrows (67), the shown tab's 96 px and Maximize, ⋯ and the panel's toggle (116) come to 327 px, and the rest is room for the title. 344 rather than the ~360 first estimated: at 1440 px with the sidebar and the side panel open the frames have 704 px, and 360 would have refused splitting a chat there (two frames need twice the least width and a divider). The room checks, the splits refused and the overflow scroll follow the constant, and `e2e/workbenchMinFrame.spec.ts` checks the arrows whole inside the strip.
 
 ## 8. Phones
 

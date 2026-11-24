@@ -420,16 +420,16 @@ describe("workbench room", () => {
     let splits = 0
     for (let i = 0; i < 6; i++) {
       const next = splitFrame(layout, rightmost(layout), "row")
-      if (!hasRoom(layout, next, 1340, 900)) break
+      if (!hasRoom(layout, next, 1440, 900)) break
       layout = next
       splits++
     }
-    // 1340 → 670 → 335: a third halving would leave 167 px.
+    // 1440 → 720 → 360: a third halving would leave 180 px (at 1340, 335 is already too narrow).
     expect(splits).toBe(2)
-    for (const box of frameBoxes(layout.root, 1340, 900).values())
+    for (const box of frameBoxes(layout.root, 1440, 900).values())
       expect(box.width).toBeGreaterThanOrEqual(MIN_FRAME_WIDTH - 1.5)
     // Down still fits: 900 → 450.
-    expect(hasRoom(layout, splitFrame(layout, rightmost(layout), "column"), 1340, 900)).toBe(true)
+    expect(hasRoom(layout, splitFrame(layout, rightmost(layout), "column"), 1440, 900)).toBe(true)
   })
 
   it("counts only the frames a change adds or shrinks", () => {

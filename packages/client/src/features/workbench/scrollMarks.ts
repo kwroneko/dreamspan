@@ -6,6 +6,8 @@ import type { ScrollMark } from "./history.ts"
 const MAX_MARKS = 20
 /** How long a restore keeps trying while the page loads what it scrolled through. */
 const PATIENCE_MS = 3000
+/** Frames a restored element's length must hold still before it's left alone. */
+const SETTLED_FRAMES = 20
 
 /** An element's tag and attribute names: not its classes or values, which change while it loads. */
 const whatOf = (element: Element) =>
@@ -38,13 +40,15 @@ const at = (root: Element, path: ReadonlyArray<number>) => {
 
 /**
  * Puts `marks` back under `root` once the page is there (`ready`, then a frame for it to render)
- * and each element is long enough, trying every animation frame for a while; the user's own
- * scrolling (wheel, touch, a key, a press) stops it. The returned function stops it too.
+ * and each element is long enough, trying every animation frame for a while, and again while
+ * what loads above moves it, until its length holds still; the user's own scrolling (wheel,
+ * touch, a key, a press) stops it. The returned function stops it too.
  */
 export const restoreScroll = (root: HTMLElement, marks: ReadonlyArray<ScrollMark>, ready: () => boolean) => {
   if (marks.length === 0) return () => {}
   const until = performance.now() + PATIENCE_MS
-  const left = new Set(marks)
+  /** Each mark not yet settled: its element's length when last seen, and the frames it held. */
+  const left = new Map(marks.map((mark) => [mark, { length: -1, held: 0 }]))
   let frame = 0
   let stopped = false
   let rendered = false
@@ -64,16 +68,21 @@ export const restoreScroll = (root: HTMLElement, marks: ReadonlyArray<ScrollMark
       else frame = requestAnimationFrame(tick)
       return
     }
-    for (const mark of left) {
+    for (const [mark, seen] of left) {
       const element = at(root, mark.path)
       if (!element || whatOf(element) !== mark.what) continue
       const room = element.scrollHeight - element.clientHeight
       const roomX = element.scrollWidth - element.clientWidth
       // Not long enough yet (results still loading): wait for it, as long as there's time.
       if ((room < mark.top - 1 || roomX < mark.left - 1) && performance.now() < until) continue
-      element.scrollTop = mark.top
-      element.scrollLeft = mark.left
-      left.delete(mark)
+      // Put back again while what loads above it moves it (the browser's scroll anchoring),
+      // until its length has held still a while.
+      if (Math.abs(element.scrollTop - mark.top) > 1) element.scrollTop = mark.top
+      if (Math.abs(element.scrollLeft - mark.left) > 1) element.scrollLeft = mark.left
+      const length = element.scrollHeight + element.scrollWidth
+      seen.held = length === seen.length ? seen.held + 1 : 0
+      seen.length = length
+      if (seen.held >= SETTLED_FRAMES) left.delete(mark)
     }
     if (left.size === 0 || performance.now() >= until) stop()
     else frame = requestAnimationFrame(tick)
