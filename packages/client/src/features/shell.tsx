@@ -25,7 +25,7 @@ export const centerColumn = defineSlot<Record<string, never>>("shell.center")
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Link, Outlet, useLocation, useMatches, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { DIALOG_COLUMN } from "../ui/Dialog.tsx"
 import { ErrorAlert } from "../actions.tsx"
 import { BrowserRecovery, RecoveryNotice } from "./editor/BrowserRecovery.tsx"
@@ -168,8 +168,20 @@ export const openAppMenu = () => {
   for (const request of menuRequests) request()
 }
 
+// Wide enough for the desktop sidebar (Tailwind's `lg`). Below it the sidebar is the phone's
+// menu, so only one of the two is ever mounted: a hidden desktop one ran its own queries (a card
+// source's search went out twice on a phone). Read during render, so the first frame is right.
+const DESKTOP = "(min-width: 1024px)"
+const subscribeDesktop = (listener: () => void) => {
+  const query = matchMedia(DESKTOP)
+  query.addEventListener("change", listener)
+  return () => query.removeEventListener("change", listener)
+}
+const useDesktop = () => useSyncExternalStore(subscribeDesktop, () => matchMedia(DESKTOP).matches)
+
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
+  const desktop = useDesktop()
   // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
   // (its crumbs and tabs, in the URL's sidebar params) doesn't, nor does changing the layout
   // (a foot section closed, a height dragged: layout params), nor a page's own view params (an
@@ -186,7 +198,8 @@ function PhoneBar() {
   const { selection } = useShellNavigation()
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
-  const open = openOn === pathname
+  // The menu is for narrow windows: widened with it open, the desktop sidebar takes its place.
+  const open = openOn === pathname && !desktop
   const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
   useEffect(() => {
     const request = () => setOpenOn(pathname)
@@ -230,7 +243,7 @@ const setSidebarHidden = (next: boolean) => writeLayoutParam(SIDEBAR, next ? "hi
 /** Reveal navigation after an entry point elsewhere scopes the left column. */
 export const showAppNavigation = () => {
   setSidebarHidden(false)
-  if (!matchMedia("(min-width: 1024px)").matches) openAppMenu()
+  if (!matchMedia(DESKTOP).matches) openAppMenu()
 }
 /** The button to focus once the sidebar has hidden or shown, so focus isn't lost with it. */
 let focusNext: "sidebar" | "header" | null = null
@@ -285,14 +298,25 @@ function SidebarToggle({ place }: { place: "sidebar" | "header" | "strip" }) {
   )
 }
 
-/** The desktop sidebar, unless the user hid it. */
+/** The desktop sidebar on a desktop-wide window, unless the user hid it. */
 function DesktopSidebarColumn() {
   const [hidden] = useSidebarHidden()
-  return hidden ? null : <DesktopSidebar />
+  const desktop = useDesktop()
+  return hidden || !desktop ? null : <DesktopSidebar />
 }
 
 function DesktopSidebar() {
   const { width, min, max, change, reset } = usePanelWidth("sidebar", 320, 220)
+  // Its live width for what covers it exactly: a side sheet it opens (ui/Sheet.tsx).
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--sidebar-width", `${width}px`)
+  }, [width])
+  useLayoutEffect(
+    () => () => {
+      document.documentElement.style.removeProperty("--sidebar-width")
+    },
+    []
+  )
   return (
     <aside
       aria-label="Sidebar"
