@@ -51,7 +51,9 @@ export const noteDroppedReply = (sql: SqlClient.SqlClient, userId: UserId, ids: 
 const SWEPT_LIBRARY = "swept-library:"
 const noteSweptLibrary = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, now: number) =>
   Effect.gen(function* () {
-    const held = yield* sql<{ ref_id: string }>`SELECT l.ref_id FROM composer_library l JOIN drafts d ON d.id = l.draft_id
+    const held = yield* sql<{
+      ref_id: string
+    }>`SELECT l.ref_id FROM composer_library l JOIN drafts d ON d.id = l.draft_id
       WHERE d.user_id = ${userId} AND d.target_kind = 'composer' AND d.target_id = ${chatId} ORDER BY l.position`
     yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
       VALUES (${SWEPT_LIBRARY + chatId}, ${userId}, ${JSON.stringify(held.map((row) => row.ref_id))}, ${now})`

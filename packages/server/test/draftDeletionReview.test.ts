@@ -444,39 +444,43 @@ it.live("an empty reply whose swipe of one's own has an image saved stays, with 
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
-it.live("an empty reply whose swipe of one's own had an image removed, undo can still restore, stays (rev-dd5 #5)", () =>
-  Effect.gen(function* () {
-    const { api, running, empty } = yield* writing
-    const image = yield* uploadImage
-    const target = { _tag: "Write", slotId: running.slotId } as const
-    const attached = yield* api.SaveMessageDraft({
-      target,
-      draftId: null,
-      expectedRowVersion: null,
-      expectedSession: null,
-      content: "",
-      images: [image]
-    })
-    // The image is removed and that saves too: only the draft's history has it now.
-    const removed = yield* api.SaveMessageDraft({
-      target,
-      draftId: attached.id,
-      expectedRowVersion: attached.rowVersion,
-      expectedSession: attached.session,
-      content: "",
-      images: []
-    })
-    yield* empty
-    // Undo still brings the image back.
-    const seqs = (yield* api.MessageDraftHistory({ target, limit: 20 })).map((state) => state.seq).sort((a, b) => b - a)
-    const undone = yield* api.RestoreMessageDraft({
-      target,
-      draftId: removed.id,
-      seq: seqs[1]!,
-      expectedRowVersion: removed.rowVersion
-    })
-    assert.include(JSON.stringify(undone), image.mediaId)
-  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+it.live(
+  "an empty reply whose swipe of one's own had an image removed, undo can still restore, stays (rev-dd5 #5)",
+  () =>
+    Effect.gen(function* () {
+      const { api, running, empty } = yield* writing
+      const image = yield* uploadImage
+      const target = { _tag: "Write", slotId: running.slotId } as const
+      const attached = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        content: "",
+        images: [image]
+      })
+      // The image is removed and that saves too: only the draft's history has it now.
+      const removed = yield* api.SaveMessageDraft({
+        target,
+        draftId: attached.id,
+        expectedRowVersion: attached.rowVersion,
+        expectedSession: attached.session,
+        content: "",
+        images: []
+      })
+      yield* empty
+      // Undo still brings the image back.
+      const seqs = (yield* api.MessageDraftHistory({ target, limit: 20 }))
+        .map((state) => state.seq)
+        .sort((a, b) => b - a)
+      const undone = yield* api.RestoreMessageDraft({
+        target,
+        draftId: removed.id,
+        seq: seqs[1]!,
+        expectedRowVersion: removed.rowVersion
+      })
+      assert.include(JSON.stringify(undone), image.mediaId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
 it.live("a late save replayed after a newer one is filed once (rev-dd2 #7)", () =>
