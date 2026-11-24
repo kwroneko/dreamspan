@@ -1145,7 +1145,7 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
         // right-aligned column and the mark, with one gap between them however wide the list.
         className={`flex flex-col ${
           popover
-            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${selected.length ? "border-b" : "-mb-3"}`
+            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border px-2 py-1 [scrollbar-gutter:stable] ${selected.length ? "border-b" : "-mb-3"}`
             : ""
         }`}
       >
