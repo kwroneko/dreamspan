@@ -438,9 +438,10 @@ test.describe("a chat not sent yet", () => {
         })
         await shoot(page, `new-chat-context-popover-${width}-${theme}`)
         await details.getByRole("link", { name: "View request", exact: true }).click()
-        // A new chat is a pending chat (draftchats3): its request is the chat's own, built as any chat's next one.
+        // A new chat is a pending chat (draftchats3): its request is the chat's own, named its first.
         await expect(page).toHaveURL(/\/request\/next\?/)
-        await expect(page.getByRole("heading", { name: "Your next request", exact: true })).toBeVisible()
+        await expect(page.getByRole("heading", { name: "Your first request", exact: true })).toBeVisible()
+        await expect(page.getByText(/^Your first request as it would be sent now/)).toBeVisible()
       })
 })
 

@@ -55,6 +55,8 @@ export const ContextChip = memo(function ContextChip({
   const size = view.history?.size
   const budget = view.history?.budget ?? null
   const chatId = (view.chat?.id ?? null) as ChatId | null
+  // A chat pending until its first turn (a new chat, DraftChatPage.tsx) has sent nothing yet.
+  const pending = view.chat?.status === "pending"
   // Where this view stands, for the next request's tab (nextRequest.ts).
   const [token] = useState(() => Symbol("next request"))
   useEffect(() => {
@@ -63,9 +65,10 @@ export const ContextChip = memo(function ContextChip({
       nextRequests.publish(token, chatId, tabId, {
         leaf: view.leafSlotId,
         fork: view.forkId,
-        revision: view.contextRevision
+        revision: view.contextRevision,
+        pending
       })
-  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision])
+  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision, pending])
   useEffect(() => () => nextRequests.withdraw(token), [token])
   if (view.loading || size === undefined || chatId === null) return null
   // The typed text as the request would hold it: its tokens, and 3 for its message.
@@ -83,8 +86,7 @@ export const ContextChip = memo(function ContextChip({
     <ContextPopover
       open={open}
       onOpenChange={setOpen}
-      // A chat pending until its first turn (a new chat, DraftChatPage.tsx) has sent nothing yet.
-      request={view.chat?.status === "pending" ? "first" : "next"}
+      request={pending ? "first" : "next"}
       tokens={tokens}
       maximum={maximum}
       reserve={reserve}

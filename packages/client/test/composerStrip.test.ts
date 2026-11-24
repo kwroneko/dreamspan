@@ -37,8 +37,8 @@ const warmth = (over: Partial<CacheWarmth>): CacheWarmth => ({
 
 it("follows only the chat tab that opened the next request", () => {
   const chat = "chat" as ChatId
-  const a = { leaf: null, fork: "fork-a" as ForkId, revision: 1 }
-  const b = { leaf: null, fork: "fork-b" as ForkId, revision: 1 }
+  const a = { leaf: null, fork: "fork-a" as ForkId, revision: 1, pending: false }
+  const b = { leaf: null, fork: "fork-b" as ForkId, revision: 1, pending: false }
   const first = Symbol()
   const second = Symbol()
   const href = nextRequestHref(chat, a.leaf, a.fork, "tab-a")
