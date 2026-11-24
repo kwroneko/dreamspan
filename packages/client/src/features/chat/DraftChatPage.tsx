@@ -22,8 +22,7 @@ import { preloadChatPage } from "./chatPageLoader.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { carryPanelFocus } from "./ChatPanels.tsx"
 import { seedChat } from "./session.ts"
-import { carryLeftover, takeLeftover } from "./composerDraft.ts"
-import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { carryLeftover, fileLeftover } from "./composerDraft.ts"
 import { rememberDraftFor } from "./chatStarted.ts"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 
@@ -126,9 +125,7 @@ function DraftChat({
       if (!started.current) void call((client) => client("LeaveDraftChat", { chatId }))
       // Typed after the chat was swept and not carried into another: filed to the recovered
       // texts once, as the sweep filed the rest.
-      const left = takeLeftover(chatId)
-      if (left !== null)
-        void call((client) => client("SaveComposer", { ...left.save, operationId: uuidv7(), content: left.content }))
+      fileLeftover(chatId, (save) => call((client) => client("SaveComposer", save)))
     }
   }, [chatId, call])
   // A new chat asked for with Guidance on (New chat with this cast) starts with it on, once.

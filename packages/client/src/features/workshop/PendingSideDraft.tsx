@@ -5,7 +5,6 @@
 // and the server sweeps it (its typing to recovered texts).
 import type { Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
-import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -13,7 +12,7 @@ import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useCaller } from "../editor/caller.ts"
 import { chatPlaceKey } from "../chat/chatPlace.ts"
 import { rememberDraftFor } from "../chat/chatStarted.ts"
-import { carryLeftover, takeLeftover } from "../chat/composerDraft.ts"
+import { carryLeftover, fileLeftover } from "../chat/composerDraft.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { SIDE_CHAT_SCOPE } from "./sideChat.ts"
 
@@ -103,9 +102,7 @@ export function PendingSideDraft({
     if (chatId === null) return
     return () => {
       if (!started.current) void call((client) => client("LeaveDraftChat", { chatId }))
-      const left = takeLeftover(chatId)
-      if (left !== null)
-        void call((client) => client("SaveComposer", { ...left.save, operationId: uuidv7(), content: left.content }))
+      fileLeftover(chatId, (save) => call((client) => client("SaveComposer", save)))
     }
   }, [chatId, call])
   const host = useMemo<SideDraftHost>(
