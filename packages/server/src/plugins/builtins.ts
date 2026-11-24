@@ -187,6 +187,10 @@ export const missingBuiltinAdapter = (id: string): string => {
   if (id === "lookup_lore") return "Not yet: needs support for looking up lore the character can know."
   if (id.startsWith("plugin_") || id === "app_source")
     return "Not yet: needs support for checking saved code, approving versions and undoing changes."
+  if (id === "import_card_file")
+    return "Copying this tool needs support for importing cards into your library with your approval."
+  if (["bash", "bash_output", "bash_stop"].includes(id))
+    return "Copying this tool needs support for running and managing background commands."
   // Before the read_ rule: read_file and read_card_file read the user's files, not the library.
   if ((FILE_TOOLS as ReadonlyArray<string>).includes(id))
     return "Not yet: needs support for working in your files and undoing file changes."

@@ -63,7 +63,13 @@ it("every unavailable story tool refuses both declared replacement and disable",
         const copied = builtinCopies.filter((part) => part.registry === "rolloutTools").map((part) => part.id)
         expect(ids).toEqual(expect.arrayContaining([...copied, ...PLUGIN_TOOLS, ...FILE_TOOLS]))
         expect(unavailable).toHaveLength(ids.length - copied.length)
-        for (const id of FILE_TOOLS) expect(missingBuiltinAdapter(id), id).toContain("your files")
+        const commandIds = ["bash", "bash_output", "bash_stop"]
+        for (const id of FILE_TOOLS) {
+          const reason = missingBuiltinAdapter(id)
+          if (id === "import_card_file") expect(reason).toMatch(/importing.*library.*approval/i)
+          else if (commandIds.includes(id)) expect(reason, id).toMatch(/running and managing.*commands/i)
+          else expect(reason, id).toContain("your files")
+        }
         for (const original of unavailable) {
           expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
           const registry = makeRegistry([original])
