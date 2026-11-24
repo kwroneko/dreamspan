@@ -118,6 +118,7 @@ export const timelineInput = (rows: ReadonlyArray<TimelineRow>, context: Timelin
       depth: entry.depth,
       position: entry.position
     })),
+    atHistoryStart: context.view.older === null,
     hasBudget: !!context.view.history?.budget,
     assemblyError: !!context.view.history?.assemblyError,
     historyDivider: context.historyDivider,

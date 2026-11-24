@@ -213,6 +213,7 @@ it("keeps the LCM divider before a coincident history divider and projects cover
   const summary = { id: "synthetic-summary", from: 1, to: 1, lastSlotId: entries[0]!.slotId }
   const view = {
     entries,
+    older: null,
     history: { budget: { maximum: 100, target: 80, responseReserve: 20, nonHistoryTokens: 40 } }
   } as unknown as ChatView
   const lcm = { cursorDepth: 0, layer: [summary] } as unknown as NonNullable<ChatView["lcm"]>
@@ -243,6 +244,29 @@ it("keeps the LCM divider before a coincident history divider and projects cover
     "slot-2"
   ])
   expect(rows[1]).toMatchObject({ from: 0, to: 0, lastSlotId: "slot-0" })
+})
+
+it("shows the Messages and Summaries tabs at the start even when the first message was deleted", () => {
+  const entries = [1, 2].map((position) => ({
+    depth: position,
+    position,
+    slotId: `slot-${position}`
+  })) as unknown as ChatView["entries"]
+  const summary = { id: "synthetic-summary", from: 0, to: 1, lastSlotId: entries[0]!.slotId }
+  const lcm = { cursorDepth: 1, layer: [summary] } as unknown as NonNullable<ChatView["lcm"]>
+  const project = (older: string | null) =>
+    timelineTransforms
+      .get("timeline.lcm")!
+      .transform(messageRows(entries), {
+        view: { entries, older } as unknown as ChatView,
+        lcm,
+        summaries: false,
+        divider: 1,
+        historyDivider: -1
+      })
+      .map((row) => row.key)
+  expect(project(null)).toEqual(["lcm-tabs", "slot-1", "lcm-boundary", "slot-2"])
+  expect(project("older-slot")).toEqual(["slot-1", "lcm-boundary", "slot-2"])
 })
 
 it("anchors built-in dividers to messages after an earlier plugin inserts a row", () => {
