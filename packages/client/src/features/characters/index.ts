@@ -3,8 +3,8 @@ import { cardGrouping } from "./cardGrouping.tsx"
 import { groupFamilies } from "./cardFamilies.ts"
 import { GroupFamiliesToggle } from "./cardBrowse.tsx"
 import { ArchivedMatches } from "./ArchivedMatches.tsx"
-import { ArchiveUnused } from "./ArchiveUnused.tsx"
-import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
+import { ArchiveUnused, ArchiveUnusedButton } from "./ArchiveUnused.tsx"
+import { archivedCardActions, cardGridActions, cardSearchExtras } from "./homeSlots.ts"
 import { CardArchive, CardArchiveMenu } from "./CardArchive.tsx"
 import { sidebarSearch } from "./sidebarSearch.ts"
 import { shellSearchKeys, tabKinds } from "../workbench/kinds.ts"
@@ -46,6 +46,7 @@ export const register = () => {
     component: CardArchiveMenu
   })
   archivedCardActions.register({ id: "cards.archive-unused", order: 10, component: ArchiveUnused })
+  cardGridActions.register({ id: "cards.archive-unused-button", order: 10, component: ArchiveUnusedButton })
   cardSearchExtras.register({ id: "cards.archived-search", order: 10, component: ArchivedMatches })
   registerDefaultPersona()
   registerPersonaLock()

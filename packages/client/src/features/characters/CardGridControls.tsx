@@ -7,6 +7,8 @@ import { Input } from "../../ui/Field.tsx"
 import { type SourceBrowse, SourceSortControl } from "../cardSources/browse.tsx"
 import { SourceSearchOptions } from "../cardSources/filters.tsx"
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { cardGridActions } from "./homeSlots.ts"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
 export function CardGridControls({
@@ -120,35 +122,39 @@ export function CardGridControls({
           className="card-grid-sort min-w-0 max-w-full justify-self-end"
           data-layout-audit-ignore="inset: Unbordered sort toolbar (its choices scrolling where they don't fit) aligns its controls with the segmented row, rather than enclosing them in a panel"
         >
-          {/* Only the sort's choices scroll; the direction and the toggles stay in view, in place. */}
-          <div className="flex max-w-full items-start gap-1 [&>button]:mt-[3px]">
-            {shown && sources ? (
-              <>
-                <SourceSortControl browse={sources} scrolls />
-                <IncludePersonas
-                  browse={browse}
-                  onChange={onChange}
-                  disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
-                />
-                <CardGroupingControl
-                  browse={browse}
-                  onChange={onChange}
-                  disabledReason={`${shown.name} lists each card on its own.`}
-                />
-              </>
-            ) : (
-              <>
-                <CardSortControl
-                  sort={browse.sort}
-                  reversed={browse.reversed}
-                  onChange={onChange}
-                  className="items-start! [&>button]:mt-[3px]"
-                  scrolls
-                />
-                <IncludePersonas browse={browse} onChange={onChange} />
-                <CardGroupingControl browse={browse} onChange={onChange} />
-              </>
-            )}
+          {/* The library's actions (Archive unused…) first, a row gap apart; then the sort, whose
+              choices alone scroll: the direction and the toggles stay in view, in place. */}
+          <div className="flex max-w-full items-start gap-2">
+            <SlotOutlet slot={cardGridActions} props={{ place: "home" }} />
+            <div className="flex min-w-0 max-w-full items-start gap-1 [&>button]:mt-[3px]">
+              {shown && sources ? (
+                <>
+                  <SourceSortControl browse={sources} scrolls />
+                  <IncludePersonas
+                    browse={browse}
+                    onChange={onChange}
+                    disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
+                  />
+                  <CardGroupingControl
+                    browse={browse}
+                    onChange={onChange}
+                    disabledReason={`${shown.name} lists each card on its own.`}
+                  />
+                </>
+              ) : (
+                <>
+                  <CardSortControl
+                    sort={browse.sort}
+                    reversed={browse.reversed}
+                    onChange={onChange}
+                    className="items-start! [&>button]:mt-[3px]"
+                    scrolls
+                  />
+                  <IncludePersonas browse={browse} onChange={onChange} />
+                  <CardGroupingControl browse={browse} onChange={onChange} />
+                </>
+              )}
+            </div>
           </div>
         </div>
         <div
