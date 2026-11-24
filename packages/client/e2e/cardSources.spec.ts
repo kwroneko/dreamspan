@@ -180,6 +180,9 @@ for (const width of [1440, 390])
         const tags = controls.getByRole("textbox", { name: "Tags", exact: true })
         await tags.fill("mystery")
         await tags.press("Enter")
+        // Measure the open suggestions from the top of the scrollport. A tag row cut by
+        // the viewport can show its tall buttons while clipping the count between them.
+        await tags.evaluate((input) => input.scrollIntoView({ block: "start" }))
         await expectLayout(page, info, `home-cardex-filters-${width}-${theme}`, { scope: "main" })
         // The suggestions stay open as tags are added (they cover the chips on a wide bar):
         // Escape closes them, as a user would, leaving the sheet open.
