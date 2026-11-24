@@ -41,6 +41,17 @@ import { attachmentName, attachmentPicture } from "./attachmentPictures.ts"
 import { messageSide, nameOf, useCast } from "./cast.ts"
 import { pictureHref } from "./PicturePage.tsx"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
+import { kindShows } from "./kindLooks.ts"
+import {
+  AttachMenu,
+  type ComposerLibrary,
+  ComposerLibraryTiles,
+  LIBRARY_ATTACH,
+  libraryRefOfDrop,
+  mayCarryLibrary,
+  MessageLibraryTiles,
+  useComposerLibrary
+} from "./libraryAttachments.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
 import { composerWorkspace } from "./composerWorkspace.ts"
 import type { ChatSession } from "./session.ts"
@@ -72,6 +83,8 @@ interface ImagesState {
   readonly error: string | null
   /** Where files of any type go (a workshop), or null: images only. */
   readonly attacher: FileAttacher | null
+  /** Cards, lorebooks and presets attached (a workshop), or null where the chat takes none. */
+  readonly library: ComposerLibrary | null
   readonly add: (files: File[]) => void
   readonly remove: (id: string) => void
   readonly capture: AttachmentInput["capture"]
@@ -420,12 +433,15 @@ function AttachmentList({
   label,
   items,
   removeHint,
-  onRemove
+  onRemove,
+  more
 }: {
   label: string
   items: ReadonlyArray<AttachmentItem>
   removeHint: string
   onRemove: (id: string) => void
+  /** Rows of other kinds after these (a workshop's cards, lorebooks and presets). */
+  more?: ReactNode
 }) {
   const [peek, setPeek] = useState<{ picture: Portrait; src: string | undefined } | null>(null)
   useEffect(() => {
@@ -467,6 +483,7 @@ function AttachmentList({
             {item.sending && <span className="text-xs text-muted">Sending…</span>}
           </li>
         ))}
+        {more}
       </ul>
       <PicturePeek picture={peek?.picture ?? null} src={peek?.src} onClose={() => setPeek(null)} />
     </>
@@ -617,6 +634,7 @@ function ImageScope({
   }, [attaching])
   const draft = composerWorkspace(session, user).draft
   const resolvedDraftId = useSyncExternalStore(draft.subscribe, () => draft.draftIdFor(view.forkId))
+  const library = useComposerLibrary(session, resolvedDraftId, kindShows(view.chat?.kind, LIBRARY_ATTACH))
   const [entries, setEntries] = useState<readonly ImageDraftEntry[]>([])
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -819,6 +837,7 @@ function ImageScope({
     return {
       images,
       ids: captured.map((entry) => entry.id),
+      ...(library ? { library: library.capture() } : {}),
       begin: async (from: ComposerSource) => {
         await enqueue(async () => {
           for (const entry of captured)
@@ -833,6 +852,8 @@ function ImageScope({
         })
       },
       finish: async (sent: boolean) => {
+        // The send took its items off the draft on the server.
+        if (sent) library?.reload()
         await enqueue(async () => {
           for (const entry of captured) {
             if (sent) await dropImage(entry.id)
@@ -851,9 +872,11 @@ function ImageScope({
         busy,
         error,
         attacher: attaching,
+        library,
         add,
         capture,
-        restore: (images) => {
+        restore: (images, items) => {
+          if (items?.length) library?.add(items.map((item) => item.refId))
           void enqueue(async () => {
             try {
               for (const image of images) {
@@ -989,31 +1012,54 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
   const vision = props.view.history?.model?.vision
   const maxImages = props.view.history?.model?.maxImages ?? 4
   const images = state.entries.some((entry) => entry.kind !== "file")
+  const library = state.library
+  const items = library?.items.length ?? 0
+  const filesHint = state.attacher
+    ? `Attach files of any type. They're saved in ${state.attacher.folder}, where the assistant can open them. You can also paste or drop them here, or drag a file from the Files tab.`
+    : "Attach images. You can also paste an image or drop it anywhere in the chat."
   return (
     <Composer
       {...props}
       attachmentInput={{
-        count: state.entries.length,
-        busy: !state.ready || state.busy || state.entries.some((entry) => !entry.mediaId || !entry.saved),
+        count: state.entries.length + items,
+        busy:
+          !state.ready ||
+          state.busy ||
+          (library?.busy ?? false) ||
+          state.entries.some((entry) => !entry.mediaId || !entry.saved),
         capture: state.capture,
         restore: state.restore,
-        action: state.attacher ? (
-          <AttachButton
-            anyType
+        ...(library
+          ? {
+              drop: {
+                takes: mayCarryLibrary,
+                drop: (data: DataTransfer) => {
+                  const refId = libraryRefOfDrop(data)
+                  if (refId !== null) library.add([refId])
+                }
+              }
+            }
+          : {}),
+        action: library ? (
+          <AttachMenu
             disabled={!state.ready || state.busy}
+            filesHint={filesHint}
             onFiles={state.add}
-            hint={`Attach files of any type. They're saved in ${state.attacher.folder}, where the assistant can open them. You can also paste or drop them here, or drag a file from the Files tab.`}
+            library={library}
           />
+        ) : state.attacher ? (
+          <AttachButton anyType disabled={!state.ready || state.busy} onFiles={state.add} hint={filesHint} />
         ) : (
           <AttachButton disabled={!state.ready || state.busy} onFiles={state.add} />
         ),
         editor:
-          state.entries.length > 0 || state.error ? (
+          state.entries.length > 0 || items > 0 || state.error || library?.error ? (
             <div className="flex flex-col gap-2" aria-label="Image attachments">
-              {state.entries.length > 0 && (
+              {state.entries.length + items > 0 && (
                 <>
                   <AttachmentList
-                    label={state.attacher ? "Attached files" : "Attached images"}
+                    label={library ? "Attachments" : state.attacher ? "Attached files" : "Attached images"}
+                    more={library ? <ComposerLibraryTiles library={library} /> : null}
                     removeHint="Removes this image from the message. It isn't sent."
                     items={state.entries.map((entry) => ({
                       id: entry.id,
@@ -1036,7 +1082,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     }))}
                     onRemove={state.remove}
                   />
-                  {state.attacher ? (
+                  {state.entries.length === 0 ? null : state.attacher ? (
                     <p role="status" className="text-sm text-muted">
                       {`Saved in ${state.attacher.folder}. The assistant is told where each one is${
                         images && vision === false ? "; this model can't see images" : ""
@@ -1050,6 +1096,11 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
               {state.error && (
                 <p role="alert" className="text-sm text-danger">
                   {state.error} {state.attacher ? "Remove an attachment" : "Remove an image"} or reload to retry.
+                </p>
+              )}
+              {library?.error && (
+                <p role="alert" className="text-sm text-danger">
+                  {library.error}
                 </p>
               )}
             </div>
@@ -1481,6 +1532,8 @@ export const registerImages = () => [
     order: 20,
     component: MessageThumbnails
   }),
+  // A workshop message's cards, lorebooks and presets (spec/WORKSHOP-CARDS.md §4.2).
+  messagePreviews.register({ id: "message.library", order: 25, component: MessageLibraryTiles }),
   messageEditorTools.register({ id: "message.editor-images", order: 5, component: EditorImages }),
   queuedPreviews.register({
     id: "queued.images",

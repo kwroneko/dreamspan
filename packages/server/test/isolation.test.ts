@@ -4367,6 +4367,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           )
       })
   },
+  GetComposerLibrary: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId])
+          yield* refused(actor.api.GetComposerLibrary({ chatId, draftId: owner.composerId }), "NotFound")
+      })
+  },
+  SetComposerLibrary: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId])
+          yield* refused(
+            actor.api.SetComposerLibrary({ chatId, draftId: owner.composerId, add: [], remove: [] }),
+            "NotFound"
+          )
+      })
+  },
   GetComposerChoice: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

@@ -187,6 +187,16 @@ export const MessageLibrary = Schema.Array(
 ).check(Schema.isMaxLength(16))
 export type MessageLibrary = typeof MessageLibrary.Type
 
+/** A message's library items as recorded at send, with each one's name then: what its tiles show. */
+export const VersionLibrary = Schema.Array(
+  Schema.Struct({
+    kind: Schema.Literals(["card", "lorebook", "preset"]),
+    refId: idSchema("RefId", "ref"),
+    name: Schema.String
+  })
+)
+export type VersionLibrary = typeof VersionLibrary.Type
+
 /** The images of a set of attachments, leaving out files of other types. */
 export const imagesOnly = <A extends { readonly kind?: "file" }>(attachments: ReadonlyArray<A>): ReadonlyArray<A> =>
   attachments.filter((a) => a.kind !== "file")
@@ -249,6 +259,8 @@ export class Version extends Schema.Class<Version>("Version")({
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
+  /** The cards, lorebooks and presets a workshop message carries (spec/WORKSHOP-CARDS.md §4.2). */
+  library: Schema.optionalKey(VersionLibrary),
   macroMode: MacroMode,
   origin: VersionOrigin,
   sourceVersionId: Schema.NullOr(VersionId),

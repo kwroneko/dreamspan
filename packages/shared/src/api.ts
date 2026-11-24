@@ -31,7 +31,7 @@ import { McpApi } from "./mcpApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi, StImportPlanApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
-import { ComposerApi } from "./composerApi.ts"
+import { ComposerApi, ComposerLibraryApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { DraftPreviewApi, InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
@@ -541,7 +541,11 @@ export class DatabaseStatusApi extends RpcGroup.make(
   Rpc.make("GetDatabaseStartup", { success: DatabaseStartup, error: Schema.Union([Forbidden, ServerError]) })
 ).middleware(Authentication) {}
 
+/** A workshop composer's library items (composerApi.ts). */
+export class AuthenticatedComposerLibraryApi extends ComposerLibraryApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedComposerLibraryApi)
   .merge(DatabaseStatusApi)
   .merge(AuthenticatedModelEditApi)
   .merge(AuthenticatedMoveApi)

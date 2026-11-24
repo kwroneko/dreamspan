@@ -175,6 +175,7 @@ describe("0002_files", () => {
           "pending_chats",
           "queue_library_revisions",
           "retained_library_attachments",
+          "composer_library",
           "recovered_label_owner"
         ]
       )
@@ -525,6 +526,7 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0018_pending_chats",
       "0019_queue_library_revisions",
       "0020_retained_library_attachments",
+      "0021_composer_library",
       "0022_recovered_label_owner"
     ])
   }).pipe(Effect.provide(layer()))

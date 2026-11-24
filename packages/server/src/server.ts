@@ -63,6 +63,7 @@ import {
   AppCoreApi,
   AuthenticatedGalleryApi,
   AuthenticatedOwnTurnNoteApi,
+  AuthenticatedComposerLibraryApi,
   AuthenticatedSharedNoteRefsApi,
   DatabaseStatusApi,
   AuthenticatedPanelApprovalApi,
@@ -108,7 +109,7 @@ import {
 import { makePanelDataHandlers } from "./api/panelData.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
-import { makeComposerHandlers } from "./api/composer.ts"
+import { makeComposerHandlers, makeComposerLibraryHandlers } from "./api/composer.ts"
 import { makeNoticeHandlers } from "./api/notices.ts"
 import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
@@ -236,6 +237,7 @@ const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
   DatabaseStatusHandlers,
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
+  AuthenticatedComposerLibraryApi.toLayer(makeComposerLibraryHandlers),
   AuthenticatedSharedNoteRefsApi.toLayer(makeSharedNoteRefsHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),

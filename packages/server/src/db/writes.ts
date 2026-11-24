@@ -6,6 +6,7 @@ import { canonicalJson } from "@dreamspan/shared/editing.ts"
 import { previewFork } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@dreamspan/shared/chatApi.ts"
 import { composerImages } from "./composerImages.ts"
+import { composerLibrary } from "./composerLibrary.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
@@ -403,6 +404,8 @@ export const makeWriteHandlers = (bin: Bin) =>
             ...(path !== undefined ? { path } : {})
           })
           .pipe(transaction("SetComposerImage")),
+      SetComposerLibrary: ({ userId, chatId, draftId, add, remove }) =>
+        composerLibrary(sql).set(userId, chatId, draftId, add, remove).pipe(transaction("SetComposerLibrary")),
       SetComposerChoice: ({
         userId,
         chatId,
