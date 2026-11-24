@@ -23,10 +23,13 @@ a similar shape and length. The same value becomes the same replacement everywhe
 still matches its path and a cursor the request that used it. A card's safety flags are set to
 false. Every time is moved back by the same amount (order and spacing kept, fractions of a
 second mapped), and ETags and `?v=` tokens are mapped like hashes. The API's structure stays
-exactly as captured: every key, status, header, null, number and boolean; the enum values and the API's own labels and error messages; and the whole
+as captured, including its keys, statuses, headers, value types, enums, labels, error messages and the whole
 capabilities description. Absolute URLs on the archive become `https://archive.example`, other
 hosts `siteN.example`. Synthesizing fails, and writes nothing, if any word of the original card
 content (or any non-ASCII letter) would remain.
+
+Arbitrary keys and strings in downloaded card extensions are synthesized. Shape comparisons
+treat those keys as wildcards and keep the known structure of the archive's own extension.
 
 ## Refreshing
 

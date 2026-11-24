@@ -1,5 +1,5 @@
 // Turns captured cardex responses into synthetic fixtures (README.md): the API's structure
-// stays as captured (every key, every status and header, the capabilities description, the
+// stays as captured (the API's keys, every status and header, the capabilities description, the
 // API's own labels and enum values, numbers, booleans, nulls, dates), and everything that came
 // from a card or a person is replaced by our own SFW words of a similar shape and length, the
 // same value the same way everywhere, so a slug in a summary still matches the one in its path.
@@ -347,6 +347,21 @@ const ISO = /^\d{4}-\d\d-\d\d(?:[T ][\d:.]+(?:Z|[+-]\d\d:?\d\d)?)?$/
 
 const digest = (value: string) => createHash("sha256").update(`cardex-fixture:${value}`).digest()
 
+const isJsonDownload = (capture: Capture) =>
+  capture.status === 200 &&
+  capture.request.path.startsWith("/api/v1/download/") &&
+  capture.request.query.mode === "json"
+
+type ExtensionScope = "card" | "cardex" | "origin" | "authored"
+const CARDEX_ORIGIN_FIELDS = new Set(["created", "current", "first_seen", "id", "source", "url"])
+const extensionField = (scope: ExtensionScope, key: string): ExtensionScope | "field" => {
+  if (scope === "card" && key === "cardex") return "cardex"
+  if (scope === "cardex" && key === "origins") return "origin"
+  if (scope === "cardex" && (key === "url" || key === "version")) return "field"
+  if (scope === "origin" && CARDEX_ORIGIN_FIELDS.has(key)) return "field"
+  return "authored"
+}
+
 class Synthesizer {
   private readonly ids = new Map<string, string>()
   private readonly tags = new Map<string, string>()
@@ -594,7 +609,29 @@ class Synthesizer {
     return this.id(key)
   }
 
-  value(value: unknown, key: string, tagged: boolean): unknown {
+  /** Download extensions can contain arbitrary authored keys and values. */
+  private extension(value: unknown, scope: ExtensionScope): unknown {
+    if (typeof value === "string") {
+      const text = this.text(value)
+      return text === value && value.trim() ? `Synthetic ${value.length}` : text
+    }
+    if (Array.isArray(value)) return value.map((item) => this.extension(item, scope === "origin" ? scope : "authored"))
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => {
+        const field = extensionField(scope, key)
+        if (field === "field")
+          return [key, typeof child === "object" ? this.extension(child, "authored") : this.value(child, key, false)]
+        if (field !== "authored") return [key, this.extension(child, field)]
+        this.replaced.add(key)
+        return [`x-${digest(`extension-key:${key}`).toString("hex").slice(0, 16)}`, this.extension(child, "authored")]
+      })
+    )
+  }
+
+  value(value: unknown, key: string, tagged: boolean, downloadPath?: ReadonlyArray<string>): unknown {
+    if (downloadPath && key === "extensions")
+      return this.extension(value, downloadPath.length === 2 && downloadPath[0] === "data" ? "card" : "authored")
     // A card's own safety flags and its site's rating describe the real card, not ours.
     if (key === "safety" && value && typeof value === "object")
       return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, typeof v === "boolean" ? false : v]))
@@ -606,7 +643,8 @@ class Synthesizer {
       return Number.isInteger(value) && ((/(_id$|Id$)/.test(key) && value >= 10) || (key === "id" && value >= 1000))
         ? Number(this.digits(String(value)))
         : value
-    if (Array.isArray(value)) return value.map((v) => this.value(v, key, tagged || TAG_KEYS.has(key)))
+    if (Array.isArray(value))
+      return value.map((v) => this.value(v, key, tagged || TAG_KEYS.has(key), downloadPath && [...downloadPath, "[]"]))
     if (value && typeof value === "object") {
       const record = value as Record<string, unknown>
       // A tag object ({slug, label}) in a list of tags.
@@ -617,7 +655,7 @@ class Synthesizer {
           if (tagObject && k === "slug") return [k, this.tag(v as string)]
           if (tagObject && (k === "label" || k === "matched_label") && typeof v === "string")
             return [k, this.tagLabel(v, record.slug as string)]
-          return [this.key(k), this.value(v, k, false)]
+          return [this.key(k), this.value(v, k, false, downloadPath && [...downloadPath, k])]
         })
       )
     }
@@ -664,7 +702,7 @@ export function synthesize(raw: ReadonlyArray<Capture>, origin: string): Array<C
               ? capture.body
               : isError
                 ? errorBody(s, capture.body as Record<string, unknown>, capture.request.query)
-                : s.value(capture.body, "", false)
+                : s.value(capture.body, "", false, isJsonDownload(capture) ? [] : undefined)
           }
         : {}),
       ...(capture.bodyInfo ? { bodyInfo: capture.bodyInfo } : {})
@@ -697,6 +735,7 @@ function leaked(s: Synthesizer, out: ReadonlyArray<Capture>): Array<string> {
     .join("\n")
     .toLowerCase()
   const outputWords = new Set(text.match(/[a-z]{5,}/g) ?? [])
+  const apiWords = apiWordsOf(out)
   const found = new Set<string>()
   // Our words are all plain ASCII: any other letter came from a card.
   for (const c of out)
@@ -704,39 +743,38 @@ function leaked(s: Synthesizer, out: ReadonlyArray<Capture>): Array<string> {
       for (const letter of JSON.stringify(c).match(/[^\x00-\x7f]/g) ?? []) found.add(letter)
   for (const original of s.replaced)
     for (const word of original.toLowerCase().match(/[a-z]{5,}/g) ?? [])
-      if (!ours.has(word) && outputWords.has(word) && !apiWord(word, out)) found.add(word)
+      if (!ours.has(word) && outputWords.has(word) && !apiWords.has(word)) found.add(word)
   return [...found]
 }
 
-/** A word that is part of the API itself: a key, or a kept value or header. */
-let apiWords: Set<string> | null = null
-function apiWord(word: string, out: ReadonlyArray<Capture>) {
-  if (!apiWords) {
-    apiWords = new Set<string>()
-    const add = (text: string) => {
-      for (const w of text.toLowerCase().match(/[a-z]{5,}/g) ?? []) apiWords!.add(w)
-    }
-    const walk = (value: unknown, key: string) => {
-      if (Array.isArray(value)) for (const v of value) walk(v, key)
-      else if (value && typeof value === "object")
-        for (const [k, v] of Object.entries(value)) {
-          add(k)
-          walk(v, k)
-        }
-      else if (typeof value === "string" && (KEPT_KEYS.has(key) || key === "message" || SITE_KEYS.has(key))) add(value)
-    }
-    for (const c of out) {
-      add(c.name)
-      walk(c.body, "")
-      for (const [k, v] of Object.entries(c.headers)) {
-        add(k)
-        if (!["etag", "location"].includes(k)) add(v.replace(/filename="[^"]*"/, ""))
-      }
-    }
-    walk(out.find((c) => c.name === "capabilities")?.body, "")
-    for (const c of out) if (c.name === "capabilities") add(JSON.stringify(c.body))
+/** Words that belong to the API's own keys, values and headers. */
+function apiWordsOf(out: ReadonlyArray<Capture>) {
+  const words = new Set<string>()
+  const add = (text: string) => {
+    for (const w of text.toLowerCase().match(/[a-z]{5,}/g) ?? []) words.add(w)
   }
-  return apiWords.has(word)
+  // The capture envelope and the archive-owned extension namespace.
+  add("request query status headers bodyInfo bytes magic cardex")
+  const walk = (value: unknown, key: string, download: boolean) => {
+    if (download && key === "extensions") return
+    if (Array.isArray(value)) for (const v of value) walk(v, key, download)
+    else if (value && typeof value === "object")
+      for (const [k, v] of Object.entries(value)) {
+        add(k)
+        walk(v, k, download)
+      }
+    else if (typeof value === "string" && (KEPT_KEYS.has(key) || key === "message" || SITE_KEYS.has(key))) add(value)
+  }
+  for (const c of out) {
+    add(c.name)
+    if (c.name === "capabilities") add(JSON.stringify(c.body))
+    else walk(c.body, "", isJsonDownload(c))
+    for (const [k, v] of Object.entries(c.headers)) {
+      add(k)
+      if (!["etag", "location"].includes(k)) add(v.replace(/filename="[^"]*"/, ""))
+    }
+  }
+  return words
 }
 
 // --- Shapes: what the contract test compares.
@@ -759,19 +797,38 @@ const kindOf = (value: unknown) =>
 const shapeKey = (key: string) => (/^[a-z_][A-Za-z0-9_]*$/.test(key) ? key : "*")
 
 /** Every `path: kind` in a JSON value; a number may stand where an integer was. */
-function shapeOf(value: unknown, path = "$", out = new Set<string>()): Set<string> {
+function shapeOf(
+  value: unknown,
+  path = "$",
+  out = new Set<string>(),
+  download = false,
+  scope?: ExtensionScope
+): Set<string> {
+  if (download && scope === undefined && path.endsWith(".extensions"))
+    scope = path === "$.data.extensions" ? "card" : "authored"
   const kind = kindOf(value)
   out.add(`${path}: ${kind}`)
-  if (kind === "array") for (const item of value as Array<unknown>) shapeOf(item, `${path}[]`, out)
+  if (kind === "array")
+    for (const item of value as Array<unknown>)
+      shapeOf(item, `${path}[]`, out, download, scope && (scope === "origin" ? scope : "authored"))
   if (kind === "object")
-    for (const [key, item] of Object.entries(value as Record<string, unknown>))
-      shapeOf(item, `${path}.${shapeKey(key)}`, out)
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      const field = scope && extensionField(scope, key)
+      shapeOf(
+        item,
+        `${path}.${field === "authored" ? "*" : shapeKey(key)}`,
+        out,
+        download,
+        field === "field" ? "authored" : field
+      )
+    }
   return out
 }
 
 /** A capture's shape: its status, its header names, its body. */
 export const captureShape = (capture: Capture): Set<string> => {
-  const out = capture.body === undefined ? new Set<string>() : shapeOf(capture.body)
+  const out =
+    capture.body === undefined ? new Set<string>() : shapeOf(capture.body, "$", new Set(), isJsonDownload(capture))
   out.add(`status: ${capture.status}`)
   for (const header of Object.keys(capture.headers)) out.add(`header: ${header}`)
   if (capture.bodyInfo) out.add(`body: ${capture.bodyInfo.magic ? "bytes" : "empty"}`)
