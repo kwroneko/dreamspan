@@ -171,4 +171,24 @@ describe("pending chats", () => {
       })
     )
   )
+
+  it.live("duplicating the greeting commits it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const greeting = yield* greetingOf(userId, draft.id)
+        const inserted = yield* api.InsertMessage({
+          chatId: draft.id,
+          forkId: draft.currentForkId!,
+          anchor: greeting.entry.slotId,
+          expectedRowVersion: greeting.entry.rowVersion,
+          body: { _tag: "Duplicate", versionId: greeting.entry.version.id }
+        })
+        assert.strictEqual(inserted.chat.status, "active")
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "active")
+        assert.isFalse(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+      })
+    )
+  )
 })
