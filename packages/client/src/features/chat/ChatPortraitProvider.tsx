@@ -128,7 +128,9 @@ export function ChatPortraitProvider({
       stack={portraits}
       onStackChange={change}
       onSharedChange={
-        wide && tab ? (id, action) => portraitSources(tab.store).changeOtherViews(tab.tabId, id, action) : undefined
+        wide && tab
+          ? (portrait, action) => portraitSources(tab.store).changeOtherViews(tab.tabId, portrait, action)
+          : undefined
       }
       tabHref={tab ? pictureHref : undefined}
     >

@@ -88,7 +88,7 @@ export function PortraitProvider({
   stack?: Stack<Portrait>
   onStackChange?: (next: Stack<Portrait>) => void
   /** A toggle closed this portrait, or a single-image action kept it. */
-  onSharedChange?: ((id: string, action: "close" | "keep") => void) | undefined
+  onSharedChange?: ((portrait: Portrait, action: "close" | "keep") => void) | undefined
   children: ReactNode
 }) {
   const [localStack, setLocalStack] = useState<Stack<Portrait>>([])
@@ -101,17 +101,20 @@ export function PortraitProvider({
   const single = useLayoutParam(SINGLE_PORTRAIT_PARAM) === "on"
   // A phone has room for one: a click there always replaces it.
   const replaces = single || !inline
-  const shown = stack.map((entry) => ({ ...entry, portrait: current?.(entry.portrait) ?? entry.portrait }))
+  const resolve = (portrait: Portrait) => current?.(portrait) ?? portrait
+  const shown = stack.map((entry) => ({ ...entry, portrait: resolve(entry.portrait) }))
+  const shownOrNew = (portrait: Portrait) =>
+    shown.find((e) => e.portrait.id === portrait.id)?.portrait ?? resolve(portrait)
   const viewer: PortraitViewer = {
     open: (portrait) => {
       const wasOpen = isOpen(stack, portrait.id)
       setStack((stack) => toggle(stack, portrait, replaces))
-      if (wasOpen) onSharedChange?.(portrait.id, "close")
-      else if (single) onSharedChange?.(portrait.id, "keep")
+      if (wasOpen) onSharedChange?.(shownOrNew(portrait), "close")
+      else if (single) onSharedChange?.(shownOrNew(portrait), "keep")
     },
     show: (portrait) => {
       setStack((stack) => show(stack, portrait, replaces))
-      if (single) onSharedChange?.(portrait.id, "keep")
+      if (single) onSharedChange?.(shownOrNew(portrait), "keep")
     },
     replace: (from, portrait) => setStack((stack) => replace(stack, from, portrait)),
     close: (id) => setStack((stack) => (id === undefined ? stack.slice(1) : close(stack, id))),
