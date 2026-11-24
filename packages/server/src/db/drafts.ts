@@ -769,8 +769,7 @@ export const makeDraftStore = (
         !deleted &&
         draft.target_kind === "user_field" &&
         draft.status === "active" &&
-        !ended &&
-        (base === null || draft.text_version > base.rowVersion) &&
+        (base === null || ended || draft.text_version > base.rowVersion) &&
         content !== draft.content &&
         isFormContent(content) &&
         isFormContent(draft.content)

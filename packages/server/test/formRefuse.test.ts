@@ -157,6 +157,28 @@ describe("a stale form save is refused and the current version kept", () => {
     }).pipe(Effect.provide(layer()))
   )
 
+  it.effect("refuses a save from an ended session when a newer form is active", () =>
+    Effect.gen(function* () {
+      const { save, writer, user, states } = yield* setup("refuse-old-session")
+      const start = yield* save(form({ name: "First form", note: "" }), null)
+      const ended = yield* writer.ClearDraft({
+        userId: user.id,
+        key,
+        draftId: start.id,
+        expectedRowVersion: start.rowVersion,
+        outcome: "committed"
+      })
+      const current = yield* save(form({ name: "Second form", note: "" }), start)
+      assert.strictEqual(current.status, "active")
+      assert.strictEqual(current.session, ended.session)
+      assert.isUndefined(current.refused)
+      const stale = form({ name: "First form", note: "Old tab's edit" })
+
+      assertRefused(yield* save(stale, start), current, stale)
+      assert.strictEqual((yield* states())[0], stale)
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("a stale starting snapshot is refused without a history step; the current tab saves on", () =>
     Effect.gen(function* () {
       const { save, reader, user } = yield* setup("refuse-seed")
