@@ -1,8 +1,8 @@
-// The cast strip in a group chat: each character tab says only the character's name, even when
-// the user's persona has the same name as a character (its tab has "you"), so a card's version
-// (an imported "main", say) never shows in a label; every tab but the open one collapses to its
-// portrait the same way when the names don't fit, and the strip never overflows its panel, at
-// 1340 and 390.
+// The cast strip in a group chat: each character tab says the character's name, and adds the
+// card's version only when two characters' tabs would otherwise read alike ("Rowan Hale · main",
+// "Rowan Hale · alt"); the persona sharing a character's name doesn't count (its tab has "you"),
+// so both say the name only. Every tab but the open one collapses to its portrait the same way
+// when the names don't fit, and the strip never overflows its panel, at 1340 and 390.
 import { expect, test, type Locator } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -11,7 +11,10 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const names = ["Seraphina Ashgrove", "Bartholomew Quill", "Evangeline Marsh", "Theodora Vance"]
+const names = ["Seraphina Ashgrove", "Bartholomew Quill", "Evangeline Marsh"]
+const twins = ["main", "alt"]
+// Each tab's label: the characters in the chat's order, then the persona (you).
+const labels = [...names, ...twins.map((version) => `Rowan Hale · ${version}`), names[0]!]
 let chatId = ""
 
 test.beforeAll(async () => {
@@ -21,6 +24,8 @@ test.beforeAll(async () => {
       const main = yield* api.CreateCard({ label: first!, name: first!, version: "main" })
       const others = []
       for (const name of rest) others.push(yield* api.CreateCard({ label: name, name }))
+      for (const version of twins)
+        others.push(yield* api.CreateCard({ label: "Rowan Hale", name: "Rowan Hale", version }))
       // The user's persona has the first character's name.
       const persona = yield* api.CreateCard({ label: first!, name: first!, version: "persona" })
       yield* api.SetPersona({ entityId: persona.entityId, persona: true })
@@ -48,7 +53,9 @@ const expanded = async (tabs: Locator) => {
 }
 
 for (const width of [1340, 390])
-  test(`character tabs show names only, and only the open one expands, at ${width}`, async ({ page }, info) => {
+  test(`character tabs: names, versions only for look-alikes, only the open one expanded, at ${width}`, async ({
+    page
+  }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -56,26 +63,24 @@ for (const width of [1340, 390])
     await openPanel(page, "Cast")
     const tabs = page.getByRole("tablist", { name: "Characters", exact: true })
     const people = tabs.getByRole("tab").filter({ hasNot: page.getByText("Cast", { exact: true }) })
-    // The characters in the chat's order, then the persona (you).
-    await expect(people).toHaveCount(names.length + 1)
-    for (const [index, name] of [...names, names[0]!].entries())
-      await expect(people.nth(index)).toHaveAccessibleName(name)
-    await expect(tabs).not.toContainText("main")
-    await expect(tabs).not.toContainText("·")
+    await expect(people).toHaveCount(labels.length)
+    for (const [index, label] of labels.entries()) await expect(people.nth(index)).toHaveAccessibleName(label)
+    // The character the persona shares a name with says its name only, though its version is "main".
+    await expect(people.nth(0)).not.toContainText("·")
     await expect(people.nth(0)).toHaveAttribute("title", names[0]!)
 
     const strip = page.locator("[data-chat-panel-tabs]")
     let height: number | null = null
-    for (let index = 0; index <= names.length; index++) {
+    for (let index = 0; index < labels.length; index++) {
       const open = people.nth(index)
       await open.click()
       await expect(open).toHaveAttribute("aria-selected", "true")
       // The names don't fit together: the open tab alone keeps its name.
-      await expect.poll(() => expanded(tabs)).toEqual([[...names, names[0]!][index]])
+      await expect.poll(() => expanded(tabs)).toEqual([labels[index]])
       // The persona, collapsed, is its portrait and its "you", without its name.
-      const persona = people.nth(names.length)
+      const persona = people.nth(labels.length - 1)
       await expect(persona.getByText("you", { exact: true })).toBeVisible()
-      if (index < names.length) await expect(persona.getByText(names[0]!, { exact: true })).toHaveClass(/sr-only/)
+      if (index < labels.length - 1) await expect(persona.getByText(names[0]!, { exact: true })).toHaveClass(/sr-only/)
       // Nothing scrolls sideways, and selecting never changes the strip's height.
       expect(await tabs.evaluate((list) => list.scrollWidth - list.clientWidth)).toBeLessThanOrEqual(0)
       const box = await strip.boundingBox()

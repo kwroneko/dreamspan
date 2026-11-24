@@ -1,6 +1,6 @@
 // Two cards with the same name in one chat, told apart by their versions (CardVersion.tsx; audit
 // item 016, CARD-FORKS surface 5): the Cast tab's rows and the composer's Speak as list show
-// each card's version under its name (the cast strip's two "Mira" tabs on hover), and a card
+// each card's version under its name (the cast strip's two "Mira" tabs in their labels), and a card
 // without one shows none, at 1440 and 390 in light and dark, with the layout audit of both.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -47,11 +47,9 @@ for (const width of [1440, 390])
 
       const cast = await openPanel(page, "Cast")
       const tabs = page.getByRole("tablist", { name: "Characters", exact: true })
-      // Both tabs say "Mira"; their hovers tell them apart by version.
-      const miraTabs = tabs.getByRole("tab", { name: "Mira", exact: true })
-      await expect(miraTabs).toHaveCount(2)
-      await expect(miraTabs.nth(0)).toHaveAttribute("title", "Mira · Summer coast")
-      await expect(miraTabs.nth(1)).toHaveAttribute("title", "Mira · Winter keep")
+      // The two Miras' tabs read alike by name, so they add their versions.
+      await expect(tabs.getByRole("tab", { name: "Mira · Summer coast", exact: true })).toHaveCount(1)
+      await expect(tabs.getByRole("tab", { name: "Mira · Winter keep", exact: true })).toHaveCount(1)
       await expect(tabs.getByRole("tab", { name: "Tobin", exact: true })).toHaveCount(1)
       const characters = cast.getByRole("list", { name: "Characters in this chat", exact: true })
       const miras = characters.getByRole("listitem", { name: "Mira", exact: true })
