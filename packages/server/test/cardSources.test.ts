@@ -11,7 +11,7 @@ import { textField } from "@dreamspan/shared/editing.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
-import { writeFile } from "node:fs/promises"
+import { unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
@@ -1753,7 +1753,7 @@ describe("the cache (§4.1)", () => {
       assert.isNull(yield* cache.peek(key("preview", "card", "missing")))
       assert.strictEqual((yield* cache.peek(key("preview", "card", "opened")))?.used, used)
       assert.strictEqual(cache.size(), 1)
-      assert.strictEqual((yield* cache.readBlob(entry.blob!)).length, 3)
+      assert.strictEqual((yield* cache.readBlob(entry.blob!))?.length, 3)
       yield* cache.sweep
       assert.strictEqual(cache.size(), 0, "preview never prolongs an entry's lifetime")
     })
@@ -1884,12 +1884,42 @@ describe("the cache (§4.1)", () => {
       yield* cache.clearUser("a", null)
       assert.isFalse(cache.has(key("a", "image", "x")))
       const entry = yield* cache.get(key("b", "image", "x"))
-      assert.deepStrictEqual([...(yield* cache.readBlob(entry!.blob!)).subarray(0, 3)], [7, 7, 7])
+      assert.deepStrictEqual([...(yield* cache.readBlob(entry!.blob!))!.subarray(0, 3)], [7, 7, 7])
       // A restart rebuilds the index from the files.
       const again = makeSourceCache({ dataDir, now: () => 0 })
       yield* again.scan
       assert.isTrue(again.has(key("b", "image", "x")))
       assert.isFalse(again.has(key("a", "image", "x")))
+    })
+  )
+
+  it.effect("a concurrent admission keeps the blob when its previous owner clears the cache", () =>
+    Effect.gen(function* () {
+      const { cache } = fresh(() => 0)
+      yield* cache.load
+      const bytes = new Uint8Array([1, 2, 3])
+      const old = key("a", "image", "x")
+      const next = key("b", "image", "x")
+      yield* cache.put(old, { bytes })
+      yield* Effect.all([cache.clearUser("a", null), cache.put(next, { bytes })], { concurrency: "unbounded" })
+      assert.isFalse(cache.has(old))
+      assert.deepStrictEqual([...(yield* cache.getBlob(next))!.bytes], [1, 2, 3])
+    })
+  )
+
+  it.effect("a cache hit with missing bytes is dropped and can be fetched again", () =>
+    Effect.gen(function* () {
+      const { cache, dataDir } = fresh(() => 0)
+      yield* cache.load
+      const image = key("a", "image", "x")
+      const bytes = new Uint8Array([1, 2, 3])
+      const { blob } = yield* cache.put(image, { bytes })
+      yield* Effect.promise(() => unlink(join(dataDir, blobPath(blob!))))
+      assert.isNull(yield* cache.getBlob(image))
+      assert.isFalse(cache.has(image))
+      assert.strictEqual(cache.usedBytes(), 0)
+      yield* cache.put(image, { bytes })
+      assert.deepStrictEqual([...(yield* cache.getBlob(image))!.bytes], [1, 2, 3])
     })
   )
 
