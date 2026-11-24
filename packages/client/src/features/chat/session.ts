@@ -1777,7 +1777,9 @@ export class ChatSession {
     const shown = new Map(
       this.view.entries.map((entry) => [entry.version.speakerEntityId as string | null, entry.version.content])
     )
-    const result = await this.call((client) => client("ChangeCast", { chatId: this.chatId, slotId, forkId, change }))
+    const result = await this.call((client) =>
+      client("ChangeCast", { chatId: this.chatId, slotId, forkId, change, ...(pending ? { pending } : {}) })
+    )
     // The save's snapshot may predate another pin. Read the current cast after it commits.
     if (result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId) {
       this.forgetPositions()

@@ -191,8 +191,12 @@ export const makeWriteHandlers = (bin: Bin) =>
         })
         // An old new-chat page's first message (a browser's copy sent on, or a tab from before):
         // nothing reads its draft any more, so its text goes to recovered texts (0018_pending_chats).
+        // Every text its history holds goes too, as the draft and its history are deleted.
         if (key.targetKind === "user_field" && legacyPendingDraft(key.targetId, key.field)) {
-          yield* fileLate(userId, key, content, "New chat")
+          const [row] = yield* sql<{ id: string }>`SELECT id FROM drafts WHERE user_id = ${userId}
+            AND target_kind = 'user_field' AND target_id = ${key.targetId} AND field = ${key.field}`
+          const texts = row === undefined ? [content] : yield* drafts.unsaved(row.id, content, [])
+          for (const text of texts.toReversed()) yield* fileLate(userId, key, text, "New chat")
           yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_kind = 'user_field'
             AND target_id = ${key.targetId} AND field = ${key.field}`
         }
