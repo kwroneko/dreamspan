@@ -93,6 +93,26 @@ for (const width of [1440, 390]) {
           return (yield* api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId })).requestCap
         })
       )
+    let refused = false
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? JSON.parse(data) : null
+        if (refused || request?.tag !== "ChangeCast" || request.payload?.change?._tag !== "RequestCap")
+          return upstream.send(data)
+        refused = true
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic cap write failure" } }]
+            }
+          })
+        )
+      })
+    })
     await page.goto(`${server().url}/chats/${chatId}`)
     const settings = await openPanel(page, "This chat")
     const field = () => settings.getByRole("spinbutton", { name: /Model requests per reply/ })
@@ -103,6 +123,21 @@ for (const width of [1440, 390]) {
     await expect(field()).toHaveValue("12")
     await expect(settings.getByText("At most 12 model requests per reply.")).toBeVisible()
     await field().fill("3")
+    await field().blur()
+    await expect(settings.getByRole("alert")).toContainText("Tools weren't changed")
+    await expect(field()).toHaveValue("3")
+    expect((await capOf()) ?? 12).toBe(12)
+    const ownerId = (await admin((api) => api.Whoami())).id
+    await expect
+      .poll(() =>
+        admin((api) =>
+          api.GetUserDraft({ ownerId, targetId: `request-cap:${chatId}`, field: "Model requests per reply" })
+        )
+      )
+      .toMatchObject({ status: "active", content: "3" })
+    await page.reload()
+    await openPanel(page, "This chat")
+    await expect(field()).toHaveValue("3")
     await field().press("Enter")
     await expect.poll(capOf).toBe(3)
     await expect(settings.getByText("At most 3 model requests per reply.")).toBeVisible()
