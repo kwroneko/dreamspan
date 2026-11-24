@@ -745,6 +745,7 @@ export const Message = memo(function Message({
     x: number
     y: number
     versionId: string
+    source: string
     caret: EditCaret | null
     thinking: ThinkingSpot | null
   } | null>(null)
@@ -756,7 +757,7 @@ export const Message = memo(function Message({
     if (event.detail <= 1 && (thinking || !editing)) {
       const source = thinking ? editableThinking(version) : version.content
       const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), source)
-      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, caret, thinking }
+      pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, source, caret, thinking }
     }
     if (pendingEdit.current === null) return
     clearTimeout(pendingEdit.current)
@@ -776,16 +777,15 @@ export const Message = memo(function Message({
     }
     // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
     const first = pressed.current
+    const source = thinking ? editableThinking(version) : version.content
     const caret =
       (first?.caret &&
       first.versionId === version.id &&
+      first.source === source &&
       first.thinking?.kind === thinking?.kind &&
       Math.hypot(first.x - event.clientX, first.y - event.clientY) <= SAME_SPOT_PX
         ? first.caret
-        : locateSpot(
-            caretSpotAt(event.clientX, event.clientY),
-            thinking ? editableThinking(version) : version.content
-          )) ?? undefined
+        : locateSpot(caretSpotAt(event.clientX, event.clientY), source)) ?? undefined
     clearTimeout(pendingEdit.current ?? undefined)
     const versionId = version.id
     pendingEdit.current = setTimeout(() => {
