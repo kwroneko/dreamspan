@@ -597,6 +597,11 @@ describe("shared folders", () => {
       // Without a recorded birth time (a filesystem with none), the inode and device decide.
       yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = NULL" }])
       assert.strictEqual(yield* ash.text("/files/Shared/wren/A/a.txt"), "A.")
+      const downgrade = yield* wren.json("/files/share", { path: "/files/A", handle: "ash", mode: "view" })
+      assert.strictEqual(downgrade.status, 200)
+      assert.deepInclude(yield* wren.read<FolderShare>(downgrade), { status: "active", mode: "view" })
+      assert.strictEqual(yield* statusOf(ash.upload("/files/Shared/wren/A/new.txt", "x")), 403)
+      assert.isEmpty((yield* ash.listing("/files")).invitations ?? [])
       // Sharing it again binds the folder as it is now, birth time included.
       yield* fixtureSql(config.dataDir, [{ sql: "UPDATE file_shares SET birth_ms = 1" }])
       assert.strictEqual(yield* statusOf(ash.list("/files/Shared/wren/A")), 404)
