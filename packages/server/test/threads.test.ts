@@ -6,16 +6,17 @@
 // restore through the bin, refusals and another user's probes. Synthetic data only.
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, type ForkId, NewVersion, type SlotId } from "@dreamspan/shared/chat.ts"
+import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
 import { foldState } from "@dreamspan/shared/state.ts"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { storyTools } from "../src/agent/tools/history.ts"
 import type { ToolContext, RolloutTool } from "../src/agent/tools.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
-import { generateReply } from "./support/generation.ts"
+import { eventually, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const mockProvider = Effect.acquireRelease(
@@ -445,6 +446,14 @@ describe("starting parallel threads", () => {
           assert.include(wrenBefore, "vault code")
           assert.include(wrenBefore, "finds the boat")
 
+          const own = yield* api.OpenComposer({ chatId: t.chatId, forkId: F })
+          yield* api.SetComposerChoice({ chatId: t.chatId, draftId: own.id, speakerEntityId: t.mira })
+          const events: ChatEvent[] = []
+          yield* api.SubscribeChat({ chatId: t.chatId }).pipe(
+            Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+            Effect.forkScoped
+          )
+          yield* eventually(() => events.some((event) => event._tag === "Hello"))
           const started = yield* api.StartThreads({
             chatId: t.chatId,
             forkId: F,
@@ -496,10 +505,15 @@ describe("starting parallel threads", () => {
             (yield* api.GetComposerChoice({ chatId: t.chatId, draftId: composer.id })).speakerEntityId,
             t.wren
           )
-          const own = yield* api.OpenComposer({ chatId: t.chatId, forkId: F })
-          assert.strictEqual(
-            (yield* api.GetComposerChoice({ chatId: t.chatId, draftId: own.id })).speakerEntityId,
-            t.tobin
+          const continuing = yield* api.GetComposerChoice({ chatId: t.chatId, draftId: own.id })
+          assert.strictEqual(continuing.speakerEntityId, t.tobin)
+          yield* eventually(() =>
+            events.some(
+              (event) =>
+                event._tag === "ComposerChoice" &&
+                event.choice.draftId === own.id &&
+                event.choice.speakerEntityId === t.tobin
+            )
           )
 
           // Wren wasn't there for the played stretch in F, nor in a branch made from it now; she

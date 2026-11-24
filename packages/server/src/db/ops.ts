@@ -1732,7 +1732,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedRowVersion: Schema.Int,
       threads: ThreadStarts
     },
-    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat, continuingChoice: Schema.NullOr(ComposerChoice) }),
     error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
   }),
   /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */

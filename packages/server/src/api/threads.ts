@@ -49,7 +49,8 @@ export const makeThreadHandlers = Effect.gen(function* () {
   const start = (input: StartThreadsInput) =>
     Effect.gen(function* () {
       const id = yield* userId
-      const result = yield* writer.StartThreads({ userId: id, ...input })
+      const { continuingChoice, ...result } = yield* writer.StartThreads({ userId: id, ...input })
+      if (continuingChoice) hub.publish(input.chatId, { _tag: "ComposerChoice", choice: continuingChoice })
       hub.publish(input.chatId, { _tag: "Chat", chat: result.chat })
       hub.publish(input.chatId, { _tag: "State" })
       hub.publish(input.chatId, { _tag: "Lcm" })
