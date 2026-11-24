@@ -46,15 +46,19 @@ export const registerCharacterPanels = () =>
             avatar: { id: selected.slice(5), name: "Character", mediaId: null }
           })
       }
-      // A tab says the character's name only. The persona's tab has its "you"; two other tabs that
-      // would read alike tell their cards apart on hover, by the card's version.
-      return tabs.map((entry, index) => {
+      // A tab says the character's name. Two tabs that would read alike add the card's version
+      // ("Mira · Winter keep"); the persona's tab never counts, its "you" sets it apart. Where the
+      // versions don't tell them apart either (none, or the same), the name alone stays.
+      const clash = (entry: PanelTabEntry, index: number, list: ReadonlyArray<PanelTabEntry>) =>
+        entry.note === undefined &&
+        list.some((other, at) => at !== index && other.note === undefined && other.label === entry.label)
+      const versioned = tabs.map((entry, index) => {
         const card = cast?.cards.find((c) => `card:${c.entityId}` === entry.value)
-        const twin =
-          entry.note === undefined &&
-          tabs.some((other, at) => at !== index && other.note === undefined && other.label === entry.label)
-        return card && twin ? { ...entry, hint: cardChoiceLabel(card) } : entry
+        return card && clash(entry, index, tabs) ? { ...entry, label: cardChoiceLabel(card) } : entry
       })
+      return versioned.map((entry, index) =>
+        clash(entry, index, versioned) ? { ...entry, label: tabs[index]!.label } : entry
+      )
     },
     component: lazyPanel(
       () => import("../chat/CharacterTab.tsx").then((module) => ({ default: module.CharacterTab })),

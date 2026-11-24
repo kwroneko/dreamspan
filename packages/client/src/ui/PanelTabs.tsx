@@ -10,8 +10,6 @@ import { Icon, type IconName } from "./Icon.tsx"
 import { UnsavedDot } from "./UnsavedChanges.tsx"
 
 interface SubjectTab {
-  /** Hover text in place of the label, when the label alone would read like another tab's. */
-  readonly hint?: string | undefined
   readonly dirty?: boolean | undefined
   readonly value: string
   readonly label: string
@@ -175,7 +173,7 @@ export function SubjectTabs({
                 value={tab.value}
                 data-unsaved={tab.dirty || undefined}
                 style={index === named && openWidth !== undefined ? { maxWidth: openWidth } : undefined}
-                title={tab.hint ?? (tab.note ? `${tab.label} (${tab.note})` : tab.label)}
+                title={tab.note ? `${tab.label} (${tab.note})` : tab.label}
                 aria-description={
                   [tab.note, tab.dirty ? "Unsaved changes" : ""].filter(Boolean).join(". ") || undefined
                 }
