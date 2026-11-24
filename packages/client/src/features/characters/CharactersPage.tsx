@@ -14,7 +14,7 @@ import type { HomeBrowse } from "./homeSearch.ts"
 import { SourceResultLine, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel, SourceHiddenNote } from "../cardSources/filters.tsx"
 import { CardGridControls } from "./CardGridControls.tsx"
-import { GroupGrid } from "./GroupGrid.tsx"
+import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
 import { NewCardButton } from "../editor/NewCard.tsx"
@@ -53,7 +53,6 @@ function Home({ data }: { data: ShellLibrary }) {
       </div>
     )
   const needle = search.trim().toLowerCase()
-  const cards = browseCards(browsable(data), browse, search)
   return (
     <div className="@container flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
@@ -83,7 +82,7 @@ function Home({ data }: { data: ShellLibrary }) {
           <SourceResults browse={sources} className={COLUMNS} />
         </>
       ) : (
-        <LocalCards data={data} browse={browse} search={search} needle={needle} cards={cards} />
+        <LocalCards data={data} browse={browse} search={search} needle={needle} />
       )}
     </div>
   )
@@ -93,33 +92,36 @@ function LocalCards({
   data,
   browse,
   search,
-  needle,
-  cards
+  needle
 }: {
   data: ShellLibrary
   browse: HomeBrowse
   search: string
   needle: string
-  cards: ReturnType<typeof browseCards>
 }) {
   const [, setBrowse] = useHomeBrowse()
-  const grouped = useGroupedFamilies(browse, search)
+  // Switching to Groups, the tab before stays until the groups are read (useGroupsSwitch).
+  const tabs = useGroupsSwitch(browse)
+  const shown = tabs.shown
+  const cards = browseCards(browsable(data), shown, search)
+  const grouped = useGroupedFamilies(shown, search)
   return (
     <>
-      {browse.filter === "personas" && (
+      {shown.filter === "personas" && (
         <div>
           <NewCardButton persona />
         </div>
       )}
-      {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />}
-      {browse.filter === "groups" ? (
-        <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
-      ) : (
+      {shown.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{ place: "home" }} />}
+      {tabs.groups && (
+        <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} {...tabs.groups} />
+      )}
+      {tabs.characters && (
         <CharacterGrid
           cards={cards}
-          sort={browse.sort}
-          markPersonas={mixesPersonas(browse)}
-          families={grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined}
+          sort={shown.sort}
+          markPersonas={mixesPersonas(shown)}
+          families={grouped ? { expanded: shown.family, onToggle: (family) => setBrowse({ family }) } : undefined}
           className={COLUMNS}
         >
           {!cards.length && (
@@ -127,20 +129,20 @@ function LocalCards({
               title={
                 needle
                   ? "No characters here"
-                  : browse.filter === "favourites"
+                  : shown.filter === "favourites"
                     ? "No favourites yet"
-                    : browse.filter === "archived"
+                    : shown.filter === "archived"
                       ? "No archived cards"
-                      : browse.filter === "personas"
+                      : shown.filter === "personas"
                         ? "No personas yet"
                         : "No characters here"
               }
             >
-              {browse.filter === "archived" ? (
+              {shown.filter === "archived" ? (
                 <p>Archived cards stay here until you unarchive them.</p>
-              ) : browse.filter === "favourites" && !needle ? (
+              ) : shown.filter === "favourites" && !needle ? (
                 <p>Star a character to keep it here.</p>
-              ) : browse.filter === "personas" && !needle ? (
+              ) : shown.filter === "personas" && !needle ? (
                 <p>Cards you play as are kept here. In the library, a card’s menu adds it.</p>
               ) : (
                 <Tooltip label="Opens the SillyTavern importer.">
@@ -153,7 +155,7 @@ function LocalCards({
           )}
         </CharacterGrid>
       )}
-      <SlotOutlet slot={cardSearchExtras} props={{ data, browse, search, className: COLUMNS }} />
+      <SlotOutlet slot={cardSearchExtras} props={{ data, browse: shown, search, className: COLUMNS }} />
     </>
   )
 }
