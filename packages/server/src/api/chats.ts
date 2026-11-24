@@ -387,12 +387,13 @@ export const makeChatHandlers = Effect.gen(function* () {
         internal("CreateChat")
       ),
 
-    RenameChat: ({ chatId, name }) =>
+    RenameChat: ({ chatId, name, from }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const [chat] = yield* writer.RenameChats({ userId: id, chats: [{ chatId, from: null }], name })
-        hub.publish(chatId, { _tag: "Chat", chat: chat! })
-        return chat!
+        const [chat] = yield* writer.RenameChats({ userId: id, chats: [{ chatId, from: from ?? null }], name })
+        if (chat === undefined) return yield* reader.GetChat({ userId: id, chatId })
+        hub.publish(chatId, { _tag: "Chat", chat })
+        return chat
       }).pipe(internal("RenameChat")),
 
     GetChat: ({ chatId }) =>
