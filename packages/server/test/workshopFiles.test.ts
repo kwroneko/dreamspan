@@ -13,6 +13,7 @@ import { completionChunks, sse, startMockProvider, type Recorded } from "./suppo
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { unquoteToolData } from "./support/toolData.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
+import { WorkshopFiles } from "../src/files/WorkshopFiles.ts"
 
 interface Body {
   messages: Array<{ role: string; content?: string }>
@@ -62,7 +63,8 @@ it.live(
               ["bash", { command: "cd notes && cat plan.md && echo made > made.txt && wc -l < plan.md" }],
               ["bash", { command: "pwd" }]
             ] as Array<[string, unknown]>)
-          : [])
+          : []),
+        ["write_file", { path: "/files/notes/scratch.md", content: "A separate scratch file." }]
       ]
       const mock = yield* Effect.acquireRelease(
         Effect.promise(() =>
@@ -142,15 +144,15 @@ it.live(
       // Newest first.
       const kinds = effects.map((e) => e.kind)
       assert.deepStrictEqual(
-        kinds.filter((k) => k.startsWith("file.")),
+        effects.filter((e) => e.kind.startsWith("file.") && e.targetId === "/files/notes/plan.md").map((e) => e.kind),
         ["file.write", "file.edit", "file.create"]
       )
       if (commands) assert.strictEqual(kinds.filter((k) => k === "shell.run").length, 2)
       const shell = effects.find((e) => e.kind === "shell.run")
       if (shell) assert.isNull(shell.undo)
       // Undo newest first: the overwrite, then the edit, then the creation.
-      const undo = (kind: string) => {
-        const effect = effects.find((e) => e.kind === kind)!
+      const undo = (kind: string, target = "/files/notes/plan.md") => {
+        const effect = effects.find((e) => e.kind === kind && e.targetId === target)!
         return api.UndoRolloutEffect({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq })
       }
       // Undo never writes through a link swapped in after the change: not for the file, and not
@@ -179,11 +181,12 @@ it.live(
       // The edit can't be undone before the overwrite that came after it: the file changed since.
       const early = yield* Effect.exit(undo("file.edit"))
       assert.isTrue(early._tag === "Failure")
+      const { quota } = yield* WorkshopFiles
+      const beforeOverwrite = yield* quota.measure(me.id)
       yield* undo("file.write")
-      assert.strictEqual(
-        yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")),
-        "Chapter one\nThe lighthouse keeper climbs the stairs.\n"
-      )
+      const edited = "Chapter one\nThe lighthouse keeper climbs the stairs.\n"
+      assert.strictEqual((yield* quota.usage(me.id)).usedBytes, beforeOverwrite.usedBytes + Buffer.byteLength(edited))
+      assert.strictEqual(yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")), edited)
       yield* undo("file.edit")
       assert.strictEqual(
         yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")),
@@ -192,6 +195,10 @@ it.live(
       const undone = yield* undo("file.create")
       assert.isNotNull(undone.undoneAt)
       assert.isFalse(existsSync(join(root, "notes/plan.md")))
+      const beforeCreationUndo = yield* quota.measure(me.id)
+      yield* undo("file.create", "/files/notes/scratch.md")
+      assert.isFalse(existsSync(join(root, "notes/scratch.md")))
+      assert.strictEqual((yield* quota.usage(me.id)).usedBytes, beforeCreationUndo.usedBytes)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   120_000

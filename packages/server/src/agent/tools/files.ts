@@ -1942,8 +1942,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
             { bytes: current.bytes, inode: current.info.ino },
             "restore"
           )
-          // The kept version and the restored content count until the next measurement.
-          if (!host) deps.quota?.wrote(env.userId, current.bytes.byteLength)
+          // The kept version counts until the next measurement, even if Undo fails later.
+          const quota = host ? undefined : deps.quota
+          quota?.wrote(env.userId, current.bytes.byteLength)
+          let restored: Buffer | null = null
           if (typeof recipe.before === "string") {
             // A version past retention (30 days) is gone with its content.
             const version = yield* deps.reader
@@ -1955,10 +1957,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
               )
             if (!version.mediaPath || !isMediaPath(version.mediaPath))
               return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
-            const bytes = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
-            yield* attempt(() => writeRegularFile(top, segments, bytes))
-            if (!host) deps.quota?.wrote(env.userId, bytes.byteLength)
-          } else yield* attempt(() => removeFile(top, segments))
+            restored = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
+          }
+          // The live bytes go away only when this path held the inode's last link.
+          yield* attempt(async () => {
+            const free = quota?.freed(env.userId, current.info.nlink === 1 ? current.info.size : 0)
+            try {
+              if (restored === null) await removeFile(top, segments)
+              else await writeRegularFile(top, segments, restored)
+            } catch (error) {
+              if (free !== undefined) quota?.unfreed(env.userId, free)
+              throw error
+            }
+            if (restored !== null) quota?.wrote(env.userId, restored.byteLength)
+          })
           deps.onChanged?.(env.userId, [recipe.path as string])
           return yield* deps.writer.CompleteFileUndo({
             userId: actor.id,

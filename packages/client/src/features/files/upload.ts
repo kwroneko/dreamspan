@@ -71,7 +71,7 @@ export interface UploadReport {
   readonly noRoom: { readonly bytes: number; readonly files: number } | null
 }
 
-/** The bytes and file count of a batch, for the room check before it starts. */
+/** The bytes and file count left when an upload is refused for lack of room. */
 export const batchSize = (items: ReadonlyArray<UploadItem>) =>
   items.reduce(
     (sum, item) => (item.kind === "file" ? { bytes: sum.bytes + item.file.size, files: sum.files + 1 } : sum),

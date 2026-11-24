@@ -15,7 +15,7 @@
 // transaction.
 import type { Stats } from "node:fs"
 import { lstat, readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { Effect, Schema } from "effect"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { Reader, Writer } from "../db/Database.ts"
@@ -80,7 +80,9 @@ export const measureTree = async (
   /** Count only what deleting `root` would free for sure: a file with other links frees nothing. */
   soleOwnerOnly = false,
   /** Counted bytes by inode, shared by the trees of one walk. */
-  seen = new Map<string, number>()
+  seen = new Map<string, number>(),
+  /** Active upload files have their own quota holds until they land. */
+  skip?: (path: string) => boolean
 ) => {
   const deadline = Date.now() + maxMs
   let bytes = 0
@@ -88,6 +90,7 @@ export const measureTree = async (
   const stack = [root]
   while (stack.length) {
     const path = stack.pop()!
+    if (skip?.(path)) continue
     const info = await lstat(path, { bigint: false }).catch(() => null)
     if (!info) continue
     const key = inodeKey(info)
@@ -166,12 +169,13 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * Bytes app-side writes added since the last measurement, so checks between walks add up, as
    * entries: one for each streaming upload (it grows as chunks arrive and is given back whole),
    * and one per account for everything else (`wrote`). An entry only grows or is removed. A walk
-   * takes off exactly what each entry held when it began, so a give-back during a walk and
-   * a write after it can't be subtracted twice or wiped.
+   * normally takes off exactly what each entry held when it began, so a give-back during a
+   * walk and a write after it can't be subtracted twice or wiped.
    */
   const pending = new Map<string, Map<number, number>>()
-  /** A copy staged outside Files is invisible to a quota walk until its database row lands. */
-  const unlandedCopies = new Set<number>()
+  /** A staged upload or copy is accounted for only by its hold until it lands. */
+  const stagingHolds = new Set<number>()
+  const stagingNames = new Map<string, Set<string>>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement, by token. */
   const frees = new Map<string, Map<number, number>>()
   /** Uploads and copies that landed while the account's walk ran. */
@@ -203,21 +207,22 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const walk = (userId: string): Effect.Effect<Usage> =>
     Effect.gen(function* () {
       const started = Date.now()
-      // What each entry held before this walk began may or may not be in what it reads, and is
-      // taken off when the walk ends. A landing upload is reconciled against what the walk saw
-      // of its inode. Frees go the other way: they are applied before the removal, so a walk
+      // Take off the bytes each entry held when the walk began, except for staged uploads and
+      // copies. A landing upload is reconciled against what the walk saw of its inode. Frees
+      // go the other way: they are applied before the removal, so a walk
       // that ends later either counted the file (clearing the free over-counts) or reached it
       // after (clearing is exact); keeping it could subtract bytes the walk never counted.
       const heldBefore = new Map(pending.get(userId))
-      for (const id of heldBefore.keys()) if (unlandedCopies.has(id)) heldBefore.delete(id)
+      for (const id of heldBefore.keys()) if (stagingHolds.has(id)) heldBefore.delete(id)
       const landedDuring = new Map<number, { readonly inode: string; readonly reserved: number } | null>()
       landing.set(userId, landedDuring)
       const { filesRoot, home, bin, output } = deps.folders(userId)
       // Files and the bin share their inodes: a file deleted while linked elsewhere counts once.
       const seen = new Map<string, number>()
+      const skipStaged = (path: string) => stagingNames.get(userId)?.has(basename(path)) === true
       const [files, homeUse, binUse, outputUse] = yield* Effect.promise(() =>
         Promise.all([
-          measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen),
+          measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen, skipStaged),
           measureTree(home, deps.walkMaxEntries),
           bin === undefined
             ? Promise.resolve({ bytes: 0, partial: false })
@@ -348,9 +353,21 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * measurement, which sees the file itself. `release` (a write that didn't land) returns
    * exactly what the hold still counts, whatever walks came between.
    */
-  const hold = (userId: string, outsideFiles = false) => {
+  const hold = (userId: string, stage?: "outside-files" | { readonly temporaryName: string }) => {
     const id = nextId++
-    if (outsideFiles) unlandedCopies.add(id)
+    if (stage !== undefined) stagingHolds.add(id)
+    if (typeof stage === "object") {
+      const names = stagingNames.get(userId) ?? new Set<string>()
+      names.add(stage.temporaryName)
+      stagingNames.set(userId, names)
+    }
+    const unstage = () => {
+      stagingHolds.delete(id)
+      if (typeof stage !== "object") return
+      const names = stagingNames.get(userId)
+      names?.delete(stage.temporaryName)
+      if (names?.size === 0) stagingNames.delete(userId)
+    }
     let released = false
     let reserved = 0
     return {
@@ -364,12 +381,12 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       },
       /** The file is in place. Give the walk its inode to account for a read under either name. */
       landed: (file?: Inode) => {
-        unlandedCopies.delete(id)
+        unstage()
         landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },
       release: () => {
         released = true
-        unlandedCopies.delete(id)
+        unstage()
         landing.get(userId)?.delete(id)
         pending.get(userId)?.delete(id)
       }

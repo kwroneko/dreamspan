@@ -92,6 +92,43 @@ const setup = Effect.gen(function* () {
 })
 
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seconds" })("workshop branches", (it) => {
+  it.effect("keeps an empty story position after the story gets its first message", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const story = yield* h.writer.CreateChat({
+        userId: h.userId,
+        kind: "rp",
+        status: "active",
+        title: "Empty story",
+        participants: [],
+        greeting: null
+      })
+      const workshop = yield* h.api.CreateWorkshop({ attachTo: story.id })
+      const message = yield* h.append(workshop.id, workshop.currentForkId!, "Let's plan the beginning.")
+      const first = yield* h.append(story.id, story.currentForkId!, "The caravan leaves.")
+      const position = { userId: h.userId, chatId: workshop.id, forkId: workshop.currentForkId }
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition(position))?.leafSlotId, first.slotId)
+      const path = yield* h.reader.GetPath({ ...position, leafSlotId: null, limit: 20 })
+      const versionId = path.entries.find((entry) => entry.slotId === message.slotId)!.version.id
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, null)
+    })
+  )
+
+  it.effect("a recorded story slot deleted on one fork falls back to its live predecessor", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      yield* h.branchStory(h.s3.slotId)
+      const position = { userId: h.userId, chatId: h.workshop.id, forkId: h.w }
+      const path = yield* h.reader.GetPath({ ...position, leafSlotId: null, limit: 20 })
+      const versionId = path.entries.find((entry) => entry.version.content.startsWith("W2:"))!.version.id
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, h.s2.slotId)
+      yield* h.api.DeleteMessage({ slotId: h.s2.slotId, forkId: h.main })
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, h.s1.slotId)
+      yield* h.api.DeleteMessage({ slotId: h.s1.slotId, forkId: h.main })
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, null)
+    })
+  )
+
   it.effect("branching the story branches its workshop; the two go on apart; going back finds A's as it was", () =>
     Effect.gen(function* () {
       const h = yield* setup
@@ -178,6 +215,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
         versionId: last.version.id
       })
       assert.strictEqual(atA?.leafSlotId, h.s3.slotId)
+      // The copied messages also come along when branching again from the new story's end.
+      const next = yield* h.branchStory(h.s1.slotId, undefined, now.fork)
+      assert.lengthOf(next.preview.workshops, 0)
+      const [onNext] = yield* h.pairedIn(h.workshop, next.fork)
+      assert.deepStrictEqual(yield* h.texts(h.workshop.id, onNext!), yield* h.texts(h.workshop.id, onNow!))
       // At the story's end nothing is left out: no row.
       const atEnd = yield* h.reader.PreviewForkNotes({
         userId: h.userId,
@@ -228,6 +270,21 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       assert.notInclude(
         (yield* h.api.ListAttachedWorkshops({ chatId: h.story.id, forkId: c.fork })).map((chat) => chat.id),
         onlyB.id
+      )
+    })
+  )
+
+  it.effect("newer workshops on another branch cannot exhaust this branch's list", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const b = yield* h.branchStory(h.s1.slotId)
+      const onlyA = yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: h.main })
+      for (let i = 0; i < 200; i++) yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: b.fork })
+      assert.lengthOf(yield* h.api.ListAttachedWorkshops({ chatId: h.story.id, forkId: b.fork }), 200)
+      const onA = yield* h.api.ListAttachedWorkshops({ chatId: h.story.id, forkId: h.main })
+      assert.sameMembers(
+        onA.map(({ id }) => id),
+        [onlyA.id, h.workshop.id]
       )
     })
   )
@@ -287,6 +344,15 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       assert.strictEqual((yield* h.api.ListBin({ limit: 100, before: null })).length, before)
       // Deleted for good: so are they.
       const again = yield* h.api.DeleteFork({ forkId: b.fork })
+      const affected = yield* h.api.BinItemBranches({ itemIds: [again.id] })
+      assert.deepStrictEqual(
+        affected.map(({ itemId, forkId, state }) => [itemId, forkId, state]).sort(),
+        [
+          [again.id, b.fork, "branchInBin"],
+          [again.id, onB!, "branchInBin"],
+          [again.id, onlyB.currentForkId!, "chatInBin"]
+        ].sort()
+      )
       yield* h.api.PurgeBinItem({ itemId: again.id })
       assert.deepStrictEqual(yield* h.pairedIn(h.workshop, b.fork), [])
       assert.strictEqual(yield* outcome(h.api.GetChat({ chatId: onlyB.id })), "NotFound")
@@ -304,6 +370,31 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       yield* h.api.RestoreBinItem({ itemId: item.id })
       assert.strictEqual((yield* h.api.GetChat({ chatId: h.workshop.id })).id, h.workshop.id)
       assert.lengthOf(yield* h.texts(h.workshop.id, h.w), 3)
+    })
+  )
+
+  it.effect("restoring the first of two deleted story branches reopens its workshop", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      // A third branch, without a pairing to the workshop used in this test.
+      const c = yield* h.branchStory(h.s1.slotId)
+      const workshop = yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: h.main })
+      yield* h.append(workshop.id, workshop.currentForkId!, "On A.")
+      const b = yield* h.branchStory(h.s3.slotId)
+      const [onB] = yield* h.pairedIn(workshop, b.fork)
+      yield* h.append(workshop.id, onB!, "Only on B.")
+      assert.deepStrictEqual(yield* h.pairedIn(workshop, c.fork), [])
+
+      const aItem = yield* h.api.DeleteFork({ forkId: h.main })
+      const bItem = yield* h.api.DeleteFork({ forkId: b.fork })
+      assert.strictEqual(yield* outcome(h.api.GetChat({ chatId: workshop.id })), "NotFound")
+      yield* h.api.RestoreBinItem({ itemId: aItem.id })
+      assert.strictEqual((yield* h.api.GetChat({ chatId: workshop.id })).currentForkId, workshop.currentForkId)
+      assert.deepStrictEqual(yield* h.pairedIn(workshop, b.fork), [])
+      assert.deepStrictEqual(yield* h.texts(workshop.id, workshop.currentForkId!), ["On A."])
+
+      yield* h.api.RestoreBinItem({ itemId: bItem.id })
+      assert.deepStrictEqual(yield* h.texts(workshop.id, onB!), ["On A.", "Only on B."])
     })
   )
 })

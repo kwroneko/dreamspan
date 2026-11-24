@@ -39,11 +39,11 @@ const workshopPath = (sql: SqlClient.SqlClient, workshopId: string, fork: ForkRo
         SELECT s.id, ${shownIn(sql, fork.id, "s")}, d.position FROM display_slots d JOIN slots s ON s.id = d.id
         WHERE NOT ${slotDeletedIn(sql, fork.id, "s")})
       SELECT sh.id, sh.version_id,
-        coalesce(
-          (SELECT json_extract(e.value_json, '$.leaf') FROM state_events e
+        json_extract(coalesce(
+          (SELECT e.value_json FROM state_events e
             WHERE e.key = 'workshop.story_at' AND e.version_id = wv.id LIMIT 1),
-          (SELECT json_extract(e.value_json, '$.leaf') FROM state_events e
-            WHERE e.key = 'workshop.story_at' AND e.version_id = wv.source_version_id LIMIT 1)) AS leaf
+          (SELECT e.value_json FROM state_events e
+            WHERE e.key = 'workshop.story_at' AND e.version_id = wv.source_version_id LIMIT 1)), '$.leaf') AS leaf
       FROM shown sh JOIN version_records wv ON wv.id = sh.version_id
       ORDER BY sh.position`
   })
@@ -111,6 +111,8 @@ const workshopCuts = (sql: SqlClient.SqlClient, storyId: string, story: ForkRow,
     const atEnd = at !== null && at === (yield* displayEndOf(sql, storyId, story))
     for (const [workshopId, source] of sources) {
       const tip = (yield* displayEndOf(sql, workshopId, source)) ?? null
+      // A branch from the story's end takes the whole workshop, including messages
+      // carried over from a different story path with "As it is now".
       const path = atEnd ? [] : yield* workshopPath(sql, workshopId, source)
       const index = atEnd ? -1 : yield* cutIndex(sql, storyId, story, at, path)
       cuts.push({
@@ -118,7 +120,7 @@ const workshopCuts = (sql: SqlClient.SqlClient, storyId: string, story: ForkRow,
         title: titles.get(workshopId)?.trim() || "Workshop",
         source,
         tip,
-        then: atEnd ? tip : index < 0 ? null : path[index]!.id,
+        then: atEnd ? tip : (path[index]?.id ?? null),
         leftOut: path.slice(index + 1)
       })
     }

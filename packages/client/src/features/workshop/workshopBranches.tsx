@@ -5,7 +5,7 @@
 // story branch.
 import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { forkLabel } from "@dreamspan/shared/branchNaming.ts"
-import type { WorkshopBranch } from "@dreamspan/shared/workshopApi.ts"
+import type { WorkshopBranch, WorkshopStory } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useRef } from "react"
@@ -17,6 +17,15 @@ import { SIDE_CHATS_KEY } from "./sideChat.ts"
 const branchesOf = Atom.family((chatId: ChatId) =>
   AppClient.query("ListWorkshopBranches", { chatId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
 )
+const storyOf = Atom.family((chatId: ChatId) =>
+  AppClient.query("ListWorkshopStories", { chatIds: [chatId] }, { reactivityKeys: [SIDE_CHATS_KEY, "chats", chatId] })
+)
+
+/** The story a workshop is about: undefined while reading or for none, `title: null` once deleted. */
+export const useWorkshopStory = (chatId: ChatId): WorkshopStory | undefined => {
+  const result = useAtomValue(storyOf(chatId))
+  return AsyncResult.isSuccess(result) ? result.value[0] : undefined
+}
 
 /** The name of the story branch a workshop branch goes with, as the story's own list names it. */
 export const storyBranchName = (story: NonNullable<WorkshopBranch["story"]>) =>
@@ -24,20 +33,27 @@ export const storyBranchName = (story: NonNullable<WorkshopBranch["story"]>) =>
 
 /**
  * The workshop's live branches, last chatted in first; null while first read. A fork the list
- * doesn't have yet (made by branching the story since) has it read again, once per fork.
+ * or story pairing it doesn't have yet has it read again, once per expected branch.
  */
-export const useWorkshopBranches = (chatId: ChatId, expect?: ForkId | null) => {
+export const useWorkshopBranches = (chatId: ChatId, expect: ForkId | null, kind: "workshop" | "story" = "workshop") => {
   const atom = branchesOf(chatId)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
   const list = AsyncResult.isSuccess(result) ? result.value : null
   const asked = useRef<string | null>(null)
-  const unknown = list !== null && expect != null && !list.some((branch) => branch.forkId === expect)
+  const missing =
+    list !== null &&
+    expect !== null &&
+    !list.some((branch) => (kind === "story" ? branch.story?.forkId : branch.forkId) === expect)
   useEffect(() => {
-    if (!unknown || asked.current === expect || result.waiting) return
-    asked.current = expect ?? null
+    if (!missing) {
+      asked.current = null
+      return
+    }
+    if (asked.current === expect || result.waiting) return
+    asked.current = expect
     refresh()
-  }, [unknown, expect, refresh, result.waiting])
+  }, [missing, expect, refresh, result.waiting])
   return list
 }
 
@@ -51,9 +67,10 @@ export function WorkshopBranchNote({ view, fork }: BranchRowNoteProps) {
 }
 
 function StoryBranchLine({ chatId, forkId }: { chatId: ChatId; forkId: ForkId }) {
+  const attached = useWorkshopStory(chatId)
   const branches = useWorkshopBranches(chatId, forkId)
   const story = branches?.find((branch) => branch.forkId === forkId)?.story
-  if (story === undefined) return null
+  if (attached === undefined || story === undefined) return null
   return (
     <Tooltip label="Each branch of this workshop goes with one branch of the story.">
       <span

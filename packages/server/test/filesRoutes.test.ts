@@ -3,12 +3,13 @@
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { encodeText, type FolderListing, type TextFile } from "@dreamspan/shared/files.ts"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { eventually } from "./support/generation.ts"
 
 const call = (path: string, init?: RequestInit) =>
   Effect.gen(function* () {
@@ -580,6 +581,89 @@ describe("file routes", () => {
       const beforeRefused = yield* cached
       assert.strictEqual(yield* streamed("/files/c.bin", 1_500_000), 507)
       assert.strictEqual((yield* cached).usedBytes, beforeRefused.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("concurrent replacements credit only the files they actually replace", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const file = "/files/race.bin"
+      assert.strictEqual((yield* upload(file, "x".repeat(100_000))).status, 200)
+      yield* api.GetFilesUsage({ fresh: true })
+      const root = join(config.dataDir, "files", (yield* api.Whoami()).id)
+      const start = (byte: number) => {
+        const stream = new TransformStream<Uint8Array>()
+        const writer = stream.writable.getWriter()
+        const send = call(`/files/upload?${new URLSearchParams({ path: file, conflict: "replace" })}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: stream.readable,
+          duplex: "half"
+        } as RequestInit)
+        return { send, writer, chunk: new Uint8Array(20_000).fill(byte) }
+      }
+      const a = start(65)
+      const b = start(66)
+      const first = yield* Effect.forkChild(a.send)
+      const second = yield* Effect.forkChild(b.send)
+      yield* Effect.promise(() => Promise.all([a.writer.write(a.chunk), b.writer.write(b.chunk)]))
+      // Both requests have already checked the original file when both staging files exist.
+      yield* eventually(() => readdirSync(root).filter((name) => name.endsWith(".rp-tmp")).length === 2)
+      yield* Effect.promise(() => a.writer.close())
+      assert.strictEqual((yield* Fiber.join(first)).status, 200)
+      yield* Effect.promise(() => b.writer.close())
+      assert.strictEqual((yield* Fiber.join(second)).status, 200)
+      const cached = yield* api.GetFilesUsage({})
+      const measured = yield* api.GetFilesUsage({ fresh: true })
+      assert.strictEqual(cached.usedBytes, measured.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("a quota walk counts a staged upload only until the request is abandoned", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      assert.strictEqual((yield* upload("/files/warm.bin", "warm")).status, 200)
+      const root = join(config.dataDir, "files", (yield* api.Whoami()).id)
+      writeFileSync(join(root, ".ordinary.rp-tmp"), Buffer.alloc(10_000))
+      const baseline = yield* api.GetFilesUsage({ fresh: true })
+      assert.isAtLeast(baseline.filesBytes, 10_004)
+
+      const stop = new AbortController()
+      yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()))
+      const stream = new TransformStream<Uint8Array>()
+      const writer = stream.writable.getWriter()
+      const request = yield* Effect.forkChild(
+        Effect.exit(
+          call("/files/upload?path=/files/stalled.bin", {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: stream.readable,
+            duplex: "half",
+            signal: stop.signal
+          } as RequestInit)
+        )
+      )
+      const staged = () => readdirSync(root).find((name) => name.startsWith(".stalled.bin."))
+      const bytes = 600_000
+      yield* Effect.promise(() => writer.write(new Uint8Array(bytes)))
+      yield* eventually(() => {
+        const name = staged()
+        return name !== undefined && statSync(join(root, name)).size === bytes
+      })
+
+      const walked = yield* api.GetFilesUsage({ fresh: true })
+      assert.isBelow(walked.filesBytes, baseline.filesBytes + 4096)
+      const during = yield* api.GetFilesUsage({})
+      assert.strictEqual(during.usedBytes, walked.usedBytes + bytes)
+      stop.abort()
+      yield* Fiber.join(request)
+      yield* eventually(() => staged() === undefined)
+      const after = yield* api.GetFilesUsage({})
+      assert.strictEqual(after.usedBytes, during.usedBytes - bytes)
+      assert.strictEqual(after.measuredAt, during.measuredAt)
+      assert.strictEqual((yield* upload("/files/next.bin", "x".repeat(500_000))).status, 200)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 

@@ -42,7 +42,6 @@ import { FolderTree } from "./FolderTree.tsx"
 import { onFolderChanged } from "./live.ts"
 import type { FilesSource } from "./source.ts"
 import {
-  batchSize,
   carriesFiles,
   itemsFromDrop,
   itemsFromInput,
@@ -50,7 +49,7 @@ import {
   type ConflictAnswer,
   type UploadItem
 } from "./upload.ts"
-import { freeBytes, noRoomMessage, roomProblem } from "./usage.ts"
+import { freeBytes, noRoomMessage } from "./usage.ts"
 import { UsageDetails } from "./UsageDetails.tsx"
 import { NoViewer, viewerFor } from "./viewers.tsx"
 import { ShareDialog } from "./ShareDialog.tsx"
@@ -352,10 +351,7 @@ export function FileBrowser(props: FileBrowserProps) {
     if (items.length === 0 || readOnly) return
     const before = new Set(names)
     setFailure(null)
-    const size = batchSize(items)
-    const now = await readUsage()
-    const problem = now && roomProblem(size.bytes, size.files, now)
-    if (problem) return setFailure(problem)
+    // The server checks each file after resolving its name conflict, including replacement credit.
     setProgress({ done: 0, total: 1 })
     const report = await uploadAll(
       source,

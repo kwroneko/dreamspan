@@ -1,5 +1,5 @@
 // The Files quota in the file manager (spec/FILES-AND-ENVIRONMENT.md §1.2): the usage line under
-// the toolbar, and the check before an upload that it fits in the room left.
+// the toolbar and the message for a batch stopped by the server's quota check.
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { FilesUsage } from "@dreamspan/shared/filesQuotaApi.ts"
 
@@ -22,9 +22,3 @@ export const noRoomMessage = (needed: number, free: number, count: number) =>
   `${count === 1 ? "This file needs" : "These files need"} ${formatByteSize(needed)}; ${
     free === 0 ? "nothing" : formatByteSize(free)
   } is free.`
-
-/** Null when `needed` bytes fit, else the message saying they don't. */
-export const roomProblem = (needed: number, count: number, usage: Usage) => {
-  const free = freeBytes(usage)
-  return needed > free ? noRoomMessage(needed, free, count) : null
-}

@@ -6,7 +6,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type Bin, toBinItem } from "./bin.ts"
-import { NotFound, WriteOps } from "./ops.ts"
+import { DeletedChatItem, NotFound, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
 export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinLimits) =>
@@ -21,6 +21,15 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
         return toBinItem(yield* bin.loadItem(userId, itemId))
       }).pipe(transaction(sql, operation))
 
+    const deletingChat = <E, R>(operation: string, userId: UserId, del: Effect.Effect<string, E, R>) =>
+      Effect.gen(function* () {
+        const itemId = yield* del
+        const workshops = yield* bin.deletedWorkshops(itemId)
+        yield* bin.evictDeleted(userId, itemId)
+        const item = toBinItem(yield* bin.loadItem(userId, itemId))
+        return new DeletedChatItem({ ...item, workshops })
+      }).pipe(transaction(sql, operation))
+
     const handlers = {
       ChangeBinLimit: ({ userId, key, value }) =>
         Effect.gen(function* () {
@@ -29,8 +38,8 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
           return limits
         }).pipe(transaction(sql, "ChangeBinLimit")),
       DeleteChatGroup: ({ userId, chatId, forkId, expectedForkIds, title }) =>
-        deleting("DeleteChatGroup", userId, bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title)),
-      DeleteChat: ({ userId, chatId }) => deleting("DeleteChat", userId, bin.deleteChat(userId, chatId)),
+        deletingChat("DeleteChatGroup", userId, bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title)),
+      DeleteChat: ({ userId, chatId }) => deletingChat("DeleteChat", userId, bin.deleteChat(userId, chatId)),
       DeleteMessage: ({ userId, slotId, forkId }) =>
         deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId, forkId)),
       DeleteMessages: ({ userId, forkId, slotIds }) =>
@@ -40,7 +49,7 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
           const rows = yield* bin.loadItems(userId, itemIds)
           return rows.map(toBinItem)
         }).pipe(transaction(sql, "DeleteMessages")),
-      DeleteFork: ({ userId, forkId }) => deleting("DeleteFork", userId, bin.deleteFork(userId, forkId)),
+      DeleteFork: ({ userId, forkId }) => deletingChat("DeleteFork", userId, bin.deleteFork(userId, forkId)),
       DeleteVersion: ({ userId, versionId, forkId }) =>
         deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId, forkId)),
       DeleteEntity: ({ userId, entityId }) => deleting("DeleteEntity", userId, bin.deleteEntity(userId, entityId)),
