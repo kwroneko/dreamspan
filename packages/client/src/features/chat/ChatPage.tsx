@@ -246,6 +246,9 @@ export function MessageList({
       follow.stuck = on
       if (on) scrollbarNeedsEnd.current = false
       instance.options.scrollEndThreshold = on ? EXACT_END_PX : -1
+      // The threshold governs future follow. TanStack Virtual has no cancellation API
+      // for an end scroll already reconciling by row index.
+      if (!on && instance["scrollState"]?.align === "end") instance["scrollState"] = null
     },
     [follow]
   )

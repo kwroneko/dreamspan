@@ -1,7 +1,7 @@
 // The development probe from review-suitegreen5: a short history clamps the initial
 // estimate, and correcting that offset must not flush React during its layout effect.
 import { resolve } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { SendResult } from "@dreamspan/shared/chatApi.ts"
@@ -62,6 +62,42 @@ test("development scroll synchronization does not emit lifecycle errors", async 
   }
 })
 
+const openHistory = async (page: Page) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const { chat, anchor, lastSlot } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Native scroll ordering" })
+      yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+      let parent: SlotId | null = null
+      const slots: SlotId[] = []
+      for (let n = 0; n < 80; n++) {
+        const sent: SendResult = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: parent,
+          branch: false,
+          content: `Message ${n + 1}. ` + "The synthetic road follows the harbor. ".repeat(12)
+        })
+        if (sent._tag !== "Posted") throw new Error("queued")
+        parent = sent.entry.slotId
+        slots.push(sent.entry.slotId)
+      }
+      return { chat, anchor: slots[20]!, lastSlot: parent }
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const list = page.getByTestId("messages")
+  await expect(list.locator(`article[data-slot="${lastSlot}"]`)).toBeInViewport()
+  await expect(page.getByText("No model chosen", { exact: true })).toBeVisible()
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  })
+  await expect
+    .poll(() => list.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+    .toBeLessThanOrEqual(1)
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  return { chat, anchor, list }
+}
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`preserves a wheel jump before its scroll event: ${width} ${theme}`, async ({ page }) => {
@@ -73,47 +109,24 @@ for (const width of [1440, 390])
         document.addEventListener(
           "scroll",
           (event) => {
-            const held = (window as unknown as { __holdMessageScroll?: boolean }).__holdMessageScroll
-            if (held && event.target instanceof HTMLElement && event.target.dataset.testid === "messages")
-              event.stopImmediatePropagation()
+            const list = event.target
+            if (!(list instanceof HTMLElement) || list.dataset.holdMessageScroll === undefined) return
+            // A later poll of scrollTop can miss zero once older messages are prepended.
+            if (list.scrollTop === 0) list.dataset.holdMessageScroll = "reached-top"
+            event.stopImmediatePropagation()
           },
           true
         )
       })
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      const { chat, anchor } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        Effect.gen(function* () {
-          const chat = yield* api.CreateChat({ title: "Native scroll ordering" })
-          yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
-          let parent: SlotId | null = null
-          const slots: SlotId[] = []
-          for (let n = 0; n < 80; n++) {
-            const sent: SendResult = yield* api.SendMessage({
-              chatId: chat.id,
-              parentSlotId: parent,
-              branch: false,
-              content: `Message ${n + 1}. ` + "The synthetic road follows the harbor. ".repeat(12)
-            })
-            if (sent._tag !== "Posted") throw new Error("queued")
-            parent = sent.entry.slotId
-            slots.push(sent.entry.slotId)
-          }
-          return { chat, anchor: slots[20]! }
-        })
-      )
-      await page.goto(`${server().url}/chats/${chat.id}`)
-      const list = page.getByTestId("messages")
-      await expect(list.locator("article").last()).toBeInViewport()
-      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+      const { chat, anchor, list } = await openHistory(page)
       await list.hover()
-      await page.evaluate(() => {
-        ;(window as unknown as { __holdMessageScroll: boolean }).__holdMessageScroll = true
-      })
+      await list.evaluate((node) => (node.dataset.holdMessageScroll = "waiting"))
       await page.mouse.wheel(0, -100_000)
-      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(0)
+      await expect(list).toHaveAttribute("data-hold-message-scroll", "reached-top")
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.RenameChat({ chatId: chat.id, name: "Updated during the native jump" })
       )
+      await expect(page.getByRole("heading", { name: "Updated during the native jump" })).toBeVisible()
       const row = page.locator(`article[data-slot="${anchor}"]`)
       await expect(row).toBeInViewport()
       await expect
@@ -126,6 +139,54 @@ for (const width of [1440, 390])
         )
         .toBeLessThanOrEqual(2)
     })
+
+for (const width of [1440, 390])
+  test(`a pending end scroll yields to the wheel at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const { list } = await openHistory(page)
+    await list.hover()
+
+    // Shrinking the viewport triggers an end scroll. Hold the reconciliation frame
+    // scheduled by that scroll so we can change its target after a real wheel turn.
+    await list.evaluate((node) => {
+      const originalStyle = node.style.cssText
+      const scrollTo = node.scrollTo
+      const requestFrame = window.requestAnimationFrame
+      node.scrollTo = (...args: unknown[]) => {
+        Reflect.apply(scrollTo, node, args)
+        if ((args[0] as ScrollToOptions | undefined)?.behavior !== "auto") return
+        node.scrollTo = scrollTo
+        window.requestAnimationFrame = (callback) => {
+          window.requestAnimationFrame = requestFrame
+          return requestAnimationFrame(() => {
+            node.addEventListener("resume-end-scroll", () => requestAnimationFrame(callback), { once: true })
+            node.dataset.endScroll = "pending"
+          })
+        }
+      }
+      node.addEventListener("restore-list-height", () => (node.style.cssText = originalStyle), { once: true })
+      node.style.height = `${node.clientHeight - 160}px`
+      node.style.flex = "none"
+    })
+    await expect(list).toHaveAttribute("data-end-scroll", "pending")
+
+    const fromEnd = () => list.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)
+    await page.mouse.wheel(0, -400)
+    await expect.poll(fromEnd).toBeGreaterThan(390)
+    await list.dispatchEvent("restore-list-height")
+    const offset = await list.evaluate(async (node) => {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+      return node.scrollTop
+    })
+    expect(await fromEnd()).toBeGreaterThan(200)
+
+    await list.dispatchEvent("resume-end-scroll")
+    const after = await list.evaluate(async (node) => {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+      return node.scrollTop
+    })
+    expect(after).toBe(offset)
+  })
 
 for (const width of [1440, 390])
   test(`keeps keyboard focus visible after shrinking the chat viewport at ${width}px`, async ({ page }) => {
