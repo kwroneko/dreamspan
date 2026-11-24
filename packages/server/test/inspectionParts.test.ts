@@ -170,6 +170,22 @@ it("finds a piece whose only difference is the carriage returns the message lost
   })
 })
 
+it("attributes normalized history before an identical preset prompt with carriage returns", () => {
+  const normalized = "The rain.\nThe river."
+  const original = normalized.replaceAll("\n", "\r\n")
+  const content = `${normalized}\n\n${original}`
+  assert.deepStrictEqual(
+    partsOf(content, [
+      { source: 0, text: original },
+      { source: 1, text: original }
+    ]),
+    [
+      { start: 0, end: normalized.length, source: 0 },
+      { start: normalized.length + 2, end: content.length, source: 1 }
+    ]
+  )
+})
+
 it("still marks a piece a prompt regex script changed as rewritten, CRLF or not", () => {
   const changed = sent.replace("Sit, Tobin.", "Sit down, Tobin.")
   assert.deepStrictEqual(locate(changed, [{ source: 0, text: greeting }]).parts, [
