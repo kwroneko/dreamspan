@@ -61,6 +61,11 @@ describe("libraryView", () => {
     expect(JSON.parse(element.split("\n")[2]!).description).toBe(description)
   })
 
+  it("lists the group-only greetings in a large card reference", () => {
+    const doc = { ...card(""), group_only_greetings: ["Hello everyone. ".repeat(3_000)] }
+    expect(attachedElement(item(doc), count, 8_000)).toContain("group_only_greetings: 1 (12,000 tokens)")
+  })
+
   it("summarizes lorebook entries and preset prompts in order", () => {
     const book = { entries: [{ uid: 3, comment: "Harbor", keys: ["dock"], content: "Ships.", enabled: true }] }
     expect(summaryLines("lorebook", book, count)).toEqual(["1 entries", "- Harbor (uid 3; keys: dock): 2 tokens"])

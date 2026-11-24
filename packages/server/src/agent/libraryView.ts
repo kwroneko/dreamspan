@@ -73,10 +73,12 @@ export const summaryLines = (kind: LibraryKind, doc: Doc, count: CountText): Rea
       return `${field}: ${number(tokens(count, value))} tokens, ${number(lines(value))} lines`
     })
     const greetings = list(doc.alternate_greetings).map(text)
+    const groupGreetings = list(doc.group_only_greetings).map(text)
     const book = doc.character_book === undefined ? null : record(doc.character_book)
     return [
       ...fields,
       `alternate_greetings: ${greetings.length} (${number(greetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
+      `group_only_greetings: ${groupGreetings.length} (${number(groupGreetings.reduce((sum, g) => sum + tokens(count, g), 0))} tokens)`,
       ...(book === null
         ? []
         : [
