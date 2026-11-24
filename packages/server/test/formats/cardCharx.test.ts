@@ -28,7 +28,8 @@ const charxCard = () => {
 const charxFiles = (): Array<ZipFile> => [
   { name: "card.json", data: json(charxCard()) },
   { name: "assets/icon/images/main.png", data: png(), method: 0 },
-  { name: "assets/icon/images/side.png", data: bytes("side") },
+  { name: "assets/icon/images/side.png", data: bytes("side") }, // A non-image with an image extension.
+  { name: "assets/emotion/images/happy.png", data: png() },
   { name: "assets/background/images/beach.webp", data: bytes("beach") },
   { name: "assets/other/audio/theme.mp3", data: bytes("theme") },
   { name: "x_meta/1.json", data: bytes("{}") }
@@ -40,13 +41,11 @@ describe("CHARX card import", () => {
     expect(result.report.format).toBe("card-v3-charx")
     expect(result.card.name).toBe("Moss")
     expect(result.avatar).toEqual({ uri: "embeded://assets/icon/images/main.png", ext: "png", bytes: png() })
-    expect(result.assets.map((a) => [a.uri, a.ext, Buffer.from(a.bytes).toString()])).toEqual([
-      ["embeded://assets/icon/images/side.png", "png", "side"],
-      ["embeded://assets/background/images/beach.webp", "webp", "beach"]
-    ])
+    expect(result.assets).toEqual([{ uri: "embeded://assets/emotion/images/happy.png", ext: "png", bytes: png() }])
     expect(result.report.issues.map((issue) => [issue.code, issue.path])).toEqual([
+      ["charx.asset_skipped", ["data", "assets", 0]],
+      ["charx.asset_skipped", ["data", "assets", 2]],
       ["charx.asset_skipped", ["data", "assets", 3]],
-      ["charx.missing_asset", ["data", "assets", 4]],
       ["charx.unused_files", undefined]
     ])
   })
