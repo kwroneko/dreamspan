@@ -138,5 +138,5 @@ export const groupByReply = (rows: ReadonlyArray<RolloutEffect>): ReadonlyArray<
   }))
 }
 
-/** "Undo all of this reply" is offered while any of its changes can still be undone. */
+/** "Revert all of this reply" is offered while any of its changes can still be undone. */
 export const undoAllOffered = (group: ReplyChanges) => group.effects.some(undoable)

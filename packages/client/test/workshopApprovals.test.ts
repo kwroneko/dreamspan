@@ -87,7 +87,7 @@ describe("a workshop change", () => {
     expect([effect({}), undone, fixed].map(undoable)).toEqual([true, false, false])
     expect(outstanding([effect({}), undone, fixed]).map((e) => e.seq)).toEqual([0, 2])
     expect(undoHint(effect({ kind: "library.create" }))).toMatch(/bin/)
-    expect(undoHint(effect({}))).toMatch(/as it was before/)
+    expect(undoHint(effect({}))).toMatch(/keeping edits made since/)
   })
 
   it("offers Open only while the item is out of the bin", () => {

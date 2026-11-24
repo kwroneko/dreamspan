@@ -1832,7 +1832,7 @@ const WriteOpsChatOwn = RpcGroup.make(
 
   Rpc.make("UndoThreads", {
     payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -3325,6 +3325,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       reversalId: Schema.String,
+      effect: Schema.optionalKey(Schema.Struct(EffectKey)),
       message: Schema.optionalKey(Schema.String),
       ...ReversalOptions
     },
@@ -6629,11 +6630,12 @@ const ReadOpsOwn = RpcGroup.make(
   }),
   /** One revert of the account's, with the changes it covers (db/changeReversals.ts): a card file's Redo. */
   Rpc.make("FileReversal", {
-    payload: { userId: UserId, reversalId: Schema.String },
+    payload: { userId: UserId, reversalId: Schema.String, effect: Schema.optionalKey(Schema.Struct(EffectKey)) },
     success: Schema.Struct({
       id: Schema.String,
       targetKind: Schema.Literals(["entity", "file"]),
       targetId: Schema.String,
+      host: Schema.Boolean,
       label: Schema.String,
       fields: Schema.Array(Schema.String),
       before: Schema.Record(Schema.String, Schema.Unknown),
@@ -6644,12 +6646,13 @@ const ReadOpsOwn = RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** A workshop's reverts, redos and binned creations since its last finished reply: the tail line's. */
+  /** A workshop's reverts, redos and binned creations still unseen by a dispatched request. */
   Rpc.make("ChatReversalsSince", {
     payload: { userId: UserId, chatId: Schema.String },
     success: Schema.Struct({
       reversals: Schema.Array(
         Schema.Struct({
+          id: Schema.String,
           action: Schema.Literals(["revert", "redo"]),
           targetKind: Schema.Literals(["entity", "file"]),
           kind: Schema.String,
@@ -6657,7 +6660,7 @@ const ReadOpsOwn = RpcGroup.make(
           fields: Schema.Array(Schema.String)
         })
       ),
-      binned: Schema.Array(Schema.String)
+      binned: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
     }),
     error: StorageError
   }),

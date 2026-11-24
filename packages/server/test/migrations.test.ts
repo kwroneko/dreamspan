@@ -180,6 +180,7 @@ describe("0002_files", () => {
           "card_files",
           "workshop_import_media_quota",
           "change_reversals",
+          "bin_reply_edits",
           "library_classes"
         ]
       )
@@ -535,6 +536,7 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0023_card_files",
       "0024_workshop_import_media_quota",
       "0025_change_reversals",
+      "0026_bin_reply_edits",
       "0027_library_classes"
     ])
   }).pipe(Effect.provide(layer()))

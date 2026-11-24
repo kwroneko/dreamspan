@@ -1,7 +1,7 @@
 // The instance's outbound network settings, for admins (spec/PROVIDERS.md §6.2). The
 // proxy is shown only as the server returns it: scheme, host and port.
 import type { NetworkSettings } from "@dreamspan/shared/api.ts"
-import { type FormEvent, useId, useState } from "react"
+import { type FormEvent, useId, useRef, useState } from "react"
 import { useDurableForm } from "./editor/durable.tsx"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { routes } from "../routes.tsx"
@@ -34,6 +34,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
   // Kept as typed (editor/durable.tsx); the proxy URL is a secret and stays in the form only.
   const initial = draftOf(settings)
   const form = useDurableForm<Draft>("network", "Settings", initial)
+  const proxySecrets = useRef(new Map<string, string>())
   const [saved, setSaved] = useState(false)
   const values = form.values
   const changed = JSON.stringify(values) !== JSON.stringify(initial)
@@ -44,6 +45,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const rememberedProxy = proxySecrets.current.get("proxyUrl")
     const proxyUrl = formText(event.currentTarget, "proxyUrl").trim()
     const bypass = values.bypass
       .split("\n")
@@ -63,6 +65,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
       return result.ok
     })
     if (ok) {
+      if (proxySecrets.current.get("proxyUrl") === rememberedProxy) proxySecrets.current.delete("proxyUrl")
       setSaved(true)
     }
   }
@@ -102,7 +105,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         />
         {values.proxy === "replace" && (
           <Field label="Proxy URL" about="HTTP, HTTPS or SOCKS5, for example socks5://user:password@vpn:1080.">
-            <SecretInput name="proxyUrl" masked={false} />
+            <SecretInput name="proxyUrl" masked={false} memory={proxySecrets} />
           </Field>
         )}
       </Fieldset>
@@ -140,9 +143,11 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
           <Button
             hint="Discards unsaved network changes."
             variant="ghost"
-            onClick={() => {
-              void form.discard()
+            onClick={async () => {
+              const rememberedProxy = proxySecrets.current.get("proxyUrl")
               action.clearError()
+              if ((await form.discard()) && proxySecrets.current.get("proxyUrl") === rememberedProxy)
+                proxySecrets.current.delete("proxyUrl")
             }}
           >
             Discard changes

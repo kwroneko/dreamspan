@@ -443,7 +443,7 @@ export const layer = Layer.effect(
             ? skillMarkerInput(execution, chat.kind, yield* offerableTools({ reader, userId }, tools))
             : undefined
           // A workshop turn's tail lines (agent/turnNotes.ts), such as its working folder.
-          const turnNotes = plan.assembly?.workshop
+          const notes = plan.assembly?.workshop
             ? (yield* Effect.forEach(execution.turnNotes.list(), (note) =>
                 note
                   .line({
@@ -456,8 +456,12 @@ export const layer = Layer.effect(
                     offered: tools.map((t) => t.id)
                   })
                   .pipe(Effect.orElseSucceed(() => null))
-              )).filter((line): line is string => typeof line === "string" && line.trim() !== "")
+              )).flatMap((line) => {
+                const note = typeof line === "string" ? { text: line, events: [] } : line
+                return note?.text.trim() ? [note] : []
+              })
             : []
+          const turnNotes = notes.map((note) => note.text)
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
@@ -660,18 +664,19 @@ export const layer = Layer.effect(
               // only on a turn after they changed: with the new user turn, after the cached prefix.
               // Only the lines that are new are told, so one line's change doesn't repeat the rest.
               const told = prior.snapshot.agentAssembly?.turnNotes ?? []
-              const notes = (snapshot.agentAssembly?.turnNotes ?? []).filter((line) => !told.includes(line))
-              if (notes.length) {
+              const newNotes = notes.filter((note) => note.events.length > 0 || !told.includes(note.text))
+              if (newNotes.length) {
+                const text = newNotes.map((note) => note.text).join("\n")
                 const last = additions.at(-1)
                 if (last?.role === "rpUser")
                   additions[additions.length - 1] = {
                     ...last,
-                    message: { ...last.message, content: `${last.message.content}\n${notes.join("\n")}` }
+                    message: { ...last.message, content: `${last.message.content}\n${text}` }
                   }
                 else
                   additions.push({
                     role: "rpUser",
-                    message: { role: "user", content: notes.join("\n") },
+                    message: { role: "user", content: text },
                     timestamp: Date.now()
                   })
               }
@@ -787,6 +792,16 @@ export const layer = Layer.effect(
               class: "no_model",
               message: "No model is chosen: bind one to this chat, or choose a default model."
             })
+          }
+          if (agentic && plan.assembly?.workshop) {
+            // A carried turn adds its notes to the new suffix. A rebuilt turn sends the assembled
+            // notes whose pieces survived into the request. Even an empty list tracks dispatch.
+            const turnEvents = notes.flatMap((note, i) =>
+              seed || snapshot.pieces.some((piece) => piece.id === `workshop:turn-note:${i}` && piece.messages.length)
+                ? note.events
+                : []
+            )
+            snapshot = { ...snapshot, turnEvents }
           }
           const rolloutId = uuidv7()
           if (agentic) {

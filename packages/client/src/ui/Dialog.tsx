@@ -94,8 +94,8 @@ export function Dialog({
    * form laid out in columns. On a narrow screen it's the usual full-width dialog.
    */
   size?: "normal" | "wide"
-  /** Top placement keeps inline expansions from moving their trigger. */
-  placement?: "center" | "top"
+  /** Top placement keeps expansions below existing content from moving it. */
+  placement?: "center" | "top" | "top-on-phone"
   /** Keep the scrollbar inside the padding, with equal visible content insets. */
   insetScroll?: boolean
   /** Override focus restoration when an action navigates outside the dialog. */
@@ -119,6 +119,12 @@ export function Dialog({
       }
     : undefined
   const away = useAway()
+  const placementClass =
+    placement === "top"
+      ? "top-4! translate-y-0! [scrollbar-gutter:stable]"
+      : placement === "top-on-phone"
+        ? "max-sm:top-4 max-sm:translate-y-0"
+        : ""
   const focusOnOpen = () => {
     if (initialFocus) return initialFocus() ?? true
     const root = content.current
@@ -158,7 +164,7 @@ export function Dialog({
           data-dialog-on-column={column ? "" : undefined}
           finalFocus={finalFocus}
           initialFocus={focusOnOpen}
-          className={`${popup} ${size === "wide" ? "sm:max-w-[min(94vw,1500px)] sm:max-h-[calc(100dvh-3rem)]" : wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}
+          className={`${popup} ${size === "wide" ? "sm:max-w-[min(94vw,1500px)] sm:max-h-[calc(100dvh-3rem)]" : wide ? "sm:max-w-5xl" : ""} ${placementClass} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}
         >
           {insetScroll ? (
             <div className="-my-5 -mr-5 min-h-0 overflow-y-auto py-5 [scrollbar-gutter:stable]" data-dialog-scroll>

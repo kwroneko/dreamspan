@@ -344,4 +344,56 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  it.live("a side workshop's first send refuses a persona its story took meanwhile (rev-dfu1 #6)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const { entityId: wren } = yield* (yield* Writer).CreateEntity({
+          userId,
+          kind: "card",
+          label: "Wren",
+          subtitle: "",
+          doc: cardDoc("Wren", { first_mes: "Wren sharpens a quill." }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const story = yield* api.StartChat({
+          cards: [quill],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Quill writes by the window.", speakerEntityId: null },
+          title: "Window"
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `side:${story.chat.id}:` })
+        // Wren isn't in the story yet: the workshop may play Wren.
+        yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId: draft.currentForkId!,
+          pending: true,
+          change: { _tag: "Persona", entityId: wren as EntityId }
+        })
+        // Another tab brings Wren into the story.
+        const storyChat = yield* api.GetChat({ chatId: story.chat.id })
+        yield* api.ChangeCast({
+          chatId: story.chat.id,
+          slotId: storyChat.activeLeafSlotId,
+          forkId: storyChat.currentForkId!,
+          change: { _tag: "Join", entityId: wren as EntityId }
+        })
+        const refused = yield* api
+          .SendMessage({
+            chatId: draft.id,
+            parentSlotId: (yield* api.GetChat({ chatId: draft.id })).activeLeafSlotId!,
+            branch: false,
+            content: "Help me with the window scene."
+          })
+          .pipe(Effect.flip)
+        assert.deepInclude(refused, { _tag: "NotFound", entity: "story-persona" })
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+      })
+    )
+  )
 })

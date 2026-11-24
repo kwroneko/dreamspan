@@ -6,10 +6,12 @@
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { chatCast, chatStateAt } from "./cards.ts"
+import { personaInStory } from "./workshopDefaults.ts"
 
 /**
  * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
@@ -23,6 +25,28 @@ export const titleFor = (names: ReadonlyArray<string>, at: number) =>
 
 /** How long a swept pending chat's late saves are still filed. */
 const SWEPT_KEPT_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * A reply that finished empty and was removed (chatSetupWrites.ts FinishGeneration
+ * `discardEmpty`): its slot and version, so a save of a swipe or an edit of it that comes after
+ * (its first save, or a browser's retry) is filed to recovered texts rather than refused. The
+ * receipt is a row of `swept_pending_chats` keyed `dropped-reply:<id>`, kept as long as a swept
+ * chat's, so no schema change: ids are never chat ids, and only `droppedReplyLabel` reads these.
+ */
+const DROPPED_REPLY = "dropped-reply:"
+const DROPPED_REPLY_LABEL = "Empty reply"
+export const noteDroppedReply = (sql: SqlClient.SqlClient, userId: UserId, ids: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const now = Date.now()
+    for (const id of ids)
+      yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
+        VALUES (${DROPPED_REPLY + id}, ${userId}, ${DROPPED_REPLY_LABEL}, ${now})`
+  })
+/** The label a late save to the removed reply's `targetId` (a slot or a version) is filed under. */
+export const droppedReplyLabel = (sql: SqlClient.SqlClient, userId: UserId, targetId: string) =>
+  sql<{ label: string }>`SELECT label FROM swept_pending_chats
+    WHERE chat_id = ${DROPPED_REPLY + targetId} AND user_id = ${userId}
+      AND swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(Effect.map(([row]) => row?.label ?? null))
 
 export interface PendingRow {
   readonly id: ChatId
@@ -61,6 +85,16 @@ export const commitPendingChat = (sql: SqlClient.SqlClient, chatId: string, at: 
   Effect.gen(function* () {
     const chat = yield* pendingRow(sql, chatId)
     if (chat === null) return false
+    // A workshop beside a story never starts as the story's persona or one of its cards, which
+    // the story may have taken since the persona was picked (rev-dfu1 #6): refused, the
+    // composer kept, so another persona can be picked and the message sent again.
+    if ((chat.draft_for ?? "").startsWith("side:")) {
+      const story = chat.draft_for!.split(":")[1]!
+      const state = yield* chatStateAt(sql, chat.id, chat.active_leaf_slot_id)
+      for (const persona of state.playedByMe)
+        if (yield* personaInStory(sql, chat.owner_user_id, story, persona))
+          return yield* new NotFound({ entity: "story-persona", id: persona })
+    }
     // A group's new chat keeps the group's name, a workshop its own ("Workshop", or the one given).
     const retitle =
       chat.title_source === "auto" &&
@@ -168,7 +202,10 @@ export const fileLegacyWorkshopDrafts = (sql: SqlClient.SqlClient, bin: Pick<Bin
           new DraftKey({ targetKind: "user_field", targetId: row.target_id, field: row.field }),
           lost,
           "discard",
-          yield* legacyWorkshopLabel(sql, row.user_id, row.target_id)
+          yield* legacyWorkshopLabel(sql, row.user_id, row.target_id),
+          // Each text is there to see after the upgrade, however small the section's limit:
+          // their drafts go now, so an eviction here would lose them (rev-dfu1 #2).
+          { evict: false }
         )
       yield* sql`DELETE FROM drafts WHERE id = ${row.id}`
     }

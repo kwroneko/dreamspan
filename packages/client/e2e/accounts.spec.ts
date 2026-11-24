@@ -66,84 +66,102 @@ test.describe("with an admin password", () => {
   })
 
   // A form dialog's save from a tab a step behind is refused (owner, 2026-11-24): that tab shows
-  // the current form and "Use this tab's version" first in its Save row, Cancel and Save in place.
-  test("a stale New user tab is refused and brings its own version back", async ({ page }, info) => {
-    const other = await page.context().newPage()
-    await other.setViewportSize({ width: 1920, height: 1080 })
-    await other.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
-    let hold = false
-    const held: Array<() => void> = []
-    await other.routeWebSocket(/\/rpc$/, (socket) => {
-      const upstream = socket.connectToServer()
-      socket.onMessage((data) => {
-        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
-        if (hold && request?.tag === "SaveUserDraft") held.push(() => upstream.send(data))
-        else upstream.send(data)
+  // the current form and a restore action, with Cancel and Save in place.
+  for (const { width, height } of [
+    { width: 1920, height: 1080 },
+    { width: 390, height: 900 }
+  ]) {
+    test(`a stale New user tab is refused and brings its own version back at ${width}px`, async ({ page }, info) => {
+      const other = await page.context().newPage()
+      await other.setViewportSize({ width, height })
+      await other.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })
+      let hold = false
+      const held: Array<() => void> = []
+      await other.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
+          if (hold && request?.tag === "SaveUserDraft") held.push(() => upstream.send(data))
+          else upstream.send(data)
+        })
+        upstream.onMessage((data) => {
+          if (hold && typeof data === "string" && data.includes('"UserDraftChanged"')) return
+          socket.send(data)
+        })
       })
-      upstream.onMessage((data) => {
-        if (hold && typeof data === "string" && data.includes('"UserDraftChanged"')) return
-        socket.send(data)
+      const asked = new Set<string>()
+      let answered = 0
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+          if (request?.tag === "SaveUserDraft" && request.id) asked.add(request.id)
+          upstream.send(data)
+        })
+        upstream.onMessage((data) => {
+          const reply = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+          if (reply?._tag === "Exit" && reply.requestId && asked.has(reply.requestId)) answered++
+          socket.send(data)
+        })
       })
+      const dialogs = []
+      for (const tab of [page, other]) {
+        await apiLogin(tab.request, server(), ADMIN.handle, ADMIN.password)
+        await tab.goto(`${server().url}/settings/users`)
+        await tab.getByRole("button", { name: "New user" }).click()
+        dialogs.push(tab.getByRole("dialog", { name: "New user" }))
+      }
+      const [mine, theirs] = dialogs as [ReturnType<typeof page.getByRole>, ReturnType<typeof page.getByRole>]
+      const handle = (dialog: typeof mine) => dialog.getByLabel("Handle", { exact: true })
+      const name = (dialog: typeof mine) => dialog.getByLabel("Display name")
+      const use = theirs.getByRole("button", { name: "Use this tab's version", exact: true })
+      const handleText = `dora-${width}`
+      const displayName = `Dora from the other tab at ${width}px`
+      await handle(mine).fill(handleText)
+      await expect(handle(theirs)).toHaveValue(handleText)
+      hold = true
+      await name(theirs).fill(displayName)
+      await expect.poll(() => held.length).toBeGreaterThan(0)
+      const answeredBefore = answered
+      await handle(mine).fill(`${handleText}-a`)
+      await expect.poll(() => answered).toBeGreaterThan(answeredBefore)
+      const cancel = theirs.getByRole("button", { name: "Cancel", exact: true })
+      const create = theirs.getByRole("button", { name: "Create user", exact: true })
+      await expect(use).toHaveCount(0)
+      const cancelBefore = (await cancel.boundingBox())!
+      const createBefore = (await create.boundingBox())!
+      const handleBefore = (await handle(theirs).boundingBox())!
+      hold = false
+      for (const send of held.splice(0)) send()
+      await expect(use).toBeVisible()
+      await expect(handle(theirs)).toHaveValue(`${handleText}-a`)
+      await expect(name(theirs)).not.toHaveValue(displayName)
+      // Cancel and Create user stay where they were.
+      expect(await cancel.boundingBox()).toEqual(cancelBefore)
+      expect(await create.boundingBox()).toEqual(createBefore)
+      expect(await handle(theirs).boundingBox()).toEqual(handleBefore)
+      if (width === 390) {
+        const restored = (await use.boundingBox())!
+        expect(restored.y).toBeGreaterThan(cancelBefore.y + cancelBefore.height)
+        expect(restored.y).toBeGreaterThan(createBefore.y + createBefore.height)
+      }
+      await use.hover()
+      await expect(other.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+        "Brings back this tab's changes"
+      )
+      const screenshot = `new-user-refused-${width}-dark.png`
+      await other.screenshot({ path: info.outputPath(screenshot) })
+      if (process.env.SCREENSHOT_DIR) await other.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${screenshot}` })
+      await use.click()
+      await expect(use).toHaveCount(0)
+      await expect(handle(theirs)).toHaveValue(handleText)
+      await expect(name(theirs)).toHaveValue(displayName)
+      await expect(handle(mine)).toHaveValue(handleText)
+      await expect(name(mine)).toHaveValue(displayName)
+      await mine.getByRole("button", { name: "Cancel", exact: true }).click()
+      await other.close()
     })
-    const asked = new Set<string>()
-    let answered = 0
-    await page.routeWebSocket(/\/rpc$/, (socket) => {
-      const upstream = socket.connectToServer()
-      socket.onMessage((data) => {
-        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
-        if (request?.tag === "SaveUserDraft" && request.id) asked.add(request.id)
-        upstream.send(data)
-      })
-      upstream.onMessage((data) => {
-        const reply = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
-        if (reply?._tag === "Exit" && reply.requestId && asked.has(reply.requestId)) answered++
-        socket.send(data)
-      })
-    })
-    const dialogs = []
-    for (const tab of [page, other]) {
-      await apiLogin(tab.request, server(), ADMIN.handle, ADMIN.password)
-      await tab.goto(`${server().url}/settings/users`)
-      await tab.getByRole("button", { name: "New user" }).click()
-      dialogs.push(tab.getByRole("dialog", { name: "New user" }))
-    }
-    const [mine, theirs] = dialogs as [ReturnType<typeof page.getByRole>, ReturnType<typeof page.getByRole>]
-    const handle = (dialog: typeof mine) => dialog.getByLabel("Handle", { exact: true })
-    const name = (dialog: typeof mine) => dialog.getByLabel("Display name")
-    const use = theirs.getByRole("button", { name: "Use this tab's version", exact: true })
-    await handle(mine).fill("dora")
-    await expect(handle(theirs)).toHaveValue("dora")
-    hold = true
-    await name(theirs).fill("Dora from the other tab")
-    await expect.poll(() => held.length).toBeGreaterThan(0)
-    const answeredBefore = answered
-    await handle(mine).fill("dora-a")
-    await expect.poll(() => answered).toBeGreaterThan(answeredBefore)
-    const cancel = theirs.getByRole("button", { name: "Cancel", exact: true })
-    const before = (await cancel.boundingBox())!
-    hold = false
-    for (const send of held.splice(0)) send()
-    await expect(use).toBeVisible()
-    await expect(handle(theirs)).toHaveValue("dora-a")
-    await expect(name(theirs)).toHaveValue("")
-    // Cancel and Create user stay where they were.
-    expect(await cancel.boundingBox()).toEqual(before)
-    await use.hover()
-    await expect(other.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
-      "Brings back this tab's changes"
-    )
-    await other.screenshot({ path: info.outputPath("new-user-refused-1920-dark.png") })
-    if (process.env.SCREENSHOT_DIR)
-      await other.screenshot({ path: `${process.env.SCREENSHOT_DIR}/new-user-refused-1920-dark.png` })
-    await use.click()
-    await expect(use).toHaveCount(0)
-    await expect(handle(theirs)).toHaveValue("dora")
-    await expect(name(theirs)).toHaveValue("Dora from the other tab")
-    await expect(handle(mine)).toHaveValue("dora")
-    await expect(name(mine)).toHaveValue("Dora from the other tab")
-    await mine.getByRole("button", { name: "Cancel", exact: true }).click()
-    await other.close()
-  })
+  }
 })
 
 test.describe("without passwords", () => {

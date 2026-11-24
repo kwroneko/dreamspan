@@ -1,4 +1,4 @@
-import { safeAgentDocument } from "./agentDocuments.ts"
+import { guarded, validateAgentDocument } from "./agentDocuments.ts"
 import { makeAgentHistoryWriteHandlers } from "./agentHistoryWrites.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
@@ -19,14 +19,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@dreamspan/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@dreamspan/shared/libraryImport.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import {
-  hasSchema,
-  keepsRegexApproval,
-  withHtmlApprovals,
-  protectedChanges,
-  validateDoc,
-  withoutGrantedAgentEdits
-} from "@dreamspan/shared/editing.ts"
+import { hasSchema, protectedChanges, validateDoc } from "@dreamspan/shared/editing.ts"
 import { InvalidDocument } from "@dreamspan/shared/editorApi.ts"
 import { replacementDoc } from "@dreamspan/shared/cardReplace.ts"
 import { DraftKey, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
@@ -151,15 +144,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
      * §4.1a; @dreamspan/shared/editing.ts).
      */
     const withoutGrants = (ref: RefRow, doc: Doc) =>
-      Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => {
-        const granted = withoutGrantedAgentEdits(ref.kind, ours, doc)
-        if (ref.kind !== "preset" && ref.kind !== "card") return granted
-        // Panel permissions stay the head's: a merge neither grants nor takes them.
-        const next = withHtmlApprovals(ours, granted)
-        return next.regex_approved === true && !keepsRegexApproval(ours, next)
-          ? { ...next, regex_approved: false }
-          : next
-      })
+      Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => guarded(ref.kind, ours, doc))
 
     /**
      * Media, cards and shared notes a document names that aren't the user's, as NotFound: a
@@ -704,10 +689,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           const ref = yield* lib.ownedRef(userId, refId)
           yield* checkRowVersion(ref, expectedRowVersion)
           if (agentOriginRef !== undefined) {
-            doc = yield* withoutGrants(ref, doc)
-            const valid = validateDoc(ref.kind, doc)
+            const valid = validateAgentDocument(ref.kind, yield* lib.loadDoc(ref.head_revision_id), doc)
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            doc = safeAgentDocument(ref.kind, yield* lib.loadDoc(ref.head_revision_id), valid.doc)
+            doc = valid.doc
             yield* checkReferences(userId, doc)
             if (ref.kind === "preset")
               for (const book of (doc.lorebooks ?? []) as ReadonlyArray<{ id: string }>) {

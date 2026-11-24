@@ -330,7 +330,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           Parameters<typeof toRolloutEffect>[0]
         >`SELECT * FROM rollout_effects WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
         if (!row) return yield* new NotFound({ entity: "rollout effect", id: input.toolCallId })
-        return toRolloutEffect(row)
+        return (yield* withReversions(sql, [toRolloutEffect(row)]))[0]!
       }).pipe(query("RolloutEffectFor")),
     VersionEffects: ({ userId, versionId }) =>
       Effect.gen(function* () {

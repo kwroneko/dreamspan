@@ -12,7 +12,7 @@ import {
   type ReactNode
 } from "react"
 import { positionOf } from "./position.ts"
-import { imagesOnly, type MessageImages, type PathEntry } from "@dreamspan/shared/chat.ts"
+import { type ChatId, imagesOnly, type MessageImages, type PathEntry } from "@dreamspan/shared/chat.ts"
 import type { ImagesLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
@@ -67,15 +67,7 @@ import {
   queuedPreviews,
   type ChatSurfaceProps
 } from "./presentation.tsx"
-import {
-  adoptImages,
-  adoptImagesWhere,
-  dropImage,
-  isGroupCopyOf,
-  keepImage,
-  readImages,
-  type ImageDraftEntry
-} from "./imageDraft.ts"
+import { adoptImages, dropImage, keepImage, legacyGroupScope, readImages, type ImageDraftEntry } from "./imageDraft.ts"
 import { draftEntryOf } from "./chatStarted.ts"
 import { pendingChatCopy } from "../editor/backup.ts"
 import { pendingAttachments, PendingAttachmentsContext, type PendingAttachments } from "./pendingComposerControls.tsx"
@@ -764,12 +756,9 @@ function ImageScope({
   }
 
   const loading = attacher === "loading"
-  // A group's new chat adopts what its old page kept by its characters: its cast first.
-  const waitsForCast =
-    view.chat?.status === "pending" && draftEntryOf(session.chatId)?.startsWith("group:") === true && !view.cast
   useEffect(() => {
     // Uploads replay where they belong: wait until it's known whether files go to Files.
-    if (resolvedDraftId === null || loading || waitsForCast) return
+    if (resolvedDraftId === null || loading) return
     let live = true
     void enqueue(async () => {
       try {
@@ -777,12 +766,20 @@ function ImageScope({
         // pending-chat key, before new chats were pending chats) is this chat's now.
         const entry = view.chat?.status === "pending" ? draftEntryOf(session.chatId) : null
         if (entry?.startsWith("card:")) await adoptImages(`${user}:pending:${pendingChatCopy(entry.slice(5))}`, scope)
-        // The empty chat's page kept its own under "new"; a group's under its characters and
-        // name (`pending-group-chat:<sorted ids>:<name>`): those of this chat's characters.
+        // The empty chat's page kept its own under "new"; a group's under the group's characters
+        // and name (`legacyGroupScope`), read from the group as it is: that key only.
         if (entry === "empty") await adoptImages(`${user}:pending:${pendingChatCopy("new")}`, scope)
-        const cast = new Set<string>(view.cast?.participants ?? [])
-        if (entry?.startsWith("group:") && cast.size > 0)
-          await adoptImagesWhere((from) => isGroupCopyOf(`${user}:pending:`, from, cast), scope)
+        if (entry?.startsWith("group:")) {
+          const group = await session.call((client) => client("ListGroupChats", { chatId: entry.slice(6) as ChatId }))
+          if (group.ok)
+            await adoptImages(
+              legacyGroupScope(`${user}:pending:`, {
+                name: group.value.group.name,
+                members: group.value.group.members.map((member) => member.entityId)
+              }),
+              scope
+            )
+        }
         const stored = await readImages(scope)
         draftId.current = resolvedDraftId
         const remote = await session.call((client) =>
@@ -820,7 +817,7 @@ function ImageScope({
     }
     // The keyed provider owns one fork; opening it replays its durable upload queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedDraftId, loading, waitsForCast])
+  }, [resolvedDraftId, loading])
   /** Attaches files from this device, or (`paths`) files already in Files. */
   const add = (picked: File[], paths: ReadonlyArray<string> = []) => {
     if (!ready) {
@@ -1071,7 +1068,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
   )
   useLayoutEffect(() => {
     liveRef.current = {
-      add: (refIds) => library?.add(refIds) ?? Promise.resolve(false),
+      add: (refIds, hold) => library?.add(refIds, hold) ?? Promise.resolve(false),
       // Once its tab is shown, the frame showing it is the focused one.
       focus: () => requestAnimationFrame(() => focusComposer())
     }

@@ -1,22 +1,21 @@
 // Attachments an old new-chat page kept in this browser, before new chats were pending chats
-// (rev-drafts5 #5): a group's page kept them under its characters and name, and the group's new
-// chat takes them.
+// (rev-drafts5 #5): a group's page kept them under its characters and its name, and that
+// group's new chat takes them, no other group's (rev-dfu1 #1).
 import { expect, it } from "vitest"
-import { isGroupCopyOf } from "../src/features/chat/imageDraft.ts"
+import { legacyGroupScope } from "../src/features/chat/imageDraft.ts"
 
 const prefix = "user:pending:"
+const harbor = `${prefix}pending-group-chat:mira,tobin:Harbor`
 
-it("a group's old copy is the new chat's when all its characters are in the chat's cast", () => {
-  const cast = new Set(["mira", "tobin", "persona"])
-  expect(isGroupCopyOf(prefix, `${prefix}pending-group-chat:mira,tobin:Pier friends`, cast)).toBe(true)
-  // A name with a colon in it still names the group's characters first.
-  expect(isGroupCopyOf(prefix, `${prefix}pending-group-chat:mira,tobin:Pier: night`, cast)).toBe(true)
+it("a group's old copy is under its sorted characters and its name", () => {
+  expect(legacyGroupScope(prefix, { name: "Harbor", members: ["tobin", "mira"] })).toBe(harbor)
+  expect(legacyGroupScope(prefix, { name: "Pier: night", members: ["mira", "tobin"] })).toBe(
+    `${prefix}pending-group-chat:mira,tobin:Pier: night`
+  )
 })
 
-it("another group's copy, another user's, or a card's isn't", () => {
-  const cast = new Set(["mira", "tobin"])
-  expect(isGroupCopyOf(prefix, `${prefix}pending-group-chat:mira,ana:Other`, cast)).toBe(false)
-  expect(isGroupCopyOf(prefix, `other:pending:pending-group-chat:mira,tobin:Pier friends`, cast)).toBe(false)
-  expect(isGroupCopyOf(prefix, `${prefix}pending-chat:mira`, cast)).toBe(false)
-  expect(isGroupCopyOf(prefix, `${prefix}pending-group-chat::Empty`, cast)).toBe(false)
+it("another group with the same characters, or with one more, doesn't take it", () => {
+  expect(legacyGroupScope(prefix, { name: "Night Watch", members: ["mira", "tobin"] })).not.toBe(harbor)
+  expect(legacyGroupScope(prefix, { name: "Harbor", members: ["mira", "tobin", "wren"] })).not.toBe(harbor)
+  expect(legacyGroupScope(prefix, { name: "Harbor", members: ["mira"] })).not.toBe(harbor)
 })

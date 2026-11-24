@@ -355,3 +355,38 @@ test("typing that saves never shows the recovery warning; a refused save shows i
   await box.fill("REFUSED-" + "z".repeat(1_000_001))
   await expect(page.getByRole("button", { name: "1 unsaved text", exact: true })).toBeVisible({ timeout: 20_000 })
 })
+
+test("an old workshop page's typed backup is listed in browser recovery and sent by Retry saving (rev-dfu1 #7)", async ({
+  page
+}) => {
+  const me = await admin((api) => api.Whoami())
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  const text = "Last keystrokes of an old workshop page"
+  // Written by the old page synchronously, before IndexedDB or the server had the edit.
+  await page.evaluate(
+    ([userId, content]) =>
+      localStorage.setItem(
+        `dreamspan.pendingTyped:${userId}:pending-workshop:new`,
+        JSON.stringify({ at: Date.now() - 10 * 60_000, content })
+      ),
+    [me.id, text] as const
+  )
+  await page.reload()
+  await page
+    .getByRole("button", { name: /^\d+ unsaved texts?$/ })
+    .filter({ visible: true })
+    .click()
+  const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
+  await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(text)
+  await recovery.getByRole("button", { name: "Retry saving", exact: true }).click()
+  await expect(recovery.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
+  await expect
+    .poll(async () =>
+      (await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))).some((x) => x.content === text)
+    )
+    .toBe(true)
+  expect(
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("dreamspan.pendingTyped:")))
+  ).toEqual([])
+})

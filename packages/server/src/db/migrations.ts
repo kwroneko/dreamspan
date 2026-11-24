@@ -263,6 +263,33 @@ export const migrationDefinitions = {
       "CREATE INDEX change_reversal_effects_effect ON change_reversal_effects(rollout_id, tool_call_id, seq)"
     ]
   },
+  "0026_bin_reply_edits": {
+    statements: [
+      "DROP TRIGGER rollout_effects_identity",
+      `CREATE TRIGGER rollout_effects_identity BEFORE UPDATE ON rollout_effects BEGIN
+    SELECT RAISE(ABORT, 'effect identity is immutable') WHERE NEW.rollout_id <> OLD.rollout_id OR NEW.tool_call_id <> OLD.tool_call_id
+      OR NEW.seq <> OLD.seq OR NEW.kind <> OLD.kind OR NEW.target_kind <> OLD.target_kind OR NEW.target_id <> OLD.target_id
+      OR NEW.title <> OLD.title OR NEW.created_at <> OLD.created_at;
+    SELECT RAISE(ABORT, 'effect cannot be undone twice') WHERE OLD.undone_at IS NOT NULL;
+    SELECT RAISE(ABORT, 'effect updates must record undo') WHERE NEW.undone_at IS NULL;
+    SELECT RAISE(ABORT, 'undo recipe is retained') WHERE NEW.undo_json IS NOT OLD.undo_json;
+    SELECT RAISE(ABORT, 'revision undo must name a restored target revision and row version') WHERE NEW.kind = 'library.revise'
+      AND NOT (
+        json_type(NEW.undo_result_json, '$.binnedWithCreation') IS 'true'
+        AND EXISTS (SELECT 1 FROM entities e WHERE e.id = NEW.target_id AND e.deleted_at IS NOT NULL)
+        AND EXISTS (
+          SELECT 1 FROM rollout_effects c JOIN rollouts created ON created.id = c.rollout_id
+          JOIN rollouts edited ON edited.id = NEW.rollout_id
+          WHERE c.kind = 'library.create' AND c.target_id = NEW.target_id AND c.undone_at IS NOT NULL
+            AND coalesce(created.spawned_by_rollout_id, created.id) = coalesce(edited.spawned_by_rollout_id, edited.id)
+        )
+      ) AND (
+      NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_result_json, '$.restoredHead') AND v.entity_id = NEW.target_id)
+      OR json_type(NEW.undo_result_json, '$.restoredRowVersion') IS NOT 'integer' OR json_extract(NEW.undo_result_json, '$.restoredRowVersion') < 0
+    );
+  END`
+    ]
+  },
   // The library's classes (spec/WORKSHOP-CARDS.md §2.2): "Read your library" became four, and a
   // workshop's choice for it is its choice for each of them.
   "0027_library_classes": {

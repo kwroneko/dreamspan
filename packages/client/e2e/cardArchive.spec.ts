@@ -43,6 +43,94 @@ test("a stale tab cannot offer Undo for another tab's archive", async ({ browser
   }
 })
 
+test("archive rules can be restored while matching cards load or fail", async ({ page }) => {
+  const server = await startServer(withAdmin)
+  const other = await page.context().newPage()
+  let holdSave = false
+  let holdRead = false
+  const saves: Array<() => void> = []
+  const reads: Array<() => void> = []
+  try {
+    await seedCardArchive(server)
+    await other.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request =
+          typeof data === "string"
+            ? (JSON.parse(data) as { tag?: string; id?: string; payload?: { criteria?: { never?: number } } })
+            : null
+        if (holdSave && request?.tag === "SaveUserDraft") saves.push(() => upstream.send(data))
+        else if (holdRead && request?.tag === "ListArchiveCandidates" && request.payload?.criteria?.never === 72)
+          reads.push(() =>
+            socket.send(
+              JSON.stringify({
+                _tag: "Exit",
+                requestId: request.id,
+                exit: {
+                  _tag: "Failure",
+                  cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic candidate read failure" } }]
+                }
+              })
+            )
+          )
+        else upstream.send(data)
+      })
+      upstream.onMessage((data) => {
+        if (holdSave && typeof data === "string" && data.includes('"UserDraftChanged"')) return
+        socket.send(data)
+      })
+    })
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    for (const tab of [page, other]) {
+      await tab.goto(`${server.url}/?show=archived`)
+      await tab.getByRole("main").getByRole("button", { name: "Archive unused cards…", exact: true }).click()
+    }
+    const first = page.getByRole("dialog", { name: "Archive unused cards" })
+    const second = other.getByRole("dialog", { name: "Archive unused cards" })
+    const days = (dialog: typeof first) => dialog.getByRole("spinbutton", { name: "Days", exact: true })
+    await days(first).fill("42")
+    await expect(days(second)).toHaveValue("42")
+    holdSave = true
+    await days(second).fill("63")
+    await expect.poll(() => saves.length).toBeGreaterThan(0)
+    await days(first).fill("72")
+    await expect
+      .poll(() =>
+        asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+          Effect.gen(function* () {
+            const ownerId = (yield* api.Whoami()).id
+            const draft = yield* api.GetUserDraft({ ownerId, targetId: "archive-unused", field: "Rules" })
+            return draft?.content
+          })
+        )
+      )
+      .toContain('"never":"72"')
+    holdRead = true
+    holdSave = false
+    for (const send of saves.splice(0)) send()
+
+    await expect(days(second)).toHaveValue("72")
+    await expect.poll(() => reads.length).toBeGreaterThan(0)
+    const restore = second.getByRole("button", { name: "Use this tab's version", exact: true })
+    const archive = second.getByRole("button", { name: /^Archive \d+ cards$/ })
+    await expect(second.getByText("Finding cards…", { exact: true })).toBeVisible()
+    await expect(restore).toBeVisible()
+    await expect(archive).toHaveCount(0)
+    holdRead = false
+    for (const fail of reads.splice(0)) fail()
+    await expect(second.getByRole("button", { name: "Try again", exact: true })).toBeVisible()
+    await expect(restore).toBeVisible()
+    await expect(archive).toHaveCount(0)
+    await restore.click()
+    await expect(days(first)).toHaveValue("63")
+    await expect(days(second)).toHaveValue("63")
+    await expect(archive).toBeVisible()
+  } finally {
+    await other.close()
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`${width} ${theme}: archive, search, sidebar, bulk selection and Undo`, async ({ page }, info) => {

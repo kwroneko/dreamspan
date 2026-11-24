@@ -1799,7 +1799,12 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     texts: ReadonlyArray<string>,
     reason: "commit" | "discard",
     /** Where it came from, when the source is about to go (a pending chat swept); else read from it. */
-    sourceName?: string
+    sourceName?: string,
+    /**
+     * `evict: false`: the section isn't held to its limits now (an upgrade moving old drafts'
+     * texts in, all of which must be there to see); the next text recovered holds it to them.
+     */
+    options?: { readonly evict?: boolean }
   ) =>
     Effect.gen(function* () {
       // `texts` come newest first; inserting oldest first keeps "newest first" listings right.
@@ -1823,6 +1828,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           created_at: now
         })}`
       }
+      if (options?.evict === false) return
       const limits = yield* readBinLimits(sql, userId, defaults)
       // Its own track: recovered text never evicts deleted items, or the other way round.
       const rows = yield* sql<{ id: string; byte_size: number }>`

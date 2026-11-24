@@ -18,8 +18,14 @@ interface TurnNoteInput {
   readonly offered: ReadonlyArray<string>
 }
 
+/** A note listing one-time events, which are acknowledged by a dispatched rollout. */
+interface TurnEvents {
+  readonly text: string
+  readonly events: ReadonlyArray<string>
+}
+
 export interface TurnNote {
   readonly id: string
   /** Its line, or null when it has nothing to say this turn. Never fails the turn. */
-  readonly line: (input: TurnNoteInput) => Effect.Effect<string | null>
+  readonly line: (input: TurnNoteInput) => Effect.Effect<string | TurnEvents | null>
 }

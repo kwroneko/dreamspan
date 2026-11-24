@@ -13,6 +13,8 @@ const isObject = (u: unknown): u is Record<string, unknown> => typeof u === "obj
 const own = (object: Record<string, unknown>, key: string) => (Object.hasOwn(object, key) ? object[key] : undefined)
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b)
 
+export const ORDER_UNIT = "@order"
+
 const IDENTITIES = ["id", "identifier", "uid"] as const
 
 /** The key that names every element of these lists, as History's comparisons split them. */
@@ -26,6 +28,14 @@ const identityOf = (lists: ReadonlyArray<ReadonlyArray<unknown>>) =>
       })
     )
   )
+
+const namedEntries = (list: ReadonlyArray<unknown>, identity: string) =>
+  new Map(list.map((entry) => [`${identity}=${String((entry as Record<string, unknown>)[identity])}`, entry]))
+
+const commonOrder = (order: ReadonlyArray<string>, other: ReadonlySet<string>) => order.filter((key) => other.has(key))
+
+export const changedEntryOrder = (before: ReadonlyArray<string>, after: ReadonlyArray<string>) =>
+  !same(commonOrder(before, new Set(after)), commonOrder(after, new Set(before)))
 
 /** A field's key: its path as JSON, `["description"]` or `["entries","uid=3"]`. */
 export const unitKey = (path: Path) => JSON.stringify(path)
@@ -50,13 +60,14 @@ export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<str
     if (Array.isArray(x) && Array.isArray(y)) {
       const id = identityOf([x, y])
       if (id !== undefined) {
-        const named = (list: ReadonlyArray<unknown>) =>
-          new Map(list.map((e) => [`${id}=${String((e as Record<string, unknown>)[id])}`, e]))
-        const xs = named(x)
-        const ys = named(y)
-        const changed = [...new Set([...xs.keys(), ...ys.keys()])].filter((k) => !same(xs.get(k), ys.get(k)))
-        // Reordered with nothing else changed: the list's order is the change.
-        if (changed.length > 0) return changed.map((k) => unitKey([key, k]))
+        const xs = namedEntries(x, id)
+        const ys = namedEntries(y, id)
+        if (xs.size === x.length && ys.size === y.length) {
+          const keys = [...new Set([...xs.keys(), ...ys.keys()])]
+          const changed = keys.filter((k) => !same(xs.get(k), ys.get(k))).map((k) => unitKey([key, k]))
+          if (changedEntryOrder([...xs.keys()], [...ys.keys()])) changed.unshift(unitKey([key, ORDER_UNIT]))
+          if (changed.length > 0) return changed
+        }
       }
     }
     return [unitKey([key])]
@@ -78,9 +89,22 @@ const unitValue = (doc: unknown, key: string): unknown => {
   const value = own(doc, top)
   if (element === undefined) return value
   if (!Array.isArray(value)) return undefined
+  if (element === ORDER_UNIT) {
+    const identity = identityOf([value])
+    return identity === undefined ? undefined : [...namedEntries(value, identity).keys()]
+  }
   const at = findIn(value, element)
   return at < 0 ? undefined : value[at]
 }
+
+/** The recorded value of each present unit in a document. */
+export const valuesOfUnits = (doc: unknown, fields: Iterable<string>) =>
+  Object.fromEntries(
+    [...fields].flatMap((field) => {
+      const value = unitValue(doc, field)
+      return value === undefined ? [] : [[field, value]]
+    })
+  )
 
 /**
  * `doc` with a field set (removed for undefined). An element that isn't in the list goes after
@@ -101,6 +125,13 @@ const withUnit = (
     return next
   }
   const list = Array.isArray(own(doc, top)) ? [...(own(doc, top) as Array<unknown>)] : []
+  if (element === ORDER_UNIT) {
+    if (!Array.isArray(value)) return doc
+    const positions = (value as Array<string>).map((key) => findIn(list, key)).filter((i) => i >= 0)
+    const entries = positions.map((i) => list[i])
+    positions.sort((a, b) => a - b).forEach((at, i) => (list[at] = entries[i]))
+    return { ...doc, [top]: list }
+  }
   const at = findIn(list, element)
   if (at >= 0) {
     if (value === undefined) list.splice(at, 1)
@@ -140,6 +171,15 @@ interface ReversalConflict {
 /** For a conflicting field: keep it as it is now, or take it as it was before the change. */
 export type ConflictChoice = "now" | "before"
 
+/** Choices only apply to the head the user saw. */
+export const matchesReversalHead = (
+  head: string,
+  options: {
+    readonly expectedHead?: string | undefined
+    readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
+  }
+) => options.expectedHead === head || (options.expectedHead === undefined && options.choices === undefined)
+
 export interface ReversalPlan {
   /** The document with the fields taken back; null when a conflict is left. */
   readonly doc: Record<string, unknown> | null
@@ -153,57 +193,98 @@ export interface ReversalPlan {
   readonly kept: ReadonlyArray<string>
 }
 
-/**
- * Takes a change back on `now`: `changed` is the document after the change (A) and `original`
- * before it (B), both whole or holding only the fields named. `fields` limits it to those (all
- * the change's otherwise); `choices` settles conflicts. Redo is the same with a revert's after
- * as `changed` and its before as `original`.
- */
-export const planReversal = (input: {
+export interface ReversalPatch {
   readonly original: unknown
   readonly changed: unknown
-  readonly now: Record<string, unknown>
   readonly fields: ReadonlyArray<string>
-  readonly choices?: Readonly<Record<string, ConflictChoice>>
-}): ReversalPlan => {
-  let doc = input.now
-  const fields: Array<string> = []
-  const before: Record<string, unknown> = {}
-  const after: Record<string, unknown> = {}
-  const conflicts: Array<ReversalConflict> = []
-  const kept: Array<string> = []
-  for (const field of input.fields) {
-    const a = unitValue(input.changed, field)
-    const b = unitValue(input.original, field)
-    const h = unitValue(input.now, field)
-    const merged = merge3(a, h, b)
-    const choice = input.choices?.[field]
-    let value: unknown
-    if (merged.conflicts.length === 0) value = merged.value
-    else if (choice === "before") value = b
-    else if (choice === "now") {
-      kept.push(field)
-      continue
-    } else {
-      conflicts.push({
-        field,
-        ...(h === undefined ? {} : { now: h }),
-        ...(b === undefined ? {} : { before: b })
-      })
-      continue
-    }
-    fields.push(field)
-    if (h !== undefined) before[field] = h
-    if (value !== undefined) after[field] = value
-    const [top] = unitPath(field)
-    doc = withUnit(
-      doc,
-      field,
-      value,
-      top === undefined ? undefined : own(isObject(input.original) ? input.original : {}, top)
-    )
+}
+
+/** Applies one inverse patch using the same planner as a group of changes. */
+export const planReversal = (
+  input: ReversalPatch & {
+    readonly now: Record<string, unknown>
+    readonly choices?: Readonly<Record<string, ConflictChoice>>
   }
-  return { doc: conflicts.length > 0 ? null : doc, fields, before, after, conflicts, kept }
+): ReversalPlan => planGroupedReversal([input], input.now, input.choices)
+
+/** String greetings have no IDs. Positions align only across unique lists with no visible moves. */
+const mergeGreetings = (changed: unknown, now: unknown, original: unknown) => {
+  const greetings = (value: unknown): value is ReadonlyArray<string> =>
+    Array.isArray(value) && value.every((item) => typeof item === "string") && new Set(value).size === value.length
+  if (!greetings(changed) || !greetings(now) || !greetings(original)) return undefined
+  const positions = new Map(changed.map((text, index) => [text, index]))
+  const aligns = (side: ReadonlyArray<string>) =>
+    side.length === changed.length && side.every((text, index) => (positions.get(text) ?? index) === index)
+  if (!aligns(now) || !aligns(original)) return undefined
+  const merged = changed.map((text, index) => merge3(text, now[index], original[index]))
+  return { value: merged.map((part) => part.value), conflicts: merged.flatMap((part) => part.conflicts) }
+}
+
+const mergeUnit = (field: string, changed: unknown, now: unknown, original: unknown) => {
+  const [top, element] = unitPath(field)
+  if (element === ORDER_UNIT && Array.isArray(changed) && Array.isArray(now) && Array.isArray(original)) {
+    const shared = new Set(commonOrder(changed, new Set(now)).filter((key) => original.includes(key)))
+    return merge3(commonOrder(changed, shared), commonOrder(now, shared), commonOrder(original, shared))
+  }
+  if (element === undefined && (top === "alternate_greetings" || top === "group_only_greetings"))
+    return mergeGreetings(changed, now, original) ?? merge3(changed, now, original)
+  return merge3(changed, now, original)
+}
+
+/** Apply the selected inverse patches newest first, on a tentative document. */
+export const planGroupedReversal = (
+  patches: ReadonlyArray<ReversalPatch>,
+  now: Record<string, unknown>,
+  choices?: Readonly<Record<string, ConflictChoice>>
+): ReversalPlan => {
+  let doc = now
+  const fields = new Set<string>()
+  const conflicts = new Set<string>()
+  const kept = new Set<string>()
+  for (const patch of patches) {
+    for (const field of patch.fields) {
+      if (kept.has(field)) continue
+      const a = unitValue(patch.changed, field)
+      const b = unitValue(patch.original, field)
+      const h = unitValue(doc, field)
+      const merged = mergeUnit(field, a, h, b)
+      const choice = choices?.[field]
+      let value = merged.value
+      if (merged.conflicts.length > 0) {
+        if (choice === "before") value = b
+        else if (choice === "now") {
+          kept.add(field)
+          fields.delete(field)
+          doc = withUnit(doc, field, unitValue(now, field), own(now, unitPath(field)[0]!))
+          continue
+        } else {
+          // Compute the result of Take before for the preview without committing it.
+          conflicts.add(field)
+          value = b
+        }
+      }
+      fields.add(field)
+      const [top] = unitPath(field)
+      doc = withUnit(
+        doc,
+        field,
+        value,
+        top === undefined || !isObject(patch.original) ? undefined : own(patch.original, top)
+      )
+    }
+  }
+  return {
+    doc: conflicts.size > 0 ? null : doc,
+    fields: [...fields].filter((field) => !conflicts.has(field)),
+    before: valuesOfUnits(now, fields),
+    after: valuesOfUnits(doc, fields),
+    conflicts: [...conflicts].map((field) => {
+      const current = unitValue(now, field)
+      const before = unitValue(doc, field)
+      return { field, ...(current === undefined ? {} : { now: current }), ...(before === undefined ? {} : { before }) }
+    }),
+    kept: [...kept]
+  }
 }
 
 /**
@@ -244,7 +325,10 @@ export const combinedFileEdits = (
 }
 
 /** A unit as the assistant names it: "description", "entries uid=3". */
-export const unitName = (unit: string) => (JSON.parse(unit) as Array<string>).join(" ")
+export const unitName = (unit: string) => {
+  const [field, part] = unitPath(unit)
+  return part === undefined ? (field ?? "") : `${field} ${part === ORDER_UNIT ? "order" : part}`
+}
 
 /** The units a list of names given by the assistant picks: by its name or its top-level field. */
 export const pickedUnits = (units: ReadonlyArray<string>, names: ReadonlyArray<string> | undefined) =>

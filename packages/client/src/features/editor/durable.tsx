@@ -57,8 +57,8 @@ export function useDurableForm<T extends object>(key: string, field: string, sav
     discard: () => (draft.text === JSON.stringify(saved) ? Promise.resolve(true) : draft.discard()),
     /**
      * "Use this tab's version" while this tab's form was refused as out of date (owner,
-     * 2026-11-24), nothing otherwise. Every form puts it first in its Save row, before Cancel,
-     * so Cancel and Save never move.
+     * 2026-11-24), nothing otherwise. Dialogs put it before Cancel in their horizontal Save
+     * row, which puts it last when DialogActions stacks the buttons on a phone.
      */
     refusedAction: <UserDraftRefused draft={draft} />,
     draft

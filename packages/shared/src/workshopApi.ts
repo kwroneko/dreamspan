@@ -132,6 +132,7 @@ const ConflictChoice = Schema.Literals(["now", "before"])
  */
 export const ReversalOutcome = Schema.Struct({
   reversalId: Schema.NullOr(Schema.String),
+  head: Schema.String,
   fields: Schema.Array(Schema.String),
   conflicts: Schema.Array(
     Schema.Struct({
@@ -146,6 +147,8 @@ export type ReversalOutcome = typeof ReversalOutcome.Type
 export const ReversalOptions = {
   fields: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(4096)))),
   choices: Schema.optionalKey(Schema.Record(Schema.String, ConflictChoice)),
+  /** The revision ID or file hash the conflict choices were shown against. */
+  expectedHead: Schema.optionalKey(Schema.String),
   /** Only say what it would take back and what conflicts: nothing is written. */
   dryRun: Schema.optionalKey(Schema.Boolean)
 }
@@ -414,8 +417,7 @@ export class WorkshopApi extends RpcGroup.make(
   }),
   /**
    * Reverts one item's changes (spec/WORKSHOP-CARDS.md §8.1): the library edits or card file edits
-   * named, as one change from the first's before to the last's after, taken back on the item as it
-   * is now field by field, as a new revision (a new file version). A conflict writes nothing.
+   * named, taken back newest first as one new revision or file version. A conflict writes nothing.
    */
   Rpc.make("RevertChange", {
     payload: {
@@ -431,6 +433,7 @@ export class WorkshopApi extends RpcGroup.make(
   Rpc.make("RedoChange", {
     payload: {
       reversalId: Schema.String,
+      effect: Schema.optionalKey(Schema.Struct(EffectKey)),
       message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
       ...ReversalOptions
     },

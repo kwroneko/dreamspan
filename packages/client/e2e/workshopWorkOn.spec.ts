@@ -183,6 +183,53 @@ test.describe("work on in a workshop", () => {
     await expect(page).not.toHaveURL(/workshopAttach=/)
   })
 
+  test("a handover the server failed once is tried again, and the first send carries it (rev-dfu1 #5)", async ({
+    page
+  }) => {
+    test.setTimeout(120_000)
+    await setUp(page, 1340, "dark")
+    const book = await admin((api) => api.CreateLorebook({ label: "Buoy charts" }))
+    // The first SetComposerLibrary fails (a dropped connection, say).
+    let failed = false
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: unknown }) : null
+        if (!failed && request?.tag === "SetComposerLibrary") {
+          failed = true
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Connection dropped" } }]
+              }
+            })
+          )
+          return
+        }
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => socket.send(data))
+    })
+    await page.goto(`${server().url}/library/${book.id}`)
+    await page.getByRole("button", { name: "Work on in a workshop" }).click()
+    await page
+      .getByRole("menu", { name: "Work on in a workshop" })
+      .getByRole("menuitem", { name: "A new workshop" })
+      .click()
+    await expect(page).toHaveURL(/[?&]draft=/)
+    await expect.poll(() => failed).toBe(true)
+    await page.getByLabel("Message", { exact: true }).fill("Sort the charts.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    await expect(page).toHaveURL(/\/chats\//, { timeout: 30_000 })
+    const message = page.getByRole("article").filter({ hasText: "Sort the charts." })
+    const sent = message.getByLabel("Attached from your library").locator("[data-library-tile]")
+    await expect(sent).toHaveCount(1)
+    await expect(sent.first()).toHaveAttribute("data-library-tile", book.id)
+  })
+
   test("a card's More menu has it as a submenu", async ({ page }) => {
     await setUp(page, 1340, "dark")
     const card = await admin((api) =>

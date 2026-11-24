@@ -6,7 +6,9 @@ import {
   changedUnits,
   combinedFileEdits,
   docOfUnits,
+  ORDER_UNIT,
   planReversal,
+  planGroupedReversal,
   revertedFields,
   unitKey
 } from "../src/changeReversal.ts"
@@ -68,6 +70,56 @@ describe("planReversal", () => {
         { uid: 3, content: "User's." }
       ]
     })
+  })
+
+  it("reverts entry order together with an entry edit, keeping unrelated entries", () => {
+    const one = { uid: 1, content: "One" }
+    const two = { uid: 2, content: "Two" }
+    const three = { uid: 3, content: "Three" }
+    const extra = { uid: 4, content: "Added later" }
+    const edited = { ...two, content: "Edited" }
+    const original = { entries: [one, two, three] }
+    const changed = { entries: [three, edited, one] }
+    const fields = changedUnits(original, changed)
+    expect(fields).toEqual([unitKey(["entries", ORDER_UNIT]), unitKey(["entries", "uid=2"])])
+    const now = { entries: [three, extra, edited, one] }
+    expect(planReversal({ original, changed, now, fields }).doc).toEqual({ entries: [one, extra, two, three] })
+  })
+
+  it("reverts one greeting and keeps a later edit to a different greeting", () => {
+    const original = { alternate_greetings: ["One", "Two", "Three"] }
+    const changed = { alternate_greetings: ["First", "Two", "Three"] }
+    const fields = changedUnits(original, changed)
+    const now = { alternate_greetings: ["First", "Second", "Three"] }
+    expect(planReversal({ original, changed, now, fields }).doc?.alternate_greetings).toEqual([
+      "One",
+      "Second",
+      "Three"
+    ])
+    for (const alternate_greetings of [
+      ["Overlapping edit", "Two", "Three"],
+      ["Two", "First", "Three"],
+      ["Added", "First", "Two", "Three"],
+      ["First", "Three", "Three"]
+    ]) {
+      const plan = planReversal({ original, changed, now: { alternate_greetings }, fields })
+      expect(plan.conflicts.map((conflict) => conflict.field)).toEqual(fields)
+    }
+  })
+
+  it("replays separate file patches around an intervening save to the same field", () => {
+    const oldest = {
+      original: { description: "The ferry runs at dawn. The inn is quiet." },
+      changed: { description: "The ferry runs at dusk. The inn is quiet." },
+      fields: [D]
+    }
+    const newest = {
+      original: { description: "The ferry runs at dusk. The inn is bustling." },
+      changed: { description: "The ferry runs at dusk. The inn is abandoned." },
+      fields: [D]
+    }
+    const plan = planGroupedReversal([newest, oldest], newest.changed)
+    expect(plan.doc).toEqual({ description: "The ferry runs at dawn. The inn is bustling." })
   })
 
   it("redoes from a record's values", () => {

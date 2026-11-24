@@ -1,7 +1,7 @@
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { StoryAt } from "@dreamspan/shared/chat.ts"
-import { safeAgentDocument } from "./agentDocuments.ts"
+import { safeAgentDocument, validateAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
@@ -37,9 +37,10 @@ import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { visibleDoc } from "../agent/libraryView.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
-import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
-import { unitName } from "@dreamspan/shared/changeReversal.ts"
+import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
+import { changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -143,6 +144,7 @@ interface UndoContext {
   readonly bin: Bin
   /** A made item goes to the bin though it changed since (the user was asked, WORKSHOP-CARDS §8.1). */
   readonly binAnyway?: boolean
+  readonly creationEdits?: ReadonlyArray<RolloutEffect>
 }
 /** The refusal that sends an Undo to the files host (api/workshop.ts). */
 export const FILE_UNDO_ON_HOST = "File undo must run through the host."
@@ -168,6 +170,14 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     const ref = yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(undo.refId))
     let head = String(undo.head)
     let version = Number(undo.rowVersion)
+    // A created item can go to the bin with all consecutive edits the same reply made.
+    const edits = ctx.creationEdits?.filter((e) => e.targetId === effect.targetId).map((e) => e.undo!) ?? []
+    for (;;) {
+      const edit = edits.find((e) => e.refId === ref.id && e.before === head && e.beforeRowVersion === version)
+      if (!edit || typeof edit.head !== "string" || Number(edit.rowVersion) <= version) break
+      head = edit.head
+      version = Number(edit.rowVersion)
+    }
     const restored = yield* ctx.sql<{
       undo_json: string
       undo_result_json: string
@@ -235,11 +245,15 @@ const createUndoer: Undoer = {
   unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
-      const ref = ctx.binAnyway
-        ? yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(effect.undo!.refId))
-        : yield* checkedCreation(ctx, effect)
-      if (ref.entity_id !== effect.targetId) return yield* refuse()
+      const lib = makeLibraryQueries(ctx.sql)
       const undo = effect.undo!
+      const ref = yield* lib.ownedRef(ctx.userId, String(undo.refId))
+      if (ref.entity_id !== effect.targetId) return yield* refuse()
+      if (!ctx.binAnyway) {
+        if ((yield* lib.usedByChats(ctx.userId, ref)) > 0)
+          return yield* refuse("A chat uses this item. Use this item's Undo to confirm moving it to the bin.")
+        yield* checkedCreation(ctx, effect)
+      }
       if (ref.kind === "card") {
         const live = yield* ctx.sql<{ id: string }>`SELECT e.id FROM entities e
           JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id
@@ -293,16 +307,21 @@ const createUndoer: Undoer = {
       return {}
     })
 }
+// Older assistant revert recipes predate a flag that distinguishes them from other card edits.
+const assistantRevert = (effect: RolloutEffect) =>
+  typeof effect.undo?.reversalId === "string" || effect.title.startsWith("Reverted a change to the ")
+
 const reviseUndoer: Undoer = {
   id: "library.revise",
   unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
+      const reverted = assistantRevert(effect)
       // Explicit user Undo restores the recorded document exactly, including its prior
       // approvals, and leaves active drafts alone. This is never tool-reachable approval.
       const change =
-        effect.undo!.exactDocument === true
+        effect.undo!.exactDocument === true || reverted
           ? yield* ctx.ops.EditRef({
               userId: ctx.userId,
               refId: ref.id as RefId,
@@ -317,6 +336,8 @@ const reviseUndoer: Undoer = {
               revisionId: String(effect.undo!.before) as RevisionId,
               expectedRowVersion: ref.row_version
             })
+      if (reverted)
+        yield* recordAssistantRevertUndo(ctx.sql, ctx.userId, effect, ref.head_revision_id, change.ref.headRevisionId)
       return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
@@ -494,16 +515,40 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
         // Files are on disk, outside SQLite: the files host puts them back (agent/tools/files.ts).
         if (row.kind.startsWith("file.")) return yield* refuse(FILE_UNDO_ON_HOST)
-        if (row.undone_at !== null) return toRolloutEffect(row)
+        if (row.undone_at !== null) return [toRolloutEffect(row)]
         const undoer = rolloutUndoers.get(row.kind)
         if (!undoer || row.undo_json === null)
           return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
+        const creationEdits =
+          row.kind === "library.create"
+            ? (yield* sql<EffectRow>`
+          WITH reply AS (
+            SELECT coalesce(spawned_by_rollout_id, id) AS id FROM rollouts WHERE id = ${row.rollout_id}
+          )
+          SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id CROSS JOIN reply
+          WHERE (r.id = reply.id OR r.spawned_by_rollout_id = reply.id)
+            AND e.target_kind = 'entity' AND e.target_id = ${row.target_id}
+            AND e.kind = 'library.revise' AND e.undo_json IS NOT NULL AND e.undone_at IS NULL
+          ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC
+        `).map(toRolloutEffect)
+            : []
         const undoResult = yield* undoer
-          .run({ sql, userId, ops, bin, binAnyway: binAnyway && row.kind === "library.create" }, toRolloutEffect(row))
+          .run(
+            { sql, userId, ops, bin, binAnyway: binAnyway && row.kind === "library.create", creationEdits },
+            toRolloutEffect(row)
+          )
           .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
         const at = Math.max(Date.now(), row.created_at)
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
-        return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
+        const done = [toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })]
+        for (const edit of creationEdits) {
+          const undoneAt = Math.max(at, edit.createdAt)
+          const undoResult = { binnedWithCreation: true }
+          yield* sql`UPDATE rollout_effects SET undone_at = ${undoneAt}, undo_result_json = ${JSON.stringify(undoResult)}
+            WHERE rollout_id = ${edit.rolloutId} AND tool_call_id = ${edit.toolCallId} AND seq = ${edit.seq}`
+          done.push({ ...edit, undoneAt, undoResult })
+        }
+        return done
       })
     const receipted = <R, E>(
       key: Key,
@@ -979,7 +1024,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         yield* lib.loadDoc(ref.head_revision_id),
                         yield* lib.loadDoc(String(value.revisionId))
                       ),
-                      message: "Restored in the workshop",
+                      message:
+                        agentMessage(typeof value.message === "string" ? value.message : undefined) ??
+                        "Restored in the workshop",
                       commitDraft: null,
                       agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
                     })
@@ -1139,12 +1186,19 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             const before = yield* lib.ownedRef(input.userId, input.refId)
             const { plan, covered, chatId } = yield* revisionReversal(
               sql,
-              input.userId,
+              input.rolloutId,
               before,
               input.revisionId,
               input.fields
             )
-            const unchanged = { result: "", effects: [] }
+            const unchanged = {
+              result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." }),
+              effects: []
+            }
+            const conflictValue = (field: string, value: unknown) =>
+              before.kind === "card" && unitPath(field)[0] === "extensions"
+                ? (visibleDoc("card", { extensions: value }).extensions ?? null)
+                : (value ?? null)
             if (plan.conflicts.length > 0)
               return {
                 ...unchanged,
@@ -1153,29 +1207,29 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   note: "Nothing was written: these fields were changed since in the same places. Edit them yourself if they should change.",
                   conflicts: plan.conflicts.map((c) => ({
                     field: unitName(c.field),
-                    now: c.now ?? null,
-                    before_the_change: c.before ?? null
+                    now: conflictValue(c.field, c.now),
+                    before_the_change: conflictValue(c.field, c.before)
                   }))
                 })
               }
-            if (plan.doc === null || plan.fields.length === 0)
-              return {
-                ...unchanged,
-                result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." })
-              }
+            if (plan.doc === null || plan.fields.length === 0) return unchanged
             const head = yield* lib.loadDoc(before.head_revision_id)
-            const valid = validateDoc(before.kind, guarded(before.kind, head, plan.doc as Doc))
+            const valid = validateAgentDocument(before.kind, head, plan.doc)
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            yield* checkDocument(valid.doc)
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
-              doc: valid.doc,
+              doc: plan.doc,
               expectedRowVersion: before.row_version,
               message: agentMessage(input.message) ?? "Reverted a change",
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
-            yield* insertReversal(sql, {
+            if (change.ref.headRevisionId === before.head_revision_id) return unchanged
+            const saved = yield* lib.loadDoc(change.ref.headRevisionId)
+            const fields = [...new Set([...plan.fields, ...changedUnits(head, saved)])]
+            const reversalId = yield* insertReversal(sql, {
               userId: input.userId,
               chatId,
               targetKind: "entity",
@@ -1185,7 +1239,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               reversesId: null,
               headBefore: before.head_revision_id,
               headAfter: change.ref.headRevisionId,
-              plan,
+              plan: { fields, before: valuesOfUnits(head, fields), after: valuesOfUnits(saved, fields) },
               effects: covered
             })
             return {
@@ -1193,28 +1247,26 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 reverted: true,
                 id: change.ref.id,
                 revision: change.ref.headRevisionId,
-                fields: plan.fields.map(unitName)
+                fields: fields.map(unitName)
               }),
-              effects:
-                change.ref.headRevisionId === before.head_revision_id
-                  ? []
-                  : [
-                      {
-                        kind: "library.revise",
-                        targetKind: "entity",
-                        targetId: before.entity_id,
-                        title: `Reverted a change to the ${before.kind} ${before.label}`,
-                        undo: {
-                          refId: before.id,
-                          before: before.head_revision_id,
-                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
-                          archivedAt: before.archived_at,
-                          beforeRowVersion: before.row_version,
-                          head: change.ref.headRevisionId,
-                          rowVersion: change.ref.rowVersion
-                        }
-                      }
-                    ]
+              effects: [
+                {
+                  kind: "library.revise",
+                  targetKind: "entity",
+                  targetId: before.entity_id,
+                  title: `Reverted a change to the ${before.kind} ${before.label}`,
+                  undo: {
+                    refId: before.id,
+                    before: before.head_revision_id,
+                    exactDocument: true,
+                    reversalId,
+                    archivedAt: before.archived_at,
+                    beforeRowVersion: before.row_version,
+                    head: change.ref.headRevisionId,
+                    rowVersion: change.ref.rowVersion
+                  }
+                }
+              ]
             }
           })
         ),
@@ -1354,7 +1406,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               entity: "rollout effect",
               id: `${input.rolloutId}:${input.toolCallId}:${input.seq}`
             })
-          return yield* undoRow(input.userId, row, input.binAnyway === true)
+          return (yield* undoRow(input.userId, row, input.binAnyway === true))[0]!
         }).pipe(transaction(sql, "UndoRolloutEffect")),
       // "Undo all of this reply": one transaction, newest change first. Each undo runs in its own
       // savepoint, so a refused one leaves nothing half done; the first refusal stops the rest,
@@ -1371,8 +1423,16 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 OR rollout_id IN (SELECT id FROM rollouts WHERE spawned_by_rollout_id = ${input.rolloutId}))
               AND undone_at IS NULL
             ORDER BY created_at DESC, rollout_id DESC, tool_call_id DESC, seq DESC`
-          const undone: Array<RolloutEffect> = []
+          const created = new Set(rows.filter((row) => row.kind === "library.create").map((row) => row.target_id))
+          const completed = new Map<string, RolloutEffect>()
+          const key = (rollout: string, call: string, seq: number) => JSON.stringify([rollout, call, seq])
+          const undone = () =>
+            rows.flatMap((row) => {
+              const done = completed.get(key(row.rollout_id, row.tool_call_id, row.seq))
+              return done ? [done] : []
+            })
           for (const [at, row] of rows.entries()) {
+            if (row.kind === "library.revise" && created.has(row.target_id)) continue
             const outcome = yield* sql.withTransaction(undoRow(input.userId, row)).pipe(
               Effect.map((effect) => ({ effect }) as const),
               Effect.catchTag(["EffectUndoRefused", "NotFound"], (error) =>
@@ -1382,16 +1442,17 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if ("effect" in outcome) {
-              undone.push(outcome.effect)
+              for (const effect of outcome.effect)
+                completed.set(key(effect.rolloutId, effect.toolCallId, effect.seq), effect)
               continue
             }
             return {
-              undone,
+              undone: undone(),
               refused: { effect: toRolloutEffect(row), reason: outcome.reason },
               left: rows.slice(at + 1).map(toRolloutEffect)
             }
           }
-          return { undone, refused: null, left: [] }
+          return { undone: undone(), refused: null, left: [] }
         }).pipe(transaction(sql, "UndoRolloutEffects"))
     } satisfies Pick<
       Handlers,

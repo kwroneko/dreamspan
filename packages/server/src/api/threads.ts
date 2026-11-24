@@ -2,6 +2,7 @@
 // dispatches through the registered command `thread.start`, so a plugin can replace it and the
 // in-app agent starts threads the same way. Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound.
+import { BinItem } from "@dreamspan/shared/bin.ts"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
 import type { ChatId, ForkId, PathEntry } from "@dreamspan/shared/chat.ts"
 import { GenerationUnavailable } from "@dreamspan/shared/chatApi.ts"
@@ -25,6 +26,7 @@ import { Generator } from "../chat/Generator.ts"
 import { rewriteText } from "../chat/rewrites.ts"
 import { Commands, makeCommand, runCommand } from "../commands.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { notifyWorkshopDeletions } from "./bin.ts"
 import { internal } from "./internal.ts"
 
 export const makeThreadHandlers = Effect.gen(function* () {
@@ -167,10 +169,12 @@ export const makeThreadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.UndoThreads({ userId: id, ...payload })
+        // The workshops beside the threads that went with them: their tabs are told.
+        yield* notifyWorkshopDeletions(id, item.workshops)
         // The threads' branches are gone and the branch's marks are lifted: tabs read again.
         hub.publish(payload.chatId, { _tag: "Reload" })
         yield* changed(id, payload.chatId)
-        return item
+        return new BinItem(item)
       }).pipe(Effect.uninterruptible, internal("UndoThreads")),
     CopyNoteToBranch: (payload: { chatId: ChatId; noteRefId: RefId; fromForkId: ForkId; toForkId: ForkId }) =>
       Effect.gen(function* () {

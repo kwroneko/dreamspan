@@ -352,10 +352,20 @@ describe("MCP servers in workshops", () => {
         { name: "read_run", args: { message: 0, call: "original", max_tokens: 4000 }, id: "first-page" }
       ])
       // The mock model's window, measured with this toolset: small enough that the quota shortens
-      // the page, large enough that the run doesn't compact before the page is sent (26k to 28k pass).
+      // the page, large enough that the run doesn't compact before the page is sent.
       // Re-measured when the read_card/read_lorebook/read_preset definitions grew (07d7c202a): 24k compacted.
-      const { api, chat, events, mock } = yield* workshop(script.handler, 27_000)
-      for (const capability of ["plugins.write", "plugins.apply", "network", "subagents"] as const)
+      // The quota's bound depends on the window alone (about 28k here), the compaction bound on the tool
+      // list, so each larger definition narrows the band: C9's version tools closed it (27k and 28k
+      // compacted, 28.5k didn't shorten). With the setup and rewrite tools Off, 25k to 28k pass.
+      const { api, chat, events, mock } = yield* workshop(script.handler, 26_500)
+      for (const capability of [
+        "plugins.write",
+        "plugins.apply",
+        "network",
+        "subagents",
+        "chats.setup",
+        "chats.rewrite"
+      ] as const)
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability, mode: "off" })
       const big = yield* fakeServer([fakeTool("dump")])
       const body = Array.from({ length: 6000 }, (_, i) => `${i}: XQYZ & <tag> "entry"`).join("\n")

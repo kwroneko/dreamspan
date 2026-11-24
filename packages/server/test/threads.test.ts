@@ -797,6 +797,35 @@ describe("starting parallel threads", () => {
       })
     )
   )
+
+  it.live("Undo threads tells a tab on a workshop not started yet beside a thread that it's gone (rev-dv1 #8)", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story(null)
+        const split = yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [t.wren], writesAs: null }
+          ]
+        })
+        const thread = split.forkIds.at(-1)!
+        const side = yield* t.api.OpenDraftChat({ draftFor: `side:${t.chatId}:${thread}` })
+        const events: Array<ChatEvent> = []
+        yield* t.api.SubscribeChat({ chatId: side.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => void events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        yield* t.api.UndoThreads({ chatId: t.chatId, splitId: split.splitId })
+        assert.strictEqual(yield* outcome(t.api.GetChat({ chatId: side.id })), "NotFound")
+        yield* eventually(() => events.some((event) => event._tag === "Deleted"), 5_000)
+      })
+    )
+  )
 })
 
 it.live("bulk rewrites and Undo retain thread absences while the side chat reads the user's current thread", () =>

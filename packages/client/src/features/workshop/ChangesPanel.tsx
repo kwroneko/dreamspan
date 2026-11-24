@@ -1,6 +1,6 @@
 // The workshop's Changes tab (spec/WORKSHOP.md §2.5, §3.6): everything its runs changed outside the
 // chat, newest first, grouped by the reply that made them, each change with Undo and Open and each
-// reply with "Undo all of this reply". Read in pages of 50 (`ListRolloutEffects`): the first again
+// reply with "Revert all of this reply". Read in pages of 50 (`ListRolloutEffects`): the first again
 // whenever a change is undone anywhere or the newest reply settles.
 import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
@@ -106,7 +106,7 @@ export function ChangesPanel({ session, view, active }: Pick<PanelProps, "sessio
   )
 }
 
-/** One reply's changes: when, how many, Undo all, then each change with its own Undo and Open. */
+/** One reply's changes: when, how many, Revert all, then each change with its own Undo and Open. */
 function ReplyGroup({ chatId, group, binned }: { chatId: ChatId; group: ReplyChanges; binned: ReadonlySet<string> }) {
   const action = useAction()
   const [report, setReport] = useState<UndoAllReport | null>(null)
@@ -162,7 +162,7 @@ function ReplyGroup({ chatId, group, binned }: { chatId: ChatId; group: ReplyCha
 
 const undidText = (n: number) => (n === 1 ? "Took back 1 change." : `Took back ${n} changes.`)
 
-/** What "Undo all of this reply" did, and what it couldn't. */
+/** What "Revert all of this reply" did, and what it couldn't. */
 function UndoAllOutcome({ report }: { report: UndoAllReport }) {
   const undone = report.undone.length
   if (report.refused === null)

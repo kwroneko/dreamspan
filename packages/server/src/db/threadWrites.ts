@@ -18,7 +18,7 @@ import { type Bin, toBinItem } from "./bin.ts"
 import { displayLength, displaySlots, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { insertFork, selectionIn, slotDeletedIn } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import { NotFound, StaleWrite, type WriteOps } from "./ops.ts"
+import { DeletedChatItem, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, type ForkRow, toChat } from "./rows.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -204,8 +204,11 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           yield* refusePending(sql, chatId)
           const itemId = yield* bin.removeThreads(userId, chatId, splitId)
+          // The workshops beside the threads that went with them (or, not started, were swept):
+          // their tabs are told, as a deleted branch's are.
+          const workshops = yield* bin.deletedWorkshops(itemId)
           yield* bin.evictDeleted(userId, itemId)
-          return toBinItem(yield* bin.loadItem(userId, itemId))
+          return new DeletedChatItem({ ...toBinItem(yield* bin.loadItem(userId, itemId)), workshops })
         }).pipe(transaction(sql, "UndoThreads"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
     return handlers
