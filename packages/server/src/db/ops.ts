@@ -5373,6 +5373,18 @@ const ReadOpsOwn = RpcGroup.make(
     success: PathWindow,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** The shown version of a visible message at a zero-based position on a fixed path. */
+  Rpc.make("ReadPathVersionAt", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      position: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+    },
+    success: Schema.NullOr(Schema.Struct({ id: VersionId, speakerEntityId: Schema.NullOr(EntityId) })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** One of the user's live versions: not in the bin, nor its message or chat. */
   Rpc.make("GetVersion", {
     payload: { userId: UserId, versionId: VersionId },

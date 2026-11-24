@@ -10,7 +10,7 @@ import { stateEventsThrough } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast, chatStateAt, previewNamesOf } from "./cards.ts"
 import { previewText } from "./previewText.ts"
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcluded, contextExcludedIn } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import {
   type ChatId,
@@ -975,6 +975,27 @@ export const makeReadHandlers = Effect.gen(function* () {
           }
         }
       }).pipe(query("ReadPath")),
+
+    ReadPathVersionAt: ({ userId, chatId, forkId, leafSlotId, position }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const fork = yield* liveFork(chat, forkId)
+        let slotId: string | null
+        if (yield* rearranges(sql, chatId, fork.id)) {
+          const shown = yield* displayTo(chatId, fork, leafSlotId)
+          slotId = position > shown.end ? null : yield* slotAtPosition(sql, shown.pieces, position)
+        } else {
+          const leaf = yield* slotIn(chatId, leafSlotId)
+          slotId = (yield* ancestorsAt(sql, leaf, [position])).get(position) ?? null
+        }
+        if (slotId === null) return null
+        const [version] = yield* sql<{ id: VersionId; speakerEntityId: EntityId | null }>`
+          SELECT v.id, v.speaker_entity_id AS speakerEntityId FROM slots s
+          JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
+          WHERE s.id = ${slotId} AND NOT ${slotDeletedIn(sql, fork.id, "s")}
+            AND NOT ${contextExcludedIn(sql, fork.id)}`
+        return version ?? null
+      }).pipe(query("ReadPathVersionAt")),
 
     // --- Branches (DESIGN §3.2) and forks
     PreviewForkNotes: (payload) => previewFork(sql, payload).pipe(query("PreviewForkNotes")),
