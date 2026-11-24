@@ -468,10 +468,10 @@ const make = (options: CardSourcesOptions = {}) =>
       Effect.gen(function* () {
         const adapter = yield* known(sourceId)
         const key = cacheKey(user, sourceId, "card", remoteId)
-        let entry = fresh ? undefined : yield* cache.get(key)
+        const hit = fresh ? null : yield* cache.getBlob(key)
+        let entry
         let bytes: Uint8Array
-        const fetched = !entry
-        if (!entry) {
+        if (hit === null) {
           const file = yield* ask(user, sourceId, `card:${remoteId}`, (http) => adapter.card(http, remoteId))
           // Admission may evict this very file when it exceeds the cache cap. The active
           // request already owns its bytes and must not depend on retaining that blob.
@@ -482,14 +482,15 @@ const make = (options: CardSourcesOptions = {}) =>
           })
         } else {
           yield* usable(user, sourceId)
-          bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
+          entry = hit.entry
+          bytes = new Uint8Array(hit.bytes)
         }
         const { summary, fileName, locator } = entry.value as {
           summary: AdapterSummary
           fileName: string
           locator?: string | null
         }
-        return { summary, fileName, bytes, fetched, locator: locator ?? null }
+        return { summary, fileName, bytes, fetched: hit === null, locator: locator ?? null }
       })
 
     /** The card's file, parsed. Parsing transfers its bytes to a worker: they aren't returned. */
@@ -1039,7 +1040,8 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           yield* usable(user, sourceId)
           const entry = yield* cache.peek(cacheKey(user, sourceId, "card", remoteId))
-          if (!entry?.blob)
+          const blob = entry?.blob ? yield* cache.readBlob(entry.blob) : null
+          if (!entry || blob === null)
             return yield* new SourceFailed({
               sourceId,
               reason: "bad_response",
@@ -1050,7 +1052,7 @@ const make = (options: CardSourcesOptions = {}) =>
             fileName: string
             locator?: string | null
           }
-          const bytes = new Uint8Array(yield* cache.readBlob(entry.blob))
+          const bytes = new Uint8Array(blob)
           const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
           return yield* preparedOf(user, sourceId, remoteId, {
             summary,
@@ -1111,28 +1113,38 @@ const make = (options: CardSourcesOptions = {}) =>
           const ref = redeem(user, sourceId, key)
           if (ref === null) return yield* new NotFound({ entity: "image", id: key })
           const entryKey = cacheKey(user, sourceId, "image", sha(ref))
-          let entry = yield* cache.get(entryKey)
-          let bytes: Uint8Array | undefined
-          if (!entry) {
-            bytes = yield* ask(user, sourceId, `image:${ref}`, (http) => adapter.image(http, ref))
-            const { mime } = describeImage(bytes)
-            if (!IMAGES.has(mime))
-              return yield* new SourceFailed({ sourceId, reason: "bad_response", message: "not an image" })
-            entry = yield* cache.put(entryKey, { bytes, value: { mime } })
+          // The reference held across the thumbnail and the original's read keeps eviction from
+          // unlinking the blob between them; the original is read only when no thumbnail is served.
+          const serve = (blob: string, mime: string, fetched: Uint8Array | null) =>
+            cache.withBlobFile(
+              blob,
+              Effect.gen(function* () {
+                if (width !== null) {
+                  const thumb = yield* formats
+                    .thumbnail({ dataDir: config.dataDir, path: blobPath(blob), width: mediaWidth(width) })
+                    .pipe(Effect.option)
+                  if (thumb._tag === "Some" && !thumb.value.original) {
+                    yield* cache.noteDerivative(blob, thumb.value.path)
+                    const bytes = yield* Effect.promise(() => readFile(join(config.dataDir, thumb.value.path)))
+                    return { bytes, mime: "image/webp", etag: `"${thumb.value.path.split("/").pop()!}"` }
+                  }
+                }
+                const bytes = fetched ?? (yield* cache.readBlob(blob))
+                return bytes === null ? null : { bytes, mime, etag: `"${blob}"` }
+              }).pipe(Effect.uninterruptible)
+            )
+          const entry = yield* cache.get(entryKey)
+          if (entry?.blob) {
+            // Null when the entry was evicted or its file is gone: fetch the image again.
+            const served = yield* serve(entry.blob, (entry.value as { mime: string }).mime, null)
+            if (served !== null) return served
           }
-          const blob = entry.blob!
-          const { mime } = entry.value as { mime: string }
-          if (width !== null) {
-            const thumb = yield* formats
-              .thumbnail({ dataDir: config.dataDir, path: blobPath(blob), width: mediaWidth(width) })
-              .pipe(Effect.option)
-            if (thumb._tag === "Some" && !thumb.value.original) {
-              yield* cache.noteDerivative(blob, thumb.value.path)
-              const thumbnail = yield* Effect.promise(() => readFile(join(config.dataDir, thumb.value.path)))
-              return { bytes: thumbnail, mime: "image/webp", etag: `"${thumb.value.path.split("/").pop()!}"` }
-            }
-          }
-          return { bytes: bytes ?? (yield* cache.readBlob(blob)), mime, etag: `"${blob}"` }
+          const bytes = yield* ask(user, sourceId, `image:${ref}`, (http) => adapter.image(http, ref))
+          const { mime } = describeImage(bytes)
+          if (!IMAGES.has(mime))
+            return yield* new SourceFailed({ sourceId, reason: "bad_response", message: "not an image" })
+          const blob = (yield* cache.put(entryKey, { bytes, value: { mime } })).blob!
+          return (yield* serve(blob, mime, bytes)) ?? { bytes, mime, etag: `"${blob}"` }
         }),
       origin: (user, entityId) =>
         Effect.gen(function* () {

@@ -56,10 +56,13 @@ export interface ShimTarget {
   readonly api?: string
 }
 
+const modelMatches = (pattern: RegExp, model: string) =>
+  (pattern.global || pattern.sticky ? new RegExp(pattern) : pattern).test(model)
+
 const shimApplies = (shim: CompatShim, target: ShimTarget, model: string) =>
   shim.providers.includes(target.provider) &&
   (shim.apis === undefined || target.api === undefined || shim.apis.includes(target.api)) &&
-  shim.model.test(model)
+  modelMatches(shim.model, model)
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
