@@ -5751,6 +5751,12 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(LibraryRef),
     error: StorageError
   }),
+  /** The linked shared note's scope and head, including when it is in the bin. */
+  Rpc.make("SharedNoteHead", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: Schema.NullOr(Schema.Struct({ revisionId: RevisionId, scope: Schema.String })),
+    error: StorageError
+  }),
   /**
    * The user's shared notes not in the bin whose title has `query` (all without one), or the
    * one `refId` or `entityId` names.

@@ -86,6 +86,40 @@ const cardFile = (name: string, data: Record<string, unknown> = {}) =>
   })
 
 describe("notes and files tools", () => {
+  it.live("unlinked card notes only copy a checked shared note with Notes access", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const card = yield* f.api.CreateCard({ label: "Mira", name: "Mira" })
+      const shared = yield* f.api.CreateSharedNote({ title: "House rules", content: "No smoking." })
+      const slot = yield* f.api.CreateCardNote({ cardRefId: card.id, title: "Rules", link: shared.entityId })
+      yield* f.api.DeleteNote({ noteRefId: shared.id })
+      const refused = yield* f.run("unlink_note", { note: slot.id }, "notes-off", {
+        sight: {
+          inView: (id) => Effect.succeed(id === slot.entityId),
+          gate: () => Effect.succeed({ ok: false, text: "Notes are off." })
+        }
+      })
+      assert.isTrue(refused.isError)
+      assert.strictEqual((yield* f.api.OpenEditor({ refId: slot.id })).doc.link, shared.entityId)
+
+      const stale = yield* Effect.flip(
+        f.writer.RunWorkshopOperation({
+          userId: f.user.id,
+          rolloutId: f.rolloutId,
+          toolCallId: "stale-link",
+          capability: "library.write",
+          operation: "UnlinkNote",
+          payload: { userId: f.user.id, noteRefId: slot.id },
+          expected: { proof: { shared: { entityId: shared.entityId, revisionId: null } } }
+        })
+      )
+      assert.strictEqual(stale._tag, "EffectUndoRefused")
+      yield* f.ok("unlink_note", { note: slot.id }, "notes-allowed")
+      assert.strictEqual((yield* f.api.OpenEditor({ refId: slot.id })).doc.content, "No smoking.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("shared and card notes: create, read, edit, link, unlink, persona and bin, each with Undo", () => {
     const config = testConfig()
     return Effect.gen(function* () {

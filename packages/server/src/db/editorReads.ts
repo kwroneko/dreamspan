@@ -12,7 +12,7 @@ import { EditorSnapshot, NoteEntry, SharedNote } from "@dreamspan/shared/editorA
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { applyDrafts } from "@dreamspan/shared/editing.ts"
-import type { Doc } from "@dreamspan/shared/library.ts"
+import type { Doc, RevisionId } from "@dreamspan/shared/library.ts"
 import { editedDoc } from "@dreamspan/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -262,6 +262,12 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           Effect.map((rows) => rows.map(toLibraryRef)),
           query("ListSharedNoteRefs")
         ),
+
+    SharedNoteHead: ({ userId, entityId }) =>
+      sharedNote(sql, userId, entityId).pipe(
+        Effect.map((shared) => (shared === null ? null : { revisionId: shared.head as RevisionId, scope: shared.scope })),
+        query("SharedNoteHead")
+      ),
 
     ListSharedNotes: ({ userId, query: search, refId, entityId, chatNote }) =>
       Effect.gen(function* () {

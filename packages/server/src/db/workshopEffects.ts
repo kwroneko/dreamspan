@@ -40,6 +40,7 @@ import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
 import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
 import { unitName } from "@dreamspan/shared/changeReversal.ts"
+import { sharedNote } from "./sharedNotes.ts"
 
 /** The assistant's message for a revision it writes, on one line; none when it gave none. */
 const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
@@ -947,6 +948,21 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     )
                 }
                 const before = yield* policy!.before(sql, input.userId, value as never)
+                if (input.operation === "UnlinkNote") {
+                  const checked = (expected?.proof as { shared?: { entityId: string; revisionId: string | null } })
+                    ?.shared
+                  const slot = before as { ref: { head_revision_id: string } }
+                  const doc = yield* lib.loadDoc(slot.ref.head_revision_id)
+                  const link = typeof doc.link === "string" ? doc.link : null
+                  const source = link === null ? null : yield* sharedNote(sql, input.userId, link)
+                  if (
+                    !checked ||
+                    checked.entityId !== link ||
+                    checked.revisionId !== (source?.head ?? null) ||
+                    (source !== null && source.scope !== "global")
+                  )
+                    return yield* refuseOperation("The linked shared note changed. Read the note again before unlinking it.")
+                }
                 let result: unknown
                 if (input.operation === "SetAgentSetting") {
                   const entry = settingsRegistry.get(String(value.key))
