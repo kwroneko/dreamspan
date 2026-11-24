@@ -148,6 +148,7 @@ function WorkbenchFor({ userId }: { userId: string }) {
   const placeholder = usePanelPlaceholder(store, wide, side)
   useKeepDividers(store, outer, center, wide && !layout.maximized)
   useRoom(store, center, wide)
+  useFocusedInView(center, wide ? layout.focused : null, focusedFrame(layout).active)
   // Frames side by side need their least widths together: the columns beside them give way
   // first (columnLayout.ts), and what still doesn't fit scrolls (the center's overflow).
   const framesMin = wide && !layout.maximized && isSplit(layout) ? minSize(layout.root, "x") : 0
@@ -166,7 +167,7 @@ function WorkbenchFor({ userId }: { userId: string }) {
             ref={setCenter}
             data-workbench
             data-layout-audit-ignore="inset: the frames fill the center edge to edge, scrolling only when the window is too narrow for them"
-            className={`flex min-h-0 min-w-0 flex-1 flex-col ${wide ? "overflow-auto" : ""}`}
+            className={`flex min-h-0 min-w-0 flex-1 flex-col ${wide ? "scroll-visible overflow-auto" : ""}`}
           >
             {wide ? (
               <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
@@ -391,6 +392,41 @@ function useRoom(store: WorkbenchStore, center: HTMLElement | null, wide: boolea
     measure()
     return () => observer.disconnect()
   }, [store, center, wide])
+}
+
+/**
+ * Where the frames scroll (a window too narrow for them), the focused frame stays in view: a
+ * tab moved or opened there, or focus moving to it, scrolls the row just enough to show it.
+ */
+function useFocusedInView(center: HTMLElement | null, frameId: string | null, tabId: string | null) {
+  useLayoutEffect(() => {
+    if (!center || !frameId) return
+    if (center.scrollWidth <= center.clientWidth && center.scrollHeight <= center.clientHeight) return
+    const frame = [...center.querySelectorAll<HTMLElement>("[data-frame]")].find((f) => f.dataset["frame"] === frameId)
+    if (!frame) return
+    const box = frame.getBoundingClientRect()
+    const view = center.getBoundingClientRect()
+    const inner = {
+      left: view.left + center.clientLeft,
+      top: view.top + center.clientTop,
+      right: view.left + center.clientLeft + center.clientWidth,
+      bottom: view.top + center.clientTop + center.clientHeight
+    }
+    // Just enough: the near edge first, the far one when the frame fits.
+    const dx =
+      box.left < inner.left
+        ? box.left - inner.left
+        : box.right > inner.right
+          ? Math.min(box.right - inner.right, box.left - inner.left)
+          : 0
+    const dy =
+      box.top < inner.top
+        ? box.top - inner.top
+        : box.bottom > inner.bottom
+          ? Math.min(box.bottom - inner.bottom, box.top - inner.top)
+          : 0
+    if (dx !== 0 || dy !== 0) center.scrollBy({ left: dx, top: dy, behavior: "instant" })
+  }, [center, frameId, tabId])
 }
 
 /**
@@ -678,7 +714,7 @@ function FrameView({
             data-drop-zone={over.zone}
             data-drop-blocked
             data-layout-overlay="A refused drop target covers the edge it would have split"
-            className={`pointer-events-none absolute z-40 flex items-center justify-center border-2 border-dashed border-border bg-surface/90 p-3 text-center text-sm text-muted ${ZONE_OVERLAY[over.zone]}`}
+            className={`pointer-events-none absolute z-40 flex items-center justify-center border-2 border-dashed border-muted bg-muted/10 p-3 text-center text-sm text-muted ${ZONE_OVERLAY[over.zone]}`}
           >
             {NO_ROOM}
           </div>
