@@ -207,12 +207,28 @@ export const planReversal = (
   }
 ): ReversalPlan => planGroupedReversal([input], input.now, input.choices)
 
-/** Merge the relative order of surviving shared entries, independently of their values. */
+/** String greetings have no IDs. Positions align only across unique lists with no visible moves. */
+const mergeGreetings = (changed: unknown, now: unknown, original: unknown) => {
+  const greetings = (value: unknown): value is ReadonlyArray<string> =>
+    Array.isArray(value) && value.every((item) => typeof item === "string") && new Set(value).size === value.length
+  if (!greetings(changed) || !greetings(now) || !greetings(original)) return undefined
+  const positions = new Map(changed.map((text, index) => [text, index]))
+  const aligns = (side: ReadonlyArray<string>) =>
+    side.length === changed.length && side.every((text, index) => (positions.get(text) ?? index) === index)
+  if (!aligns(now) || !aligns(original)) return undefined
+  const merged = changed.map((text, index) => merge3(text, now[index], original[index]))
+  return { value: merged.map((part) => part.value), conflicts: merged.flatMap((part) => part.conflicts) }
+}
+
 const mergeUnit = (field: string, changed: unknown, now: unknown, original: unknown) => {
-  if (unitPath(field)[1] !== ORDER_UNIT || !Array.isArray(changed) || !Array.isArray(now) || !Array.isArray(original))
-    return merge3(changed, now, original)
-  const shared = new Set(commonOrder(changed, new Set(now)).filter((key) => original.includes(key)))
-  return merge3(commonOrder(changed, shared), commonOrder(now, shared), commonOrder(original, shared))
+  const [top, element] = unitPath(field)
+  if (element === ORDER_UNIT && Array.isArray(changed) && Array.isArray(now) && Array.isArray(original)) {
+    const shared = new Set(commonOrder(changed, new Set(now)).filter((key) => original.includes(key)))
+    return merge3(commonOrder(changed, shared), commonOrder(now, shared), commonOrder(original, shared))
+  }
+  if (element === undefined && (top === "alternate_greetings" || top === "group_only_greetings"))
+    return mergeGreetings(changed, now, original) ?? merge3(changed, now, original)
+  return merge3(changed, now, original)
 }
 
 /** Apply the selected inverse patches newest first, on a tentative document. */
