@@ -27,32 +27,46 @@ declare module "vitest" {
 
 const BUNDLES = "bundles"
 
-/** The run's directory, shared by every project that has this setup (server, server-slow). */
+/** The run's directory, shared by every project that has this setup (server, server-slow, server-live). */
 interface Run {
   readonly dir: string
-  readonly bundleDir: Promise<string>
+  readonly bundleDir: string
+  /** The bundle build, started by the first project that builds; the live project doesn't. */
+  built?: Promise<void>
   users: number
 }
 
 /**
- * A setup for each project of a run. A run of both server projects (`npx vitest run`) gets
- * one directory and one build: a second directory would land inside the first, since TMPDIR
- * points there by then, and the first's check would find it. Vitest may load this module
- * once per project, so the run lives in `holder`, by default `globalThis`.
+ * A setup for each project of a run. A run of several server projects (`npx vitest run`, or
+ * filters matching files of each) gets one directory and one build: a second directory would
+ * land inside the first, since TMPDIR points there by then, and the first's check would find
+ * it. Vitest may load this module once per project, so the run lives in `holder`, by default
+ * `globalThis`. `build` is null for a project that needs no bundles (server-live): it shares
+ * the directory but doesn't decide whether the bundles get built, whichever project's setup
+ * Vitest runs first. (When the live project's empty build could be the run's only one, a
+ * filter matching a live file and server files failed every server test with
+ * WorkerBundleMissing.)
  */
 export const makeSetup =
-  (build: (bundleDir: string) => Promise<void>, holder: { rpTestRun?: Run } = globalThis as { rpTestRun?: Run }) =>
+  (
+    build: ((bundleDir: string) => Promise<void>) | null,
+    holder: { rpTestRun?: Run } = globalThis as { rpTestRun?: Run }
+  ) =>
   async (project: Pick<TestProject, "provide">) => {
     if (holder.rpTestRun === undefined) {
       const dir = mkdtempSync(join(tmpdir(), "rp-test-run-"))
       process.env.TMPDIR = dir
       const bundleDir = join(dir, BUNDLES)
       mkdirSync(bundleDir)
-      holder.rpTestRun = { dir, bundleDir: build(bundleDir).then(() => bundleDir), users: 0 }
+      holder.rpTestRun = { dir, bundleDir, users: 0 }
     }
     const run = holder.rpTestRun
     run.users++
-    project.provide("bundleDir", await run.bundleDir)
+    if (build !== null) {
+      run.built ??= build(run.bundleDir)
+      await run.built
+    }
+    project.provide("bundleDir", run.bundleDir)
     return () => {
       if (--run.users > 0) return
       delete holder.rpTestRun

@@ -4,4 +4,4 @@
 // and a bundle build on a loaded host took minutes.
 import { makeSetup } from "../../support/globalSetup.ts"
 
-export default makeSetup(async () => {})
+export default makeSetup(null)
