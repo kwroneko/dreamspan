@@ -90,6 +90,12 @@ export interface CodeEditorProps {
   hostFiles?: ((data: DataTransfer) => boolean) | undefined
   /** Message text without the message's styling (`message.text-editor`): the composer's guidance. */
   plain?: boolean | undefined
+  /**
+   * Message text in a form field, in the message editor's box (`MessageTextEditor`): a card's
+   * greeting ("message") or its example dialogue ("examples", whose `<START>` lines and speaker
+   * prefixes stay as they are). The message's styling, with the field's own font and metrics.
+   */
+  messageField?: "message" | "examples" | undefined
   ref?: Ref<TextSurfaceHandle> | undefined
 }
 

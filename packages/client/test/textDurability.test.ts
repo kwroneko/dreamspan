@@ -46,7 +46,8 @@ const SITES: Readonly<Record<string, ReadonlyArray<Site>>> = {
     { exempt: "primitive: Textarea with textActions" }
   ],
   "features/editor/CardTextEditor.tsx": [
-    { durable: "EditorStore", what: "the code editor of a library field, given its store and field" }
+    { durable: "EditorStore", what: "the code editor of a library field, given its store and field" },
+    { durable: "EditorStore", what: "a card's greeting or example dialogue, in the message text box, same store" }
   ],
   "features/chat/editorHistory.tsx": [
     {
