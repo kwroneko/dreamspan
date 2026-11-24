@@ -5591,6 +5591,11 @@ const ReadOpsOwn = RpcGroup.make(
     ),
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("ListSharedNoteRefs", {
+    payload: { userId: UserId },
+    success: Schema.Array(LibraryRef),
+    error: StorageError
+  }),
   /**
    * The user's shared notes not in the bin whose title has `query` (all without one), or the
    * one `refId` or `entityId` names.

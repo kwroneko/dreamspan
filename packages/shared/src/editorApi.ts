@@ -605,3 +605,8 @@ export class OwnTurnNoteApi extends RpcGroup.make(
     error: Schema.Union([...Errors, EditRefused])
   })
 ) {}
+
+/** Global shared notes in the library, as refs only. */
+export class SharedNoteRefsApi extends RpcGroup.make(
+  Rpc.make("ListSharedNoteRefs", { success: Schema.Array(LibraryRef), error: ServerError })
+) {}

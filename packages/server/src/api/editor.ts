@@ -85,6 +85,13 @@ const checkField = (field: string) =>
     ? Effect.fail(new EditRefused({ message: "That isn't a field of a document." }))
     : Effect.void
 
+export const makeSharedNoteRefsHandlers = Effect.map(Reader, (reader) => ({
+  ListSharedNoteRefs: () =>
+    Effect.flatMap(CurrentUser, (user) => reader.ListSharedNoteRefs({ userId: user.id })).pipe(
+      settle("ListSharedNoteRefs")
+    )
+}))
+
 export const makeEditorHandlers = Effect.gen(function* () {
   const notices = yield* Notices
   const hub = yield* ChatHub
