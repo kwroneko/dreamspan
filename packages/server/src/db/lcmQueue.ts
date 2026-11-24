@@ -1,3 +1,4 @@
+import { listed, listedSql } from "./listedChats.ts"
 import { requireSummaries } from "./chatKindPolicy.ts"
 import { inJobFork, withdrawReruns } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
@@ -408,7 +409,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
     ReconcileSummaryJobs: ({ userId, running }) =>
       Effect.gen(function* () {
         const rows = yield* sql<{ id: string; claim_epoch: number; rollout_id: string | null }>`
-          SELECT j.id,j.claim_epoch,j.rollout_id FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id
+          SELECT j.id,j.claim_epoch,j.rollout_id FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id /* chat:includes-pending: every job left running is closed */
           WHERE c.owner_user_id=${userId} AND j.status='processing'`
         for (const row of rows) {
           if (running.some((r) => r.id === row.id && r.epoch === row.claim_epoch)) continue
@@ -423,7 +424,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         yield* enforceCaps(sql, userId)
         const idle = yield* sql<{ id: string; chat_id: string; prefix_json: string | null }>`
           SELECT j.id,j.chat_id,j.prefix_json FROM summarization_jobs j JOIN chats c ON c.id=j.chat_id
-          WHERE c.owner_user_id=${userId} AND c.deleted_at IS NULL AND j.status='pending' AND j.request_class='idle'`
+          WHERE c.owner_user_id=${userId} AND ${listed(sql, "c")} AND j.status='pending' AND j.request_class='idle'`
         for (const job of idle)
           if (
             !(yield* summaryIsWarm(
@@ -456,7 +457,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         }>`
           SELECT j.id, j.chat_id, j.fork_id, s.id AS slot_id, s.chain_id, s.depth
           FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id JOIN slots s ON s.id = j.first_slot_id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.fork_id IS NOT NULL
+          WHERE c.owner_user_id = ${userId} AND ${listed(sql, "c")} AND j.fork_id IS NOT NULL
             AND j.level = 1 AND j.status IN ('pending','processing')`
         const positions: Array<readonly [string, number]> = []
         for (const fork of new Set(starts.map((j) => j.fork_id))) {
@@ -476,7 +477,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
         ${displayOrder ? "LEFT JOIN display_jobs jo ON jo.id = j.id" : ""}
         JOIN slots start ON start.id = j.first_slot_id
-        WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'pending'
+        WHERE c.owner_user_id = ? AND ${listedSql("c")} AND j.status = 'pending'
         AND (j.fork_id IS NULL OR EXISTS(SELECT 1 FROM forks jf WHERE jf.id=j.fork_id AND jf.deleted_at IS NULL))
         AND NOT ${heldSql("j.chat_id", "j.fork_id")}
         AND (j.request_class = 'interactive' OR j.explicit_requested = 1 OR ${spends("j")})
@@ -605,7 +606,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           leafSlotId: SummaryJob["leafSlotId"]
         }>`
           SELECT c.owner_user_id AS userId,c.id AS chatId,f.id AS forkId,f.tip_slot_id AS leafSlotId
-          FROM chats c JOIN forks f ON f.chat_id=c.id WHERE c.deleted_at IS NULL AND f.deleted_at IS NULL
+          FROM chats c JOIN forks f ON f.chat_id=c.id WHERE ${listed(sql, "c")} AND f.deleted_at IS NULL
           AND f.tip_slot_id IS NOT NULL AND (EXISTS(SELECT 1 FROM summarization_jobs j
             WHERE j.chat_id=c.id AND j.fork_id=f.id AND j.status='pending') OR
             json_extract((SELECT value_json FROM state_events e WHERE e.chat_id=c.id AND e.key='lcm.settings'

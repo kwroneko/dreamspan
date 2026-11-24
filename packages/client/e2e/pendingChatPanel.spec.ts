@@ -1,6 +1,7 @@
-// A pending chat (before the first send) has the saved chat's side panel (DESIGN §2.1, owner
-// 2026-11-02: it looks and works like any other chat): resizable, with the same tabs; and a
-// character added in its Cast tab before the first send is in the chat that send makes.
+// A new chat (a pending chat until its first send, DraftChatPage.tsx) has the chat's own side
+// panel (DESIGN §2.1, owner 2026-11-02: it looks and works like any other chat): resizable, with
+// the same tabs, a tab that needs a started chat saying so in its place; and a character added in
+// its Cast tab before the first send is in the chat that send starts.
 import { test, expect, type Page } from "@playwright/test"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -31,8 +32,11 @@ const setup = async (page: Page) => {
 
 /**
  * Every tab the open panel offers: its tools (with those under More) and its cast strip; and
- * which of the tools are registered as offered only once the chat is saved (`savedOnly`).
+ * which of the tools are registered as needing a started chat (`savedOnly`).
  */
+const NOT_STARTED = "Available once the chat is started: send a message first."
+const greeting = (page: Page, text: string) => page.getByRole("article").filter({ hasText: text })
+
 const tabNames = async (page: Page) => {
   const tools = page.getByRole("tablist", { name: "Chat panel" })
   await expect(tools).toBeVisible()
@@ -58,11 +62,11 @@ const tabNames = async (page: Page) => {
   }
 }
 
-test("a pending chat's side panel resizes and has the saved chat's tabs", async ({ page }) => {
+test("a new chat's side panel resizes and has the started chat's tabs", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { wren } = await setup(page)
   await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
-  await expect(page.getByRole("article", { name: "Greeting from Panel Wren" })).toBeVisible()
+  await expect(greeting(page, "Wren waves.")).toBeVisible()
   await openPanel(page, "Cast")
   const pendingTabs = await tabNames(page)
   // Resizable, as the saved chat's panel is.
@@ -72,27 +76,23 @@ test("a pending chat's side panel resizes and has the saved chat's tabs", async 
   await grip.focus()
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft")
   await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThan(before + 20)
-  // A tab that needs the saved chat says so, in its place.
-  await openPanel(page, "Notes")
-  await expect(page.getByRole("tabpanel", { name: "Notes" })).toContainText("Available once the chat is saved")
-  // The first send saves it in place: the same panel, its tab and its width.
+  // A tab that needs a started chat (the Workshop, attached to a started chat: spec/WORKSHOP.md
+  // §4) stays in its place and says so.
+  await openPanel(page, "Workshop")
+  const workshop = page.getByRole("tabpanel", { name: "Workshop" })
+  await expect(workshop).toContainText(NOT_STARTED)
+  // The first send starts it in place: the same panel, its tab and its width.
   const width = (await panel.boundingBox())!.width
   await page.getByLabel("Message", { exact: true }).fill("Hello, Wren.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+\?.*panel=notes/)
-  await expect(page.getByRole("tabpanel", { name: "Notes" })).not.toContainText("Available once the chat is saved")
-  await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+\?.*panel=workshop/)
+  await expect(workshop).not.toContainText(NOT_STARTED)
   await expect.poll(async () => Math.abs(((await panel.boundingBox())?.width ?? 0) - width)).toBeLessThanOrEqual(1)
-  // The same tabs, apart from those registered as offered only once the chat is saved: the
-  // Workshop tab, whose workshop is attached to the saved chat (spec/WORKSHOP.md §4).
+  // The same tabs before and after.
   const saved = await tabNames(page)
-  expect(pendingTabs.savedOnly).toEqual([])
-  expect(saved.savedOnly).toEqual(["Workshop"])
-  expect(pendingTabs.tabs).not.toContain("Workshop")
-  expect(saved.tabs.filter((name) => !saved.savedOnly.includes(name))).toEqual(pendingTabs.tabs)
+  expect(pendingTabs.savedOnly).toEqual(["Workshop"])
+  expect(saved).toEqual(pendingTabs)
   // With no workshop beside it yet, the tab is its chat already: the intro and the composer.
-  await openPanel(page, "Workshop")
-  const workshop = page.getByRole("tabpanel", { name: "Workshop" })
   await expect(workshop.locator("[data-side-chat-intro]")).toContainText("out of character")
   await expect(workshop.getByLabel("Message", { exact: true })).toBeVisible()
 })
@@ -101,7 +101,7 @@ test("the first send opens the saved chat with no loading skeleton or placeholde
   await page.setViewportSize({ width: 1440, height: 900 })
   const { wren } = await setup(page)
   await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
-  await expect(page.getByRole("article", { name: "Greeting from Panel Wren" })).toBeVisible()
+  await expect(greeting(page, "Wren waves.")).toBeVisible()
   // Everything the page adds from here on: the messages' skeleton, the header's placeholder name.
   await page.evaluate(() => {
     const seen: Array<string> = []
@@ -173,7 +173,7 @@ test("the first send keeps its timeline when the header read fails", async ({ pa
   ).toBe(false)
 })
 
-test("a character added in the pending Cast tab is in the chat the first send makes", async ({ page }) => {
+test("a character added in a new chat's Cast tab is in the chat the first send starts", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { wren } = await setup(page)
   await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
@@ -182,11 +182,6 @@ test("a character added in the pending Cast tab is in the chat the first send ma
   const add = cast.getByRole("button", { name: "Add Panel Ivo to this chat" })
   await add.click()
   await expect(cast.getByRole("listitem", { name: "Panel Ivo" })).toBeVisible()
-  await expect(page.getByRole("article", { name: "Greeting from Panel Ivo" })).toBeVisible()
-  // The header names both, as the saved chat will be named.
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Panel Wren & Panel Ivo")
-  // Two characters: who answers first is picked here too.
-  await expect(cast.getByLabel("Reply from", { exact: true })).toBeVisible()
   await page.getByLabel("Message", { exact: true }).fill("Hello, both.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+/)
@@ -198,13 +193,14 @@ test("a character added in the pending Cast tab is in the chat the first send ma
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`saved-only URL and first-send tab continuity: ${width} ${theme}`, async ({ page }) => {
+    test(`a waiting tab's URL and first-send tab continuity: ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       const { wren } = await setup(page)
+      // The Workshop tab waits in its place on a new chat: its URL keeps it.
       await page.goto(`${server().url}/cards/${wren.entityId}/chat?panel=workshop`)
-      await expect(page).toHaveURL(/panel=chat(?:&|$)/)
-      await expect(page.getByRole("tabpanel", { name: "This chat", exact: true })).toBeVisible()
+      await expect(page).toHaveURL(/panel=workshop(?:&|$)/)
+      await expect(page.getByRole("tabpanel", { name: "Workshop", exact: true })).toContainText(NOT_STARTED)
       // Close the phone sheet so the composer can be used, then select a tab whose position
       // and focus must survive the first send. Programmatic click leaves focus on that tab.
       if (width === 390) await page.keyboard.press("Escape")
@@ -240,7 +236,7 @@ for (const width of [1440, 390])
         .getByRole("button", { name: "Send", exact: true, includeHidden: true })
         .evaluate((button: HTMLButtonElement) => button.click())
       await expect(page).toHaveURL(/\/chats\/[^/?]+\?.*panel=notes/)
-      await expect(page.getByRole("tabpanel", { name: "Notes" })).not.toContainText("Available once the chat is saved")
+      await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
       await expect(notes).toBeFocused()
       const continuity = await page.evaluate(() => {
         const state = (

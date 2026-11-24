@@ -9,13 +9,12 @@
 import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect } from "react"
 import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
-import type { PendingChat } from "../chat/pendingChat.ts"
 import { chatCharacterRows, pendingPersonaPickerRows } from "../chat/presentation.tsx"
 
 /** Writes of a lock name this; "library" also reads it again when a persona card changes. */
@@ -70,14 +69,10 @@ const lockHint = (name: string) => `New chats with ${name} start with this perso
  * the search: lock the persona picked to its character. A row of the list's own inset, not a
  * settings switch; none while no persona is picked.
  */
-function PendingPersonaLock({ pending }: { pending: PendingChat }) {
-  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
-  // The chat's one character now: none once another joins in the Cast tab.
-  const card = pending.lockCard(state)
+function PendingPersonaLock({ card, persona }: { card: CastCard | null; persona: CastCard | null }) {
   const lock = usePersonaLock(card?.entityId ?? null)
   const action = useAction()
-  const persona = card === null || state.persona === card.entityId ? null : pending.playing(state)
-  if (card === null || persona === null) return null
+  if (card === null || persona === null || persona.entityId === card.entityId) return null
   const locked = lock.persona?.entityId === persona.entityId
   return (
     <div className="mx-2 flex min-h-9 shrink-0 items-center rounded-md px-2 py-2 hover:bg-surface-raised">

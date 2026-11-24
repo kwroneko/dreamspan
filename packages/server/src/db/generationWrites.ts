@@ -1,3 +1,4 @@
+import { commitPendingChat } from "./pendingChats.ts"
 import { makeExternalMediaWriteHandlers } from "./externalMedia.ts"
 import { makeSavedMediaWriteHandlers } from "./savedMedia.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
@@ -133,6 +134,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         // read since, so no request record is made and nothing is sent.
         yield* refuseBrokenTurn(sql, versionId)
         const now = Date.now()
+        // A request is a turn: a pending chat is committed before anything records one (its
+        // generating version committed it already; this keeps the ledger off pending chats).
+        yield* commitPendingChat(sql, chatId, now)
         // The fork it writes in: the one named, else the current one when its path holds the
         // leaf, as a send's does.
         const [chat] = yield* sql<{

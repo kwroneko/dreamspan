@@ -1,3 +1,4 @@
+import { refusePending } from "./chatKindPolicy.ts"
 // Starting parallel threads (spec/THREADS.md §5.2, TH2; DESIGN §3.3 [D]), in the writer worker:
 // one transaction makes the split, a fork per new thread at S beside the branch F the user is
 // in (which continues as the first thread), each thread's away marks at S, each new thread's
@@ -48,6 +49,7 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const at = Date.now()
           yield* graph.ownedChat(userId, chatId)
+          yield* refusePending(sql, chatId)
           const fork = yield* graph.ownedFork(userId, chatId, forkId)
 
           // 1. S is on F's display path and not deleted there, as the tab saw it.
@@ -200,6 +202,7 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
 
       UndoThreads: ({ userId, chatId, splitId }) =>
         Effect.gen(function* () {
+          yield* refusePending(sql, chatId)
           const itemId = yield* bin.removeThreads(userId, chatId, splitId)
           yield* bin.evictDeleted(userId, itemId)
           return toBinItem(yield* bin.loadItem(userId, itemId))

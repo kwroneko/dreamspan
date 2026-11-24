@@ -14,6 +14,7 @@ import { shareBirthMigration } from "./migrationShareBirth.ts"
 import { guidanceTargetMigration } from "./migrationGuidanceTarget.ts"
 import { reasoningStatsMigration } from "./migrationReasoningStats.ts"
 import { nativeReasoningMigration } from "./migrationNativeReasoning.ts"
+import { pendingChatsMigration } from "./migrationPendingChats.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -102,7 +103,9 @@ export const migrationDefinitions = {
       `CREATE INDEX version_library_revision ON version_library(revision_id)`,
       `ALTER TABLE queued_messages ADD COLUMN library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json))`
     ]
-  }
+  },
+  // DESIGN §2.1 (owner, 2026-11-23): the new-chat page's chat, pending until its first turn, and the entry it was opened for.
+  "0018_pending_chats": { statements: pendingChatsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

@@ -1,3 +1,4 @@
+import { refusePending } from "./chatKindPolicy.ts"
 import { chatFork } from "./snippets.ts"
 import { revisionOnLine } from "./revisionNumbers.ts"
 import { inFork } from "./forkState.ts"
@@ -905,6 +906,9 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const [chat] = yield* sql<{ id: ChatId }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        // A pending chat owns no notes until it is committed: the library would list one, and
+        // the sweep would leave it behind (DESIGN §2.1).
+        yield* refusePending(sql, chatId)
         const label = (yield* linkTitle(userId, link)) ?? (title.trim().slice(0, 200) || "Note")
         const doc = {
           ...newChatNote(chat.id, label, link),

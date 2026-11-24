@@ -1,5 +1,5 @@
 // The Chats page's start cards open a chat not made yet (owner, 2026-11-17: "The chat is created
-// when the first message is sent"): New chat opens the pending chat page with no characters, New
+// when the first message is sent"): New chat opens a pending chat with no characters, New
 // workshop the workshop's own pending page with the saved workshop's composer (speaker chip,
 // Guidance, Generate, the model, preset and capability chips); nothing exists until the first
 // send, and a reload keeps the page, its title and what's typed. A workshop's grants chosen
@@ -39,10 +39,10 @@ test.describe("chats started from the Chats page", () => {
       await page.goto(`${server().url}/chats`)
       await page.getByLabel("Title of the new chat").fill(title)
       await page.getByRole("button", { name: "New chat", exact: true }).click()
-      await expect(page).toHaveURL(/\/new\/chat$/)
+      // A pending chat (DraftChatPage.tsx), named by the title typed, which its URL names.
+      await expect(page).toHaveURL(/\/new\/chat\?draft=[^&]+$/)
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
       await expect(page.locator("[data-empty-chat-intro]")).toBeVisible()
-      await expect(page.getByLabel("Title of the new chat")).toHaveValue(title)
       const box = page.getByLabel("Message", { exact: true })
       await box.fill("A note to keep.")
       await expect(page.getByRole("button", { name: /^Generate/ })).toBeVisible()
@@ -50,11 +50,10 @@ test.describe("chats started from the Chats page", () => {
       await shot(page, `new-chat-pending-${width}`)
       await expectLayout(page, info, `new-chat-pending-${width}`)
 
-      // A reload keeps the pending page, its title and what's typed; still nothing is made.
+      // A reload keeps the pending chat, its title and what's typed; still nothing is listed.
       await page.waitForTimeout(800)
       await page.reload()
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByLabel("Title of the new chat")).toHaveValue(title)
       await expectTextBox(box, "A note to keep.")
       expect((await chats()).length).toBe(before)
 

@@ -46,6 +46,7 @@ export const register = () => [
   chatOverlays.register({ id: "threads.loader", order: 20, component: ThreadsLoader }),
   messageActions.register({
     id: "message.threads",
+    needsStarted: true,
     order: 70,
     group: "place",
     describe: viewOf(({ openDialog }) => ({
@@ -60,6 +61,7 @@ export const register = () => [
   }),
   chatCommands.register({
     id: "chat.threads",
+    needsStarted: true,
     label: "Start parallel threads…",
     description:
       "From the newest message: two or more threads that run at the same time, each with its own characters, until you join them.",

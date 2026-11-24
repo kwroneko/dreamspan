@@ -171,7 +171,8 @@ describe("0002_files", () => {
           "composer_save_session",
           "composer_commits",
           "workshop_starts",
-          "library_attachments"
+          "library_attachments",
+          "pending_chats"
         ]
       )
       // The existing row is kept, an image by default.
@@ -239,6 +240,33 @@ describe("0004_workshop_branches", () => {
       assert.deepStrictEqual(
         (yield* sql<{ state_seq: number }>`SELECT state_seq FROM chats WHERE id = 'w'`).map((r) => r.state_seq),
         [2]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0018_pending_chats", () => {
+  it.effect("files the old new-chat pages' first messages to recovered texts, keeping a card source page's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(17))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES
+        ('card', 'u', 'user_field', 'pending-chat:e1', 'First message', 'Hello, lighthouse keeper.', 5),
+        ('group', 'u', 'user_field', 'pending-group-chat:e1,e2:Crew', 'First message', 'Hello, crew.', 6),
+        ('blank', 'u', 'user_field', 'pending-chat:e2', 'First message', '  ', 7),
+        ('source', 'u', 'user_field', 'pending-chat:src:s1:r1', 'First message', 'Hello, stranger.', 8)`
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(
+        yield* sql`SELECT source_id, source_label, content, created_at FROM recovered_texts ORDER BY created_at`,
+        [
+          { source_id: "pending-chat:e1", source_label: "New chat", content: "Hello, lighthouse keeper.", created_at: 5 },
+          { source_id: "pending-group-chat:e1,e2:Crew", source_label: "New chat", content: "Hello, crew.", created_at: 6 }
+        ]
+      )
+      assert.deepStrictEqual(
+        (yield* sql<{ id: string }>`SELECT id FROM drafts ORDER BY id`).map((row) => row.id),
+        ["source"]
       )
     }).pipe(Effect.provide(layer()))
   )
@@ -457,7 +485,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0014_composer_save_session",
       "0015_composer_commits",
       "0016_workshop_starts",
-      "0017_library_attachments"
+      "0017_library_attachments",
+      "0018_pending_chats"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -734,6 +763,28 @@ describe("0013_native_reasoning", () => {
   )
 })
 
+describe("0018_pending_chats", () => {
+  it.effect("adds the pending chat's entry, NULL on every chat there was, and the index that finds them", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0018_pending_chats": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at)
+        VALUES ('c', 'u', 'rp', 'active', 'Mira, Nov 24', 1, 2)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      // Existing data is kept as it was: the chat is active, with no entry.
+      assert.deepStrictEqual(yield* sql`SELECT id, status, title, created_at, last_message_at, draft_for FROM chats`, [
+        { id: "c", status: "active", title: "Mira, Nov 24", created_at: 1, last_message_at: 2, draft_for: null }
+      ])
+      const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT id FROM chats WHERE owner_user_id = 'u' AND draft_for = 'empty' AND status = 'pending'
+        ORDER BY created_at DESC`
+      assert.isTrue(plan.some((row) => row.detail.includes("chats_pending")))
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("released migrations", () => {
   // A migration's SQL must never change once released, so it can't be built from helpers that
   // later edits could change (review files23 finding 1). The baseline is exempt: it may still
@@ -751,7 +802,8 @@ describe("released migrations", () => {
       "migrationShareBirth.ts",
       "migrationGuidanceTarget.ts",
       "migrationReasoningStats.ts",
-      "migrationNativeReasoning.ts"
+      "migrationNativeReasoning.ts",
+      "migrationPendingChats.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

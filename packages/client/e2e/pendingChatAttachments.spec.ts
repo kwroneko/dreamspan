@@ -1,7 +1,8 @@
-// A chat not made yet attaches as a saved chat does: the same paperclip in the same row, paste
-// and drop, the thumbnails above the text, which stays put; a reload keeps them, and the first send makes the
-// chat with them on its first message. Generate leaves them, and they move to the saved chat's
-// composer. At 1440 and 390 with the layout audit. Synthetic cards and a drawn image only.
+// A new chat (a pending chat until its first send, DraftChatPage.tsx) attaches with the chat's own
+// composer: the paperclip in its row, paste and drop, the thumbnails above the text, which stays
+// put; a reload keeps them, and the first send starts the chat with them on its first message.
+// Generate leaves them in the composer. At 1440 and 390 with the layout audit. Synthetic cards
+// and a drawn image only.
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { composerPlaces, expectGrewUpward, expectImageTile } from "./support/attachments.ts"
@@ -41,13 +42,16 @@ const transfer = (page: Page, kind: "paste" | "drop", name: string, base64: stri
       data.items.add(new File([bytes], name, { type: "image/png" }))
       const target =
         kind === "paste"
-          ? document.querySelector('[data-testid="composer"]')!
-          : document.querySelector("[data-chat-main] .overflow-y-auto")!
+          ? // The composer's editor content, in its editor's shadow root: the editor sees the paste first.
+            [...document.querySelector("[data-composer-text]")!.querySelectorAll("*")]
+              .map((element) => element.shadowRoot?.querySelector('[data-testid="composer"]'))
+              .find((element) => element)!
+          : document.querySelector('[data-testid="messages"]')!
       if (kind === "drop")
         target.dispatchEvent(new DragEvent("dragover", { dataTransfer: data, bubbles: true, cancelable: true }))
       target.dispatchEvent(
         kind === "paste"
-          ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+          ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true })
           : new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
       )
     },
@@ -104,7 +108,7 @@ for (const width of [1440, 390]) {
     await box.fill("Here's the harbor.")
     await expect(page.getByRole("button", { name: /^Send/ })).toBeEnabled()
 
-    // A reload keeps them, and still nothing is made.
+    // A reload keeps them, and still nothing is listed.
     await page.waitForTimeout(800)
     await page.reload()
     await expect(attached(page).getByRole("img")).toHaveCount(3, { timeout: 30_000 })
@@ -112,7 +116,7 @@ for (const width of [1440, 390]) {
     expect((await chats()).length).toBe(before)
     await expectLayout(page, info, `pending-attachments-reloaded-${width}`)
 
-    // The first send makes the chat, with them on its first message.
+    // The first send starts the chat, with them on its first message.
     await page.getByRole("button", { name: /^Send/ }).click()
     await expect(page).toHaveURL(/\/chats\/[^/?]+/)
     const sent = page.getByRole("article").filter({ hasText: "Here's the harbor." })
@@ -129,48 +133,39 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("the first send leaves out an image whose deletion is still queued", async ({ page }) => {
+test("the first send leaves out an image whose removal is still on its way", async ({ page }) => {
+  // A new chat's composer is the chat's own: removing an image clears it from the chat's draft
+  // on the server (SetComposerImage), held here until after Send.
+  let release: (() => void) | null = null
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const removal =
+        typeof data === "string" && data.includes('"tag":"SetComposerImage"') && data.includes('"mediaId":null')
+      if (removal && release === null) release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.CreateCard({ label: "Dock clerk", name: "Dock clerk" })
   )
   await page.goto(`${server().url}/cards/${card.entityId}/chat`)
-  const send = page.getByRole("button", { name: /^Send/ })
+  await expect(page).toHaveURL(/[?&]draft=/)
   await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
   await page
     .getByLabel("Choose images")
     .setInputFiles({ name: "removed.png", mimeType: "image/png", buffer: await drawing(page) })
-  await expect(send).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Remove removed.png" })).toBeVisible()
   await page.getByLabel("Message", { exact: true }).fill("Only the note goes.")
   await attached(page).getByRole("img").hover()
-  // Hold a write transaction open so the app can't delete the queued image until after Send.
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        const open = indexedDB.open("dreamspan.message-images")
-        open.onerror = () => reject(open.error)
-        open.onsuccess = () => {
-          const db = open.result
-          const lock = db.transaction("images", "readwrite")
-          const store = lock.objectStore("images")
-          let held = true
-          window.addEventListener("release-image-delete", () => (held = false), { once: true })
-          lock.oncomplete = () => db.close()
-          const hold = () => {
-            store.get("test-lock").onsuccess = () => {
-              if (held) hold()
-            }
-          }
-          hold()
-          resolve()
-        }
-      })
-  )
   try {
     await page.getByRole("button", { name: "Remove removed.png" }).click()
-    await send.click()
+    await expect.poll(() => release !== null).toBe(true)
+    await page.getByRole("button", { name: /^Send/ }).click()
   } finally {
-    await page.evaluate(() => window.dispatchEvent(new Event("release-image-delete")))
+    ;(release as (() => void) | null)?.()
   }
   await expect(page).toHaveURL(/\/chats\/[^/?]+/)
   const sent = page.getByRole("article").filter({ hasText: "Only the note goes." })
@@ -178,7 +173,7 @@ test("the first send leaves out an image whose deletion is still queued", async 
   await expect(sent.getByRole("button", { name: /^View image/ })).toHaveCount(0)
 })
 
-test("Generate leaves the attachments, and they move to the saved chat's composer", async ({ page }) => {
+test("Generate leaves the attachments in the started chat's composer", async ({ page }) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -195,7 +190,7 @@ test("Generate leaves the attachments, and they move to the saved chat's compose
   await expect(generate).toBeEnabled()
   await generate.click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+/)
-  // Attached to the saved chat's draft on the server: it's there without this browser's copy.
+  // Attached to the chat's draft on the server: it's there without this browser's copy.
   await expect(page.getByRole("button", { name: "Remove kept.png" })).toBeVisible({ timeout: 30_000 })
   await page.waitForTimeout(800)
   await page.evaluate(

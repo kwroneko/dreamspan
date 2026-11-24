@@ -1,3 +1,4 @@
+import { committed } from "./listedChats.ts"
 // Per-chat stamps for the re-import preview (ARCHITECTURE.md §13 "Re-import preview"). The
 // preview records one per chat it reads, before it maps any file; the confirmed import's
 // write of a file into that chat (`StImportCommitChat`) reads it again first, in the same
@@ -56,7 +57,7 @@ const chatColumns = "id, row_version, shell_stamp, state_seq, current_fork_id, a
 export const stImportChatStamps = (sql: SqlClient.SqlClient, userId: UserId) =>
   Effect.gen(function* () {
     const chats = yield* sql<ChatRow>`SELECT ${sql.literal(chatColumns)} FROM chats
-      WHERE owner_user_id = ${userId} ORDER BY id`
+      WHERE owner_user_id = ${userId} AND ${committed(sql, "chats")} ORDER BY id`
     const records = yield* sql<RecordRow>`
       SELECT id, status, payload_json, json_extract(payload_json, '$.chatId') AS chat_id FROM jobs
       WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD} ORDER BY id`

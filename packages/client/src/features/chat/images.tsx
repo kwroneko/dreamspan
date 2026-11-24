@@ -619,6 +619,12 @@ function ImageScope({
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Removed but not yet gone from the draft: never sent (a new chat's first send included).
+  const removing = useRef(new Set<string>())
+  useEffect(() => {
+    // Capture still sees the previous entries until React commits the new list.
+    for (const id of removing.current) if (!entries.some((entry) => entry.id === id)) removing.current.delete(id)
+  }, [entries])
   const queue = useRef(Promise.resolve())
   const draftId = useRef<string | null>(null)
   const enqueue = (run: () => Promise<void>) => {
@@ -795,7 +801,9 @@ function ImageScope({
     [session, view.forkId, ready]
   )
   const capture = () => {
-    const captured = entries.filter((entry) => entry.mediaId && entry.saved && !entry.sending)
+    const captured = entries.filter(
+      (entry) => entry.mediaId && entry.saved && !entry.sending && !removing.current.has(entry.id)
+    )
     const images: MessageImages = captured.map((entry) => ({
       mediaId: entry.mediaId!,
       altText: entry.name.slice(0, 2000),
@@ -860,19 +868,27 @@ function ImageScope({
           })
         },
         remove: (id) => {
+          if (removing.current.has(id)) return
+          removing.current.add(id)
           void enqueue(async () => {
-            if (!draftId.current) throw new Error("The attachment draft is still loading. Reload to retry.")
-            const removed = await session.call((client) =>
-              client("SetComposerImage", {
-                chatId: session.chatId,
-                draftId: draftId.current!,
-                id,
-                mediaId: null,
-                altText: ""
-              })
-            )
-            if (!removed.ok) throw new Error(removed.error.message)
-            await dropImage(id)
+            try {
+              if (!draftId.current) throw new Error("The attachment draft is still loading. Reload to retry.")
+              const removed = await session.call((client) =>
+                client("SetComposerImage", {
+                  chatId: session.chatId,
+                  draftId: draftId.current!,
+                  id,
+                  mediaId: null,
+                  altText: ""
+                })
+              )
+              if (!removed.ok) throw new Error(removed.error.message)
+              await dropImage(id)
+            } catch (error) {
+              removing.current.delete(id)
+              throw error
+            }
+            setEntries((current) => current.filter((entry) => entry.id !== id))
             await refresh()
           })
         }

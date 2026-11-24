@@ -31,6 +31,7 @@ import {
   usePanelTabs
 } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
+import { isPendingChat, NOT_STARTED } from "./chatStarted.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
 declare module "@tanstack/react-router" {
@@ -258,7 +259,9 @@ export function ChatSidePanel({
             description:
               "pending" in content && !t.descriptor.pending
                 ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
-                : t.descriptor.description
+                : t.descriptor.savedOnly && isPendingChat(content.view.chat)
+                  ? `${t.descriptor.description ?? t.label} ${NOT_STARTED}`
+                  : t.descriptor.description
           }))}
           value={tab}
           onValueChange={onTab}
@@ -333,6 +336,11 @@ export function ChatSidePanel({
                     pending={content.pending}
                     view={content.view}
                   />
+                ) : t.descriptor.savedOnly && isPendingChat(content.view.chat) ? (
+                  // A new chat not started yet: the tab stays in its place, saying why it waits.
+                  <p role="note" className="text-sm text-muted">
+                    {NOT_STARTED}
+                  </p>
                 ) : (
                   <PanelContent
                     key={t.descriptor.id}

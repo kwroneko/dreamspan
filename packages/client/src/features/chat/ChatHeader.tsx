@@ -1,3 +1,4 @@
+import { isPendingChat } from "./chatStarted.ts"
 import { cardChoiceLabel } from "./CardVersion.tsx"
 import { useSplitChats } from "./splitChats.ts"
 import { kindTitle } from "./kindLooks.ts"
@@ -385,6 +386,7 @@ export function ChatHeader({
         <>
           <ChatTitle session={session} view={view} name={name} request={renameRequest} onEditing={setRenaming} />
           {view.chat && <ChatBadges chat={view.chat} />}
+          {isPendingChat(view.chat) && <NewBadge />}
           {view.chat && <SlotOutlet slot={chatHeaderAbout} props={{ view }} />}
         </>
       }
@@ -443,6 +445,17 @@ export function PendingChatHeader({
       about={aboutLine(characters, title, null)}
       actions={<SlotOutlet slot={pendingChatHeaderActions} props={{ pending, view, panel }} />}
     />
+  )
+}
+
+/** A new chat not started yet: nothing lists it until its first message. */
+function NewBadge() {
+  return (
+    <Tooltip label="A new chat: it starts with your first message, and until then it isn’t in your chats.">
+      <span tabIndex={0} className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <Badge>new</Badge>
+      </span>
+    </Tooltip>
   )
 }
 

@@ -1,3 +1,5 @@
+import { refusePending } from "./chatKindPolicy.ts"
+import { listed } from "./listedChats.ts"
 // Snippets' writes: making one, and moving it between "This chat" and "All chats". Its text is
 // edited as any library field is (drafts, `CommitEditorDrafts`), not here.
 import { newSharedNote } from "@dreamspan/shared/editing.ts"
@@ -23,7 +25,7 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
         AND coalesce(json_extract(h.doc_json, '$.owner.chat'), '') <> ${chatId}
       UNION ALL
       SELECT 1 FROM state_events ev JOIN entity_revisions b ON b.id = json_extract(ev.value_json, '$.revision')
-      JOIN chats c ON c.id = ev.chat_id AND c.deleted_at IS NULL AND c.owner_user_id = ${userId}
+      JOIN chats c ON c.id = ev.chat_id AND ${listed(sql, "c")} AND c.owner_user_id = ${userId}
       WHERE ev.key = 'note.binding' AND ev.chat_id <> ${chatId} AND ev.superseded_by_changeset IS NULL
         AND json_extract(b.doc_json, '$.link') = ${entityId}
       LIMIT 1`.pipe(Effect.map((rows) => rows.length > 0))
@@ -32,6 +34,8 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
     CreateSnippet: ({ userId, chatId, title, content }) =>
       Effect.gen(function* () {
         yield* chatFork(sql, userId, chatId, null)
+        // A pending chat has no snippets of its own until it is committed (as for its notes).
+        if (chatId !== null) yield* refusePending(sql, chatId)
         const doc = {
           ...newSharedNote(title.trim() || "Untitled snippet", content),
           owner: { shared: chatId ?? "global" }
@@ -61,6 +65,7 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
             if (chatId === null)
               return yield* new RefOperationRefused({ refId, reason: "Only a chat can have a snippet of its own." })
             yield* chatFork(sql, userId, chatId, null)
+            yield* refusePending(sql, chatId)
             if (yield* shownOutside(userId, ref.entity_id, chatId))
               return yield* new RefOperationRefused({
                 refId,

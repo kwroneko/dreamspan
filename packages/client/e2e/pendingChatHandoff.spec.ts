@@ -5,22 +5,6 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "1200" })
-const copies = (page: Page) =>
-  page.evaluate(
-    () =>
-      new Promise<Array<{ content: string; save: { kind: string; payload: { chatId?: string } } }>>((resolve) => {
-        const request = indexedDB.open("dreamspan-editor-copies", 1)
-        request.onsuccess = () => {
-          const db = request.result
-          const all = db.transaction("copies").objectStore("copies").getAll()
-          all.onsuccess = () => {
-            db.close()
-            resolve(all.result)
-          }
-        }
-      })
-  )
-
 const setup = async (page: Page, title: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const existing = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
@@ -44,7 +28,9 @@ const setup = async (page: Page, title: string) => {
     })
   )
   await page.goto(`${server().url}/groups/${chat.id}/new`)
-  await expect(page.getByRole("article", { name: /^Greeting from / })).toHaveCount(2)
+  // A new chat of the group (DraftChatPage.tsx): each member's greeting, its URL naming it.
+  await expect(page.getByRole("article", { name: "Reply", exact: true })).toHaveCount(2)
+  await expect(page).toHaveURL(/[?&]draft=/)
   return chat
 }
 
@@ -64,78 +50,6 @@ test("a group's pending chat accepts the group's full existing title", async ({ 
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   await page.screenshot({ path: test.info().outputPath("phone-long-group-saved.png") })
 })
-
-for (const target of ["group", "card"] as const) {
-  test(`${target}: text typed during the first send survives reload before the new composer opens`, async ({
-    page
-  }) => {
-    let releaseStart: (() => void) | null = null
-    let composerHeld = false
-    let holdComposer = true
-    let holdSave = true
-    let saveHeld = false
-    await page.routeWebSocket("**/rpc", (socket) => {
-      const upstream = socket.connectToServer()
-      socket.onMessage((message) => {
-        const text = String(message)
-        if (releaseStart === null && text.includes('"tag":"StartChat"')) releaseStart = () => upstream.send(message)
-        else if (holdComposer && text.includes('"tag":"OpenComposer"')) composerHeld = true
-        else if (holdSave && text.includes('"tag":"SaveComposer"')) saveHeld = true
-        else upstream.send(message)
-      })
-      upstream.onMessage((message) => socket.send(message))
-    })
-    await setup(page, "Draft handoff")
-    if (target === "card") {
-      const cards = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
-      await page.goto(`${server().url}/cards/${cards.find((c) => c.name === "Tobias Wren")!.entityId}/chat`)
-      await expect(page.getByRole("article", { name: /^Greeting from / })).toHaveCount(1)
-    }
-    const composer = page.getByLabel("Message", { exact: true })
-    await composer.fill("The first message that will be saved.")
-    await page.getByRole("button", { name: "Send", exact: true }).click()
-    await expect.poll(() => releaseStart !== null).toBe(true)
-    await composer.fill("Irreplaceable text typed while the first send was pending.")
-    releaseStart!()
-    await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
-    await expect.poll(() => composerHeld).toBe(true)
-    const chatId = new URL(page.url()).pathname.split("/").at(-1)!
-    await expect
-      .poll(async () =>
-        (await copies(page)).some(
-          (copy) =>
-            copy.content === "Irreplaceable text typed while the first send was pending." &&
-            copy.save.payload.chatId === chatId
-        )
-      )
-      .toBe(true)
-    holdComposer = false
-    await page.reload()
-    // The destination has adopted a durable draft copy, but its save is still held.
-    await expect.poll(() => saveHeld).toBe(true)
-    await expect
-      .poll(async () =>
-        (await copies(page)).some(
-          (copy) =>
-            copy.save.kind === "composer" &&
-            copy.content === "Irreplaceable text typed while the first send was pending."
-        )
-      )
-      .toBe(true)
-    holdSave = false
-    await page.reload()
-    await expectTextBox(composer, "Irreplaceable text typed while the first send was pending.")
-    await expect.poll(() => copies(page)).toEqual([])
-    await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText(
-      "The first message that will be saved."
-    )
-    const recovered = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-      api.ListRecoveredTexts({ limit: 100, before: null })
-    )
-    expect(recovered.map((text) => text.content)).not.toContain("The first message that will be saved.")
-    await page.screenshot({ path: test.info().outputPath(`${target}-handoff-restored.png`) })
-  })
-}
 
 test("a phone shows the full streaming speaker name and Stop", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -166,21 +80,26 @@ for (const target of ["card", "group"] as const) {
       if (target === "card") {
         const cards = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
         await page.goto(`${server().url}/cards/${cards.find((c) => c.name === "Tobias Wren")!.entityId}/chat`)
+        await expect(page).toHaveURL(/[?&]draft=/)
       }
       const composer = page.getByLabel("Message", { exact: true })
-      const send = page.getByRole("button", { name: "Send", exact: true })
-      const generate = page.getByRole("button", { name: /^Generate / })
+      // The composer's own: a greeting's swipe arrow is also named Generate (another swipe).
+      const box = page.getByTestId("composer-box")
+      const send = box.getByRole("button", { name: "Send", exact: true })
+      const generate = box.getByRole("button", { name: /^Generate\b/ })
       await expect(composer).toBeEditable()
-      await expect(send).toBeDisabled()
-      // The chat's composer box at every width: the text on a row of its own, the actions on the
-      // control row under it; on a phone, Write is an icon.
+      // The chat's own composer (a new chat is a pending chat): empty, its send button asks for
+      // a reply, as in any chat; the text on a row of its own, the actions on the control row
+      // under it; on a phone, Generate is an icon.
       await expect(generate).toHaveText(width === 390 ? "" : "Generate")
-      await expect(send.locator("svg")).toBeVisible()
       const empty = (await composer.boundingBox())!
       expect(empty.height).toBeLessThan(45)
       const outline = (await page.getByTestId("composer-box").boundingBox())!
       expect(empty.width).toBeGreaterThan(outline.width * 0.95)
-      for (const control of [send, generate, page.getByRole("switch", { name: "Guidance", exact: true })]) {
+      await composer.fill("x")
+      await expect(send.locator("svg")).toBeVisible()
+      await composer.fill("")
+      for (const control of [generate, page.getByRole("switch", { name: "Guidance", exact: true })]) {
         const box = (await control.boundingBox())!
         expect(box.y).toBeGreaterThanOrEqual(empty.y + empty.height - 1)
         expect(box.y + box.height).toBeLessThanOrEqual(outline.y + outline.height)
@@ -194,13 +113,15 @@ for (const target of ["card", "group"] as const) {
       await composer.press("Shift+Enter")
       await composer.pressSequentially("Second line")
       await expectTextBox(composer, "First line\n\n\n\nSecond line")
+      const sendBox = (await send.boundingBox())!
+      expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(Math.min(width, outline.x + outline.width))
       expect((await composer.boundingBox())!.height).toBeGreaterThan(empty.height)
       expect(page.url()).toBe(pendingUrl)
       await page.reload()
       await expectTextBox(composer, "First line\n\n\n\nSecond line")
       await send.hover()
       // The tooltip ends with the key that sends, and only that (Base UI gives its popup no tooltip role).
-      await expect(page.getByText("Send. (Enter)", { exact: true })).toBeVisible()
+      await expect(page.getByText(/^Send\b.*\. \(Enter\)$/)).toBeVisible()
       await composer.press("Enter")
       await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
       await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("First line")

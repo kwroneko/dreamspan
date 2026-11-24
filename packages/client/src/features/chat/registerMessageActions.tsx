@@ -95,6 +95,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.branch",
+    needsStarted: true,
     onMerges: true,
     order: 60,
     group: "place",
@@ -109,6 +110,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.merge",
+    needsStarted: true,
     dialogInUrl: true,
     order: 75,
     group: "place",
@@ -186,6 +188,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.delete",
+    needsStarted: true,
     onMerges: true,
     order: 110,
     group: "delete",
@@ -210,6 +213,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.delete-all",
+    needsStarted: true,
     order: 111,
     group: "delete",
     disabled: ({ entry }) => (entry.versionCount < 2 ? "This message has only one swipe; use Delete message." : null),

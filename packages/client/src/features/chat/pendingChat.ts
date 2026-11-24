@@ -6,7 +6,7 @@
 import { greetingPick, offeredGreetings } from "@dreamspan/shared/greetings.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
 import { startingPersona } from "@dreamspan/shared/personaLock.ts"
-import type { CastCard, ChatId, EntityId } from "@dreamspan/shared/chat.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import type { CardForChat } from "@dreamspan/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
 import type { ChatView, Outcome } from "./session.ts"
@@ -31,12 +31,6 @@ export interface PendingState {
 export const firstId = (swapped: PendingState["swapped"], id: EntityId) =>
   (Object.entries(swapped).find(([, to]) => to === id)?.[0] as EntityId | undefined) ?? id
 
-/** A group the new chat is of: its name and the chat that names it. */
-export interface PendingGroup {
-  readonly name: string
-  readonly chatId: ChatId
-}
-
 const characterCount = (state: Pick<PendingState, "greeters" | "persona">) =>
   new Set(state.greeters.filter((item) => item.card.entityId !== state.persona).map((item) => item.card.entityId)).size
 
@@ -54,14 +48,12 @@ export class PendingChat {
   get cards(): ReadonlyArray<CastCard> {
     return this.availableCards
   }
-  readonly group: PendingGroup | null
   /**
    * The one character of a new single chat as it stands now, whose persona lock (DESIGN §2.2)
-   * can be set from its persona picker; null for a group's chat, one with no character or with
-   * several (a character added in the Cast tab), or a card source's card not yet the user's.
+   * can be set from its persona picker; null for one with no character or with several (a
+   * character added in the Cast tab), or a card source's card not yet the user's.
    */
   lockCard(state = this.state): CastCard | null {
-    if (this.group !== null) return null
     const characters = state.greeters.filter((item) => item.card.entityId !== state.persona)
     const only = characters.length === 1 ? characters[0]!.card : null
     return only !== null && remoteOf(only.entityId) === null ? only : null
@@ -71,7 +63,6 @@ export class PendingChat {
   constructor(
     cards: ReadonlyArray<CastCard>,
     greeters: ReadonlyArray<CardForChat>,
-    group: PendingGroup | null,
     call: Caller,
     defaultPersona: EntityId | null = null,
     guidance = false,
@@ -79,10 +70,9 @@ export class PendingChat {
     lock: EntityId | null = null
   ) {
     this.availableCards = cards
-    this.group = group
     this.call = call
     const only = greeters.length === 1 ? greeters[0]!.card : null
-    const single = group === null && only !== null && remoteOf(only.entityId) === null
+    const single = only !== null && remoteOf(only.entityId) === null
     const known = [...cards, ...greeters.map((item) => item.card)]
     const persona = startingPersona({
       single,
@@ -93,10 +83,8 @@ export class PendingChat {
     const state = { greeters, persona }
     this.state = {
       ...state,
-      // A group's chat starts at a random greeting of each, as ST starts one; a card at its first.
-      picks: pendingOptions(state).map((options) =>
-        group === null ? 0 : (options[Math.floor(Math.random() * Math.max(1, options.length))]?.index ?? 0)
-      ),
+      // A card's chat starts at its first greeting.
+      picks: pendingOptions(state).map(() => 0),
       fallbackNote: "",
       replier: null,
       guidance,
@@ -271,10 +259,9 @@ export const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCa
 
 /**
  * The name the chat will have once saved, so the header reads the same before and after the
- * first send: the group's, else the characters' (the server's default title, `titleFor`).
+ * first send: the characters' (the server's default title, `titleFor`).
  */
-export const pendingTitle = (chat: PendingChat, state: PendingState, now = Date.now()) => {
-  if (chat.group !== null) return chat.group.name
+export const pendingTitle = (state: PendingState, now = Date.now()) => {
   const names = state.greeters.filter((item) => item.card.entityId !== state.persona).map((item) => item.card.name)
   return names.length > 1
     ? names.join(" & ")

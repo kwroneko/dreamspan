@@ -345,7 +345,7 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
           yield* sql`DELETE FROM media_assets WHERE id IN (SELECT value FROM json_each(${JSON.stringify(files)}))
             AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = media_assets.id)
             AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = media_assets.id)
-            AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id)
+            AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id) /* chat:includes-pending: kept until swept */
             AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
             AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
             AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)`

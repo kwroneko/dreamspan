@@ -72,7 +72,7 @@ describe("authored settings and pre-creation drafts", () => {
       const writer = yield* Database.Writer
       const reader = yield* Database.Reader
       const user = yield* writer.EnsureUser({ handle: "empty-author", displayName: "Author" })
-      const key = { targetKind: "user_field" as const, targetId: "pending-chat:synthetic", field: "First message" }
+      const key = { targetKind: "user_field" as const, targetId: "pending-chat:src:synthetic", field: "First message" }
       let current = yield* writer.SaveDraft({
         userId: user.id,
         key,
@@ -125,7 +125,7 @@ describe("authored settings and pre-creation drafts", () => {
     Effect.gen(function* () {
       const writer = yield* Database.Writer
       const user = yield* writer.EnsureUser({ handle: "observed-clear", displayName: "Author" })
-      const key = { targetKind: "user_field" as const, targetId: "pending-chat:observed", field: "First message" }
+      const key = { targetKind: "user_field" as const, targetId: "pending-chat:src:observed", field: "First message" }
       const first = yield* writer.SaveDraft({
         userId: user.id,
         key,
