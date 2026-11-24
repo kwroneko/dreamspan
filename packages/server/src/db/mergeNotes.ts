@@ -16,7 +16,7 @@ import type { MergeNote } from "@dreamspan/shared/mergeApi.ts"
 import { type FoldableEvent, foldState, noteSwitches } from "@dreamspan/shared/state.ts"
 import { Effect, Predicate } from "effect"
 import type { SqlClient } from "effect/sql"
-import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
+import { agentWrittenNotes, notesCreated } from "./agentNotes.ts"
 import { docHash, searchText } from "./documents.ts"
 import { replacementConflict } from "./noteReplacementWrites.ts"
 import { sharedNote } from "./sharedNotes.ts"
@@ -103,7 +103,7 @@ export const mergeNotes = Effect.fnUntraced(function* (
     sql,
     heads.filter((n) => typeof ownerOf(n.doc).chat === "string").map((n) => n.entity)
   )
-  const named = notesNamed(sourceRows)
+  const named = yield* notesCreated(sql, sourceRows, byAgent)
   const cardIds = new Set<string>()
   for (const { doc } of there) {
     if (typeof ownerOf(doc).card === "string") cardIds.add(ownerOf(doc).card as string)

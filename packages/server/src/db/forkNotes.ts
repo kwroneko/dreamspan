@@ -16,6 +16,7 @@ import { stateEventRowsThrough } from "./stateRead.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
+import { agentWrittenNotes, notesCreated } from "./agentNotes.ts"
 
 const decodeEvent = Schema.decodeUnknownSync(FoldableEvent)
 const CONTENT = textField(["content"])
@@ -99,8 +100,14 @@ const previewForkNotes = Effect.fnUntraced(function* (
       AND (json_extract(h.doc_json, '$.owner.chat') = ${chatId}
         OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(cards.length ? cards : [""])})
     ORDER BY e.id`
+  const byAgent = yield* agentWrittenNotes(
+    sql,
+    rows.map((row) => row.entity)
+  )
+  const created = yield* notesCreated(sql, thenRows, byAgent)
   const result: Array<ForkNote> = []
   for (const row of rows) {
+    if (byAgent.has(row.entity) && !created.has(row.entity)) continue
     const head = JSON.parse(row.doc_json) as Doc
     const card = Predicate.isObject(head.owner) && typeof head.owner.card === "string"
     const snapshot = Effect.fnUntraced(function* (state: typeof thenState, switches: typeof thenSwitches) {

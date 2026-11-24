@@ -353,6 +353,12 @@ describe("agent note tools", () => {
         "Injury"
       )
 
+      const injury = (yield* api.ListChatNotes(at)).find((note) => note.doc.title === "Injury")!.ref.entityId
+      for (const active of [false, true]) {
+        yield* api.ChangeCast({ ...at, change: { _tag: "Note", entityId: injury, active } })
+        assert.strictEqual((yield* api.ListChatNotes(at)).find((note) => note.ref.entityId === injury)?.active, active)
+      }
+
       // The first version shown again: the agent's note isn't listed there, for the user or the agent.
       yield* api.SelectVersion({ slotId: version.slotId, versionId: version.id, expectedVersionId: swipe.version.id })
       assert.deepStrictEqual(yield* listed(), ["Locked"])
@@ -360,6 +366,8 @@ describe("agent note tools", () => {
         (yield* api.GetAgentPermissions(at)).notes.map((n) => n.title),
         ["Locked"]
       )
+      const context = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: version.slotId })
+      assert.notInclude(context.presetContext?.notes.map((note) => note.title) ?? [], "Injury")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -451,6 +459,11 @@ describe("agent note tools", () => {
       assert.strictEqual(top(later.request), top(after.request))
       assert.include(later.request.join("\n"), "[Mira's current description: She wears a muddy ball gown.]")
       assert.notInclude(later.request.join("\n"), "red ball gown")
+
+      const at = { chatId: chat.id, slotId: later.version.slotId }
+      const replacement = (yield* api.ListChatNotes(at)).find((note) => note.doc.replaces !== undefined)!
+      for (const active of [false, true])
+        yield* api.ChangeCast({ ...at, change: { _tag: "Note", entityId: replacement.ref.entityId, active } })
 
       // A swipe of the reply that made the change: the description is whole again, and no costume note.
       model.run([])

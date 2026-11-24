@@ -360,7 +360,7 @@ describe("resuming agent replies", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        const { version, events } = yield* generateReply(api, {
+        const { chat, version, events } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},
           mira: { description: "She wears a grey coat.", agent_editable_fields: ["description"] },
@@ -385,6 +385,10 @@ describe("resuming agent replies", () => {
         const entry = yield* api.ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
         yield* eventually(() => finished(events, entry.version.id) !== undefined)
         assert.strictEqual(finished(events, entry.version.id)!.content, "Done.")
+        assert.include(
+          (yield* api.ListChatNotes({ chatId: chat.id, slotId: version.slotId })).map((note) => note.doc.title),
+          "Injury"
+        )
         const after = bodies(mock.requests()).slice(before.length)
         assert.deepStrictEqual(after[0], before[interruptedCall + 1], "the receipt restores the original result")
         const inspect = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
