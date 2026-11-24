@@ -184,8 +184,12 @@ export function cardexCriteriaTests() {
               await check(chip!)
             }
             panel = await openPanel(page, scope, "Tokens")
-            await panel.getByRole("spinbutton", { name: "Min tokens", exact: true }).fill("100")
-            await panel.getByRole("spinbutton", { name: "Max tokens", exact: true }).fill("2000")
+            const minTokens = panel.getByRole("spinbutton", { name: "Min tokens", exact: true })
+            const maxTokens = panel.getByRole("spinbutton", { name: "Max tokens", exact: true })
+            await minTokens.fill("100")
+            await minTokens.press("Enter")
+            await maxTokens.fill("2000")
+            await maxTokens.press("Enter")
             await closePanel(page, "Tokens")
             await check("100–2,000 tokens")
             for (const label of ["Hide forks", "Deleted from all sources", "Deleted from a source"]) {

@@ -103,6 +103,40 @@ test("excluding a result's author keeps the included authors editable", async ({
   }
 })
 
+test("typing and validating a token bound preserves the other bound", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ tokens: { min: 500, max: 2000 } }))
+    await page.goto(url.href)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    const panel = await openPanel(page, main, "Tokens")
+    const min = panel.getByRole("spinbutton", { name: "Min tokens", exact: true })
+    const max = panel.getByRole("spinbutton", { name: "Max tokens", exact: true })
+    const tokens = () => JSON.parse(new URL(page.url()).searchParams.get("sf")!).tokens as object
+    await max.press("ControlOrMeta+a")
+    await max.pressSequentially("1500")
+    await expect(max).toHaveValue("1500")
+    await expect(min).toHaveValue("500")
+    expect(tokens()).toEqual({ min: 500, max: 2000 })
+    await max.press("Enter")
+    await expect.poll(tokens).toEqual({ min: 500, max: 1500 })
+
+    await max.fill("100")
+    await max.press("Enter")
+    await expect.poll(() => max.evaluate((input: HTMLInputElement) => input.validationMessage)).toContain("minimum")
+    expect(tokens()).toEqual({ min: 500, max: 1500 })
+    await max.fill("1600")
+    await min.focus()
+    await expect.poll(tokens).toEqual({ min: 500, max: 1600 })
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)
@@ -167,7 +201,9 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `cardex-filters-panel-${width}`, { scope: "body" })
       await closePanel(page, "Added")
       panel = await openPanel(page, main, "Tokens")
-      await panel.getByRole("spinbutton", { name: "Min tokens", exact: true }).fill("100")
+      const min = panel.getByRole("spinbutton", { name: "Min tokens", exact: true })
+      await min.fill("100")
+      await min.press("Enter")
       await closePanel(page, "Tokens")
       controls = await filterControls(page, main)
       await controls.getByRole("checkbox", { name: "Hide forks", exact: true }).click()

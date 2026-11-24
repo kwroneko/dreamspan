@@ -8,7 +8,16 @@
 // results. Under the bar, a chip for every filter in effect, the source's own defaults too.
 // Every value is in the URL as it's set, so a reload keeps it.
 import type { SourceCapabilities, SourceFilter, SourceFilterValue, SourceQuery } from "@dreamspan/shared/cardSources.ts"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import {
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState
+} from "react"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, RadioGroup } from "../../ui/Choice.tsx"
@@ -605,7 +614,11 @@ const creatorChoice = (caps: SourceCapabilities, filters: Filters) => {
 }
 
 type AuthorMode = "by" | "not"
-const creatorPatch = (c: NonNullable<SourceCapabilities["creators"]>, mode: AuthorMode, list: ReadonlyArray<string>) => {
+const creatorPatch = (
+  c: NonNullable<SourceCapabilities["creators"]>,
+  mode: AuthorMode,
+  list: ReadonlyArray<string>
+) => {
   const patch: Patch = {}
   if (mode === "not") {
     if (c.excludeFilterId) patch[c.excludeFilterId] = list.length ? joinList(list) : undefined
@@ -747,6 +760,14 @@ function RangePanel({
   const scale = scaleOf(filter.scaleMax ?? filter.max ?? 100_000)
   const committed: [number, number] = [scale.positionOf(min), max === undefined ? STEPS : scale.positionOf(max)]
   const [drag, setDrag] = useState<[number, number] | null>(null)
+  const [draft, setDraft] = useState<{ min?: string | undefined; max?: string | undefined }>({})
+  const minInput = useRef<HTMLInputElement>(null)
+  const maxInput = useRef<HTMLInputElement>(null)
+  const clearDrafts = () => {
+    setDraft({})
+    minInput.current?.setCustomValidity("")
+    maxInput.current?.setCustomValidity("")
+  }
   const shown = drag ?? committed
   const words = (n: number) => `${count(n)} ${unit}`.trim()
   const text = (position: number, thumb: 0 | 1) => {
@@ -763,12 +784,45 @@ function RangePanel({
     if (next?.max !== undefined) clean.max = next.max
     set({ [filter.id]: clean.min === undefined && clean.max === undefined ? undefined : clean })
   }
-  const typed = (side: "min" | "max", text: string) => {
-    const number = text.trim() === "" ? undefined : Number(text)
-    if (number !== undefined && (!Number.isFinite(number) || number < 0)) return
-    // An empty minimum is no minimum: 0, which lifts a default one.
-    write({ ...value, [side]: side === "min" && number === undefined && floor !== undefined ? 0 : number })
+  const commit = (side: "min" | "max", input: HTMLInputElement) => {
+    if (draft[side] === undefined) return
+    const number = input.value === "" ? undefined : input.valueAsNumber
+    const defaultMin = browse.caps?.hiddenByDefault?.find(
+      (d) => d.filterId === filter.id && !moot(d, browse.remote.filters)
+    )?.min
+    // An empty minimum lifts the archive's default floor.
+    const bound = side === "min" && number === undefined && defaultMin !== undefined ? 0 : number
+    const lowest = side === "min" ? (bound ?? 0) : min
+    const highest = side === "max" ? bound : max
+    const error =
+      input.validity.badInput || (number !== undefined && (!Number.isFinite(number) || number < 0))
+        ? "Enter a non-negative number."
+        : highest !== undefined && lowest > highest
+          ? "The minimum must be at most the maximum."
+          : ""
+    input.setCustomValidity(error)
+    if (error) {
+      input.reportValidity()
+      return
+    }
+    setDraft((previous) => ({ ...previous, [side]: undefined }))
+    write({ ...value, [side]: bound })
   }
+  const edit = (side: "min" | "max") => ({
+    onChange: (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.currentTarget
+      input.setCustomValidity("")
+      const text = input.value
+      setDraft((previous) => ({ ...previous, [side]: text }))
+    },
+    onBlur: (event: FocusEvent<HTMLInputElement>) => commit(side, event.currentTarget),
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        commit(side, event.currentTarget)
+      }
+    }
+  })
   const atDefault = value === undefined
   const resetLabel =
     floor !== undefined || browse.caps?.hiddenByDefault?.some((d) => d.filterId === filter.id)
@@ -789,6 +843,7 @@ function RangePanel({
         onValueCommitted={([a, b]) => {
           setDrag(null)
           if (a === committed[0] && b === committed[1]) return
+          clearDrafts()
           // A thumb that didn't move keeps its exact value.
           const low = a === committed[0] ? value?.min : scale.valueAt(a)
           const high = b === committed[1] ? max : b >= STEPS ? undefined : scale.valueAt(b)
@@ -798,13 +853,14 @@ function RangePanel({
       <div className="flex items-center gap-2">
         <Field label={`Min ${unit}`.trim()} labelHidden className="min-w-0 flex-1">
           <Input
+            ref={minInput}
             type="number"
             inputMode="numeric"
             min={0}
             className="max-w-none!"
             placeholder="0"
-            value={String(shownMin)}
-            onChange={(e) => typed("min", e.currentTarget.value)}
+            value={draft.min ?? String(shownMin)}
+            {...edit("min")}
           />
         </Field>
         <span aria-hidden="true" className="text-muted">
@@ -812,13 +868,14 @@ function RangePanel({
         </span>
         <Field label={`Max ${unit}`.trim()} labelHidden className="min-w-0 flex-1">
           <Input
+            ref={maxInput}
             type="number"
             inputMode="numeric"
             min={0}
             className="max-w-none!"
             placeholder="No max"
-            value={shownMax === undefined ? "" : String(shownMax)}
-            onChange={(e) => typed("max", e.currentTarget.value)}
+            value={draft.max ?? (shownMax === undefined ? "" : String(shownMax))}
+            {...edit("max")}
           />
         </Field>
         {!atDefault && (
@@ -827,7 +884,10 @@ function RangePanel({
             hint={resetLabel}
             icon="undo"
             className="size-9! shrink-0 rounded-md border border-border"
-            onClick={() => write(undefined)}
+            onClick={() => {
+              clearDrafts()
+              write(undefined)
+            }}
           />
         )}
       </div>
@@ -1137,7 +1197,10 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
               key={`${side}:${identity}`}
               className={`${chipClass} ${side === "not" ? "border-danger/60 text-danger" : "border-accent/60"}`}
             >
-              <span className={`min-w-0 truncate ${side === "not" ? "line-through decoration-1" : ""}`} title={identity}>
+              <span
+                className={`min-w-0 truncate ${side === "not" ? "line-through decoration-1" : ""}`}
+                title={identity}
+              >
                 {nameOf(identity)}
               </span>
               <IconButton
@@ -1146,7 +1209,13 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
                 icon="close"
                 className="size-6! shrink-0"
                 onClick={() =>
-                  set(creatorPatch(c, side, current[side].filter((v) => v !== identity)))
+                  set(
+                    creatorPatch(
+                      c,
+                      side,
+                      current[side].filter((v) => v !== identity)
+                    )
+                  )
                 }
               />
             </li>
@@ -1705,7 +1774,15 @@ export function SourceChips({ browse }: { browse: SourceBrowse }) {
           <Chip
             key={`creator:${mode}:${identity}`}
             tone={mode === "not" ? "exclude" : "plain"}
-            onRemove={() => change(creatorPatch(caps.creators!, mode, chosen.filter((v) => v !== identity)))}
+            onRemove={() =>
+              change(
+                creatorPatch(
+                  caps.creators!,
+                  mode,
+                  chosen.filter((v) => v !== identity)
+                )
+              )
+            }
           >
             {mode === "not" ? `Not by ${creatorName(identity)}` : `By ${creatorName(identity)}`}
           </Chip>
