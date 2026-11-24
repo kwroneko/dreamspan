@@ -70,6 +70,19 @@ test("opening the Portrait tab preserves a saved fractional crop", async ({ page
   expect(saved.doc).toMatchObject({ avatar_crop: crop })
 })
 
+test("a tall free picture keeps both previews bounded without distorting them", async ({ page }) => {
+  const name = "Narrow"
+  const ref = await importPicture(page, { name, width: 10, height: 600 })
+  const dialog = await openPicture(page, ref, name)
+  for (const key of ["Large view", "Export"]) {
+    const preview = dialog.locator(`[data-cutout-preview="${key}"]`)
+    const size = (await preview.boundingBox())!
+    expect(size.height).toBeLessThanOrEqual(201)
+    expect(size.width / size.height).toBeCloseTo(1 / 60, 3)
+  }
+  await expect(dialog.getByRole("button", { name: "Save cutout", exact: true })).toBeInViewport()
+})
+
 let setup: Promise<{ refId: string; chat: string }> | null = null
 /** Tall's card (its editor's ref) and a chat with it, a greeting and a reply on screen. */
 const open = async (page: Page) => {

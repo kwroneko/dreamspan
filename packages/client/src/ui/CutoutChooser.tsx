@@ -49,6 +49,13 @@ const boxFrom = (crop: AvatarCrop, image: Size): Box => ({
   height: crop.height * image.height
 })
 
+const picturePreview = (crop: AvatarCrop | null, image: Size | null, maxWidth: number): CSSProperties => {
+  if (!crop || !image) return { width: maxWidth }
+  const { width, height } = boxFrom(crop, image)
+  const scale = Math.min(maxWidth / width, maxWidth / PORTRAIT_RATIO / height)
+  return { width: width * scale, height: height * scale }
+}
+
 /** An image shown as a cutout of it in a 2:3 frame: the preview's portrait. */
 export const cutoutStyle = (crop: AvatarCrop): CSSProperties => ({
   position: "absolute",
@@ -487,8 +494,8 @@ export function CutoutChooser({
           <div className="flex items-start gap-4 sm:flex-col">
             {(tab === "picture"
               ? [
-                  ["Large view", "Opened large", "w-[134px]"],
-                  ["Export", "PNG export", "w-[96px]"]
+                  ["Large view", "Opened large", 134],
+                  ["Export", "PNG export", 96]
                 ]
               : [
                   // The message preview has the shape and size of the chat's own portraits (`Avatar` at `chat`).
@@ -502,12 +509,8 @@ export function CutoutChooser({
                 <span className="text-xs text-muted">{label}</span>
                 <span
                   data-cutout-preview={key}
-                  className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${size}`}
-                  style={
-                    tab === "picture" && crop && image
-                      ? { aspectRatio: `${crop.width * image.width} / ${crop.height * image.height}` }
-                      : undefined
-                  }
+                  className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${typeof size === "string" ? size : ""}`}
+                  style={typeof size === "number" ? picturePreview(crop, image, size) : undefined}
                 >
                   {crop && <img src={src} alt="" draggable={false} style={cutoutStyle(crop)} />}
                   <span
