@@ -40,11 +40,12 @@ const get = (path: string, headers: Record<string, string> = {}) =>
 const IMMUTABLE = "public, max-age=31536000, immutable"
 
 describe("static file caching", () => {
-  it.live("pages and unhashed files revalidate; hashed assets are immutable", () => {
+  it.live("pages, unhashed files and source maps revalidate; hashed bundles are immutable", () => {
     const clientDist = tempDir("client")
     mkdirSync(join(clientDist, "assets"), { recursive: true })
     writeFileSync(join(clientDist, "index.html"), "<!doctype html><title>t</title>")
     writeFileSync(join(clientDist, "assets", "index-AbC123de.js"), "/* app */")
+    writeFileSync(join(clientDist, "assets", "index-AbC123de.js.map"), '{"version":3}')
     writeFileSync(join(clientDist, "favicon.svg"), "<svg/>")
     const config = testConfig({ clientDist })
     return Effect.gen(function* () {
@@ -67,6 +68,21 @@ describe("static file caching", () => {
       const revalidated = yield* get("/assets/index-AbC123de.js", { "If-None-Match": String(asset.etag) })
       assert.strictEqual(revalidated.status, 304)
       assert.strictEqual(revalidated.cacheControl, IMMUTABLE)
+
+      const mapPath = "/assets/index-AbC123de.js.map"
+      const map = yield* get(mapPath)
+      assert.strictEqual(map.status, 200)
+      assert.strictEqual(map.cacheControl, "no-cache")
+      assert.strictEqual(map.body, '{"version":3}')
+      assert.isString(map.etag)
+      const cachedMap = yield* get(mapPath, { "If-None-Match": String(map.etag) })
+      assert.strictEqual(cachedMap.status, 304)
+      assert.strictEqual(cachedMap.cacheControl, "no-cache")
+      writeFileSync(join(clientDist, "assets", "index-AbC123de.js.map"), '{"version":3,"sources":[]}')
+      const newMap = yield* get(mapPath, { "If-None-Match": String(map.etag) })
+      assert.strictEqual(newMap.status, 200)
+      assert.strictEqual(newMap.cacheControl, "no-cache")
+      assert.strictEqual(newMap.body, '{"version":3,"sources":[]}')
 
       assert.strictEqual((yield* get("/favicon.svg")).cacheControl, "no-cache")
       // A path that only climbs out of /assets/ is the page, not an immutable asset.

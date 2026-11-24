@@ -641,7 +641,7 @@ const HASHED_ASSETS = "/assets/"
 
 /**
  * Whether a request path names a hashed asset as the static server will read it: decoded once
- * and normalized, so `/assets/..%2findex.html` is not, and no HTML page is.
+ * and normalized, so `/assets/..%2findex.html` is not. Source maps reuse the bundle's hash.
  */
 const hashedAsset = (path: string) => {
   let decoded: string
@@ -651,12 +651,12 @@ const hashedAsset = (path: string) => {
     return false
   }
   const normalized = posix.normalize(decoded)
-  return !decoded.includes("\0") && normalized.startsWith(HASHED_ASSETS) && !/\.html?$/i.test(normalized)
+  return !decoded.includes("\0") && normalized.startsWith(HASHED_ASSETS) && !/\.(?:html?|map)$/i.test(normalized)
 }
 
 /**
  * The client build. Hashed assets are kept for a year; everything else (index.html, the SPA
- * fallback, unhashed files) is revalidated by its ETag on every load, so a deploy shows at once.
+ * fallback, source maps and unhashed files) is revalidated by its ETag on every load.
  */
 const StaticRoutes = Layer.unwrap(
   Effect.map(AppConfig, (config) =>
