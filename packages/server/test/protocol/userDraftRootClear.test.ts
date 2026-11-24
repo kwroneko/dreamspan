@@ -58,10 +58,11 @@ const reset = () => {
   browser.closed = false
 }
 
-// A new workshop's first message is a user draft with a typed backup. The old new-chat page's
-// `pending-chat:<card>` key no longer keeps one: its saves go to recovered texts (f543b0e9d).
+// The Chats page's start card title is a user draft with a typed backup. The old new-chat page's
+// `pending-chat:<card>` and new workshop's `pending-workshop:` keys no longer keep one: their saves
+// go to recovered texts (`legacyPendingDraft`, covered in `pendingChatEdges.test.ts`).
 for (const [targetId, field] of [
-  ["pending-workshop:synthetic-root", "First message"],
+  ["chat:new", "Title"],
   ["Settings → Chats", "Summarization instruction"]
 ] as const)
   for (const delivery of ["rpc", "reload", "keepalive"] as const)
