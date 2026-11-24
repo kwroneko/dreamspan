@@ -258,6 +258,14 @@ export const LcmSettingsView = Schema.Struct({
 })
 export type LcmSettingsView = typeof LcmSettingsView.Type
 
+/** A summary style registered on the server: what "Written as" names it and says on hover. */
+export const SummaryStyleInfo = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.NullOr(Schema.String)
+})
+export type SummaryStyleInfo = typeof SummaryStyleInfo.Type
+
 /** A change would leave a target at or above its maximum in the chat's own settings. */
 export class LcmSettingsInvalid extends Schema.TaggedError<LcmSettingsInvalid>()("LcmSettingsInvalid", {
   message: Schema.String
@@ -398,7 +406,9 @@ export class SummaryRequestApi extends RpcGroup.make(
     payload: { revisionId: SummaryRevisionId },
     success: SummaryDetails,
     error: Schema.Union([NotFound, ServerError])
-  })
+  }),
+  /** The summary styles registered now, built-in and added ones, for the "Written as" picker. */
+  Rpc.make("ListSummaryStyles", { success: Schema.Array(SummaryStyleInfo), error: ServerError })
 ) {}
 
 export class LcmApi extends RpcGroup.make(

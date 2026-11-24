@@ -618,6 +618,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSummaryRevisionRequest({ revisionId: owner.summary.revisionId }), "NotFound")
   },
+  ListSummaryStyles: { createOnly: "read-only list of the server's registered summary styles; no user data" },
   GetSummaryDetails: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
   },
