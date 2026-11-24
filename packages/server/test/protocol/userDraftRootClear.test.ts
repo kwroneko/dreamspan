@@ -4,7 +4,6 @@ import { Effect, Exit } from "effect"
 import { vi } from "vitest"
 import type { Copy } from "../../../client/src/features/editor/backup.ts"
 import { makeCopy, pendingOf } from "../../../client/src/features/editor/backup.ts"
-import { readTypedBackup } from "../../../client/src/features/editor/typedBackup.ts"
 import { UserDraftStore } from "../../../client/src/features/editor/userDraft.tsx"
 import { Generator } from "../../src/chat/Generator.ts"
 import { client, post, serverLayer, testConfig } from "../support/config.ts"
@@ -58,7 +57,7 @@ const reset = () => {
   browser.closed = false
 }
 
-// The Chats page's start card title is a user draft with a typed backup. The old new-chat page's
+// The Chats page's start card title is a live user draft. The old new-chat page's
 // `pending-chat:<card>` and new workshop's `pending-workshop:` keys no longer keep one: their saves
 // go to recovered texts (`legacyPendingDraft`, covered in `pendingChatEdges.test.ts`).
 for (const [targetId, field] of [
@@ -116,7 +115,6 @@ for (const [targetId, field] of [
           assert.strictEqual(browser.memory.size, 1, "only the final durable copy survives close")
           copy = [...browser.memory.values()][0]!
           assert.strictEqual(copy.content, fresh)
-          if (field === "First message") assert.deepStrictEqual(readTypedBackup(ownerId, targetId), copy)
         } finally {
           closed = true
           browser.closed = true
