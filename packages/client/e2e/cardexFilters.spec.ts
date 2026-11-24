@@ -205,8 +205,12 @@ test("the search row and the filter row keep together at every width", async ({ 
       await expect
         .poll(
           async () => {
-            const [b, i, t, l] = await Promise.all([box, within, tag, lastPanel].map((at) => at.boundingBox()))
-            return [Math.round(i!.y - b!.y), Math.round(t!.y - l!.y)]
+            const [b, i, t, l, row] = await Promise.all(
+              [box, within, tag, lastPanel, panels].map((at) => at.boundingBox())
+            )
+            // The tag field takes the next line only when its 10rem don't fit after the last button.
+            const room = row!.x + row!.width - (l!.x + l!.width + 8) >= 160
+            return [Math.round(i!.y - b!.y), room ? Math.round(t!.y - l!.y) : 0]
           },
           { message: `window ${width}` }
         )
