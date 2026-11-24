@@ -1,5 +1,5 @@
 import { pairScopes, type MacroLookup } from "./expand.ts"
-import { isClosing, type MacroNode, type Node, parse } from "./parse.ts"
+import { type MacroNode, type Node, parse } from "./parse.ts"
 
 export interface MacroToken {
   readonly from: number
@@ -31,6 +31,7 @@ export const highlightMacros = (
   while (tasks.length) {
     const nodes = tasks.pop()!
     for (const item of pairScopes(text, nodes, 0, nodes.length, accepts, () => {})) {
+      if (item.keepRaw) continue
       const node = nodes[item.index]!
       const entry = node.kind === "macro" ? registry.get(node.name.toLowerCase()) : undefined
       const close = item.close === undefined ? undefined : nodes[item.close]!
@@ -47,7 +48,7 @@ export const highlightMacros = (
         if (node.value) tasks.push(node.value.nodes)
       } else {
         if (entry) {
-          mark(node, close || isClosing(text, node) ? "directive" : entry.kind)
+          mark(node, close ? "directive" : entry.kind)
           if (close) tokens.push({ from: close.start, to: close.end, kind: "directive" })
         }
         for (const arg of node.args) tasks.push(arg.nodes)

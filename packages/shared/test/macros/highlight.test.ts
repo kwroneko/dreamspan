@@ -69,6 +69,12 @@ describe("macro highlighting", () => {
     ])
   })
 
+  it("leaves literal scope tags and their arguments unstyled", () => {
+    expect(spans("{{user}}example{{/user}} {{user::{{char}}}}example{{/user}} {{/if}} {{char}}")).toEqual([
+      ["{{char}}", "value"]
+    ])
+  })
+
   it("leaves unknown and malformed macros unstyled while finding known children", () => {
     expect(spans("{{unknown::{{user}}}} {{unknown}}hello{{/unknown}} {{not known")).toEqual([["{{user}}", "value"]])
     expect(spans("{{random::{{unknown}}::{{user}}}}")).toEqual([
