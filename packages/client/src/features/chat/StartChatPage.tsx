@@ -512,8 +512,8 @@ function Pending({
         listCards: pending.listCards,
         onPick: (picked) => pending.setPersona(picked.entityId)
       },
-      // The same rows as the Cast tab's persona picker: the persona lock.
-      footer: <SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />
+      // The same rows as the Cast tab's persona picker, at the top: the persona lock.
+      header: <SlotOutlet slot={pendingPersonaPickerRows} props={{ pending }} />
     },
     speakerName,
     submitKey: composerSubmitKey(viewPrefs.prefs.enterSends),

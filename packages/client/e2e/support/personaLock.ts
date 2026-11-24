@@ -2,7 +2,7 @@
 // new single chat's persona picker starts that character's next new chat; the character's tab
 // shows and clears it; group chats and started chats are untouched. The same tests run in
 // the focused layout audit (LAYOUT_AUDIT_PERSONALOCK_ONLY=1).
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./layoutAudit.ts"
 import { closePanel, openPanel, panelTab } from "./panel.ts"
@@ -16,6 +16,31 @@ const playing = (page: Page, name: string) =>
 const speaking = (page: Page, name: string) =>
   page.getByRole("button", { name: `Speaking as ${name}. Change the speaker`, exact: true })
 
+/** A folder that also gets this flow's picker screenshots (PERSONA_LOCK_SHOTS), besides the test's output. */
+const shotsDir = process.env.PERSONA_LOCK_SHOTS
+
+/**
+ * The lock row is at the top of the picker: under its search, above the cards (and the Cast
+ * tab's Personas / All cards), a row of the list's own inset (its checkbox where the rows'
+ * portraits start), its label one line.
+ */
+const expectTopRow = async (picker: Locator, toggle: Locator) => {
+  // Measured once the popover has finished scaling in.
+  await picker.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)))
+  const search = (await picker.getByRole("combobox").boundingBox())!
+  const list = (await picker.getByRole("listbox").boundingBox())!
+  const option = (await picker.getByRole("option").first().boundingBox())!
+  const box = (await toggle.boundingBox())!
+  expect(box.y).toBeGreaterThanOrEqual(search.y + search.height - 1)
+  expect(box.y + box.height).toBeLessThanOrEqual(list.y + 1)
+  const tabs = picker.getByRole("tablist")
+  if ((await tabs.count()) > 0) expect(box.y + box.height).toBeLessThanOrEqual((await tabs.boundingBox())!.y + 1)
+  // The rows' 8 px padding: the checkbox lines up with their portraits.
+  expect(Math.abs(box.x - (option.x + 8))).toBeLessThanOrEqual(1)
+  const label = picker.locator("[data-layout-name]").filter({ hasText: "Always play as" })
+  expect((await label.boundingBox())!.height).toBeLessThanOrEqual(24)
+}
+
 export function personaLockTests() {
   test.describe("persona lock", () => {
     test.setTimeout(180_000)
@@ -25,7 +50,7 @@ export function personaLockTests() {
       cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
     })
     const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
-    for (const width of [1440, 390])
+    for (const width of [1340, 390])
       for (const theme of ["light", "dark"] as const) {
         const suffix = `${width} ${theme}`
         test(`lock on the pending page, start with it, clear it from the character's tab ${suffix}`, async ({
@@ -78,11 +103,8 @@ export function personaLockTests() {
           await expect(lockRow(name(mapmaker))).toHaveAccessibleDescription(
             `New chats with ${name(harbor)} start with this persona. Chats already started keep theirs.`
           )
-          // A compact row of the list's own inset, under the list, not a settings switch above it.
-          const listBox = (await picker.getByRole("listbox").boundingBox())!
-          const rowBox = (await lockRow(name(mapmaker)).boundingBox())!
-          expect(rowBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height - 1)
-          expect(rowBox.height).toBeLessThanOrEqual(20)
+          // At the top, under the search: a compact row of the list's own inset.
+          await expectTopRow(picker, lockRow(name(mapmaker)))
           await picker
             .getByRole("group", { name: "Your persona" })
             .getByRole("option", { name: name(pilot), exact: true })
@@ -93,13 +115,38 @@ export function personaLockTests() {
           await speaking(page, name(pilot)).click()
           const toggle = lockRow(name(pilot))
           await expect(toggle).not.toBeChecked()
+          await expectTopRow(picker, toggle)
           await picker.screenshot({ path: info.outputPath(`picker-unlocked.png`), animations: "disabled" })
+          if (shotsDir)
+            await picker.screenshot({ path: `${shotsDir}/composer-unlocked-${suffix}.png`, animations: "disabled" })
           await expectLayout(page, info, `persona-lock-picker-unlocked-${suffix}`, { scope: '[role="dialog"]' })
           await toggle.click()
           await expect(toggle).toBeChecked()
           await expect.poll(async () => (await lock())?.entityId).toBe(pilot.entityId)
           await picker.screenshot({ path: info.outputPath(`picker-locked.png`), animations: "disabled" })
+          if (shotsDir) {
+            await picker.screenshot({ path: `${shotsDir}/composer-locked-${suffix}.png`, animations: "disabled" })
+            await page.screenshot({ path: `${shotsDir}/composer-page-${suffix}.png`, animations: "disabled" })
+          }
           await expectLayout(page, info, `persona-lock-picker-locked-${suffix}`, { scope: '[role="dialog"]' })
+          await page.keyboard.press("Escape")
+
+          // The Cast tab's picker shows the same row, in the same place, ticked.
+          await openPanel(page, "Cast")
+          await playing(page, name(pilot)).click()
+          const castPicker = page.getByRole("dialog", { name: "Your persona" })
+          const castToggle = castPicker.getByRole("checkbox", {
+            name: `Always play as ${name(pilot)} with ${name(harbor)}`,
+            exact: true
+          })
+          await expect(castToggle).toBeChecked()
+          await expectTopRow(castPicker, castToggle)
+          await castPicker.screenshot({ path: info.outputPath(`cast-picker-locked.png`), animations: "disabled" })
+          if (shotsDir) {
+            await castPicker.screenshot({ path: `${shotsDir}/cast-locked-${suffix}.png`, animations: "disabled" })
+            await page.screenshot({ path: `${shotsDir}/cast-page-${suffix}.png`, animations: "disabled" })
+          }
+          await expectLayout(page, info, `persona-lock-cast-picker-locked-${suffix}`, { scope: '[role="dialog"]' })
           await page.keyboard.press("Escape")
 
           // The pending chat's character tab shows it.

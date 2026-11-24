@@ -249,7 +249,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   personas,
   onAddToChat,
   compact = false,
-  footer,
+  header,
   place = "speaker"
 }: {
   /** The library's cards, which the persona is picked from. */
@@ -278,8 +278,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   compact?: boolean
   /** Where on the page it is ("composer", "cast"): names its New persona form in the URL, so a reload opens it again. */
   place?: string
-  /** Rows under the list, inset as its rows are: the persona lock (DESIGN §2.2). */
-  footer?: ReactNode
+  /** Rows at the top, under the search and inset as the list's rows are: the persona lock (DESIGN §2.2). */
+  header?: ReactNode
 }) {
   const view = useCast()
   const defaultPersona = useDefaultPersona()
@@ -590,6 +590,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           onKeyDown={onKeyDown}
           className="shrink-0"
         />
+        {header}
         {persona ? (
           <Tabs
             label="Cards to play as"
@@ -617,7 +618,6 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         ) : (
           list
         )}
-        {footer}
         {onNone && (
           <Tooltip label="Uses no persona for this chat.">
             <button
