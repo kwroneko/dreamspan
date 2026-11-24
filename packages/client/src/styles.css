@@ -562,6 +562,12 @@ main:has(> [data-fill]) {
       scrollbar-color: var(--scrollbar-hover) transparent;
     }
   }
+  @supports selector(::-webkit-scrollbar) {
+    /* Chromium refreshes the thumb's pseudo-style when the scroll container also has a hover rule. */
+    *:hover {
+      scrollbar-color: auto;
+    }
+  }
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
