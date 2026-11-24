@@ -143,6 +143,7 @@ interface UndoContext {
   readonly bin: Bin
   /** A made item goes to the bin though it changed since (the user was asked, WORKSHOP-CARDS §8.1). */
   readonly binAnyway?: boolean
+  readonly creationEdits?: ReadonlyArray<RolloutEffect>
 }
 /** The refusal that sends an Undo to the files host (api/workshop.ts). */
 export const FILE_UNDO_ON_HOST = "File undo must run through the host."
@@ -168,6 +169,14 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     const ref = yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(undo.refId))
     let head = String(undo.head)
     let version = Number(undo.rowVersion)
+    // A created item can go to the bin with all consecutive edits the same reply made.
+    const edits = ctx.creationEdits?.filter((e) => e.targetId === effect.targetId).map((e) => e.undo!) ?? []
+    for (;;) {
+      const edit = edits.find((e) => e.refId === ref.id && e.before === head && e.beforeRowVersion === version)
+      if (!edit || typeof edit.head !== "string" || Number(edit.rowVersion) <= version) break
+      head = edit.head
+      version = Number(edit.rowVersion)
+    }
     const restored = yield* ctx.sql<{
       undo_json: string
       undo_result_json: string
@@ -498,16 +507,40 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
         // Files are on disk, outside SQLite: the files host puts them back (agent/tools/files.ts).
         if (row.kind.startsWith("file.")) return yield* refuse(FILE_UNDO_ON_HOST)
-        if (row.undone_at !== null) return toRolloutEffect(row)
+        if (row.undone_at !== null) return [toRolloutEffect(row)]
         const undoer = rolloutUndoers.get(row.kind)
         if (!undoer || row.undo_json === null)
           return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
+        const creationEdits =
+          row.kind === "library.create"
+            ? (yield* sql<EffectRow>`
+          WITH reply AS (
+            SELECT coalesce(spawned_by_rollout_id, id) AS id FROM rollouts WHERE id = ${row.rollout_id}
+          )
+          SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id CROSS JOIN reply
+          WHERE (r.id = reply.id OR r.spawned_by_rollout_id = reply.id)
+            AND e.target_kind = 'entity' AND e.target_id = ${row.target_id}
+            AND e.kind = 'library.revise' AND e.undo_json IS NOT NULL AND e.undone_at IS NULL
+          ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC
+        `).map(toRolloutEffect)
+            : []
         const undoResult = yield* undoer
-          .run({ sql, userId, ops, bin, binAnyway: binAnyway && row.kind === "library.create" }, toRolloutEffect(row))
+          .run(
+            { sql, userId, ops, bin, binAnyway: binAnyway && row.kind === "library.create", creationEdits },
+            toRolloutEffect(row)
+          )
           .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
         const at = Math.max(Date.now(), row.created_at)
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
-        return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
+        const done = [toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })]
+        for (const edit of creationEdits) {
+          const undoneAt = Math.max(at, edit.createdAt)
+          const undoResult = { binnedWithCreation: true }
+          yield* sql`UPDATE rollout_effects SET undone_at = ${undoneAt}, undo_result_json = ${JSON.stringify(undoResult)}
+            WHERE rollout_id = ${edit.rolloutId} AND tool_call_id = ${edit.toolCallId} AND seq = ${edit.seq}`
+          done.push({ ...edit, undoneAt, undoResult })
+        }
+        return done
       })
     const receipted = <R, E>(
       key: Key,
@@ -1353,7 +1386,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               entity: "rollout effect",
               id: `${input.rolloutId}:${input.toolCallId}:${input.seq}`
             })
-          return yield* undoRow(input.userId, row, input.binAnyway === true)
+          return (yield* undoRow(input.userId, row, input.binAnyway === true))[0]!
         }).pipe(transaction(sql, "UndoRolloutEffect")),
       // "Undo all of this reply": one transaction, newest change first. Each undo runs in its own
       // savepoint, so a refused one leaves nothing half done; the first refusal stops the rest,
@@ -1370,8 +1403,16 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 OR rollout_id IN (SELECT id FROM rollouts WHERE spawned_by_rollout_id = ${input.rolloutId}))
               AND undone_at IS NULL
             ORDER BY created_at DESC, rollout_id DESC, tool_call_id DESC, seq DESC`
-          const undone: Array<RolloutEffect> = []
+          const created = new Set(rows.filter((row) => row.kind === "library.create").map((row) => row.target_id))
+          const completed = new Map<string, RolloutEffect>()
+          const key = (rollout: string, call: string, seq: number) => JSON.stringify([rollout, call, seq])
+          const undone = () =>
+            rows.flatMap((row) => {
+              const done = completed.get(key(row.rollout_id, row.tool_call_id, row.seq))
+              return done ? [done] : []
+            })
           for (const [at, row] of rows.entries()) {
+            if (row.kind === "library.revise" && created.has(row.target_id)) continue
             const outcome = yield* sql.withTransaction(undoRow(input.userId, row)).pipe(
               Effect.map((effect) => ({ effect }) as const),
               Effect.catchTag(["EffectUndoRefused", "NotFound"], (error) =>
@@ -1381,16 +1422,17 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if ("effect" in outcome) {
-              undone.push(outcome.effect)
+              for (const effect of outcome.effect)
+                completed.set(key(effect.rolloutId, effect.toolCallId, effect.seq), effect)
               continue
             }
             return {
-              undone,
+              undone: undone(),
               refused: { effect: toRolloutEffect(row), reason: outcome.reason },
               left: rows.slice(at + 1).map(toRolloutEffect)
             }
           }
-          return { undone, refused: null, left: [] }
+          return { undone: undone(), refused: null, left: [] }
         }).pipe(transaction(sql, "UndoRolloutEffects"))
     } satisfies Pick<
       Handlers,

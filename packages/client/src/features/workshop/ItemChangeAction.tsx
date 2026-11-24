@@ -116,10 +116,8 @@ export function ItemChangeAction({
   const pending = item.effects.filter(undoable)
   if (pending.length === 0) return null
   const undoAll = async (binAnyway: boolean) => {
-    // Newest first, as the turn made them: each undo needs the item as the next one left it.
-    // Asked, the made item goes to the bin as it is now.
-    const order = binAnyway ? pending.filter((e) => e.kind === "library.create") : pending
-    for (const effect of order) {
+    // The writer bins the created item with the edits the reply made to it.
+    for (const effect of pending.filter((e) => e.kind === "library.create")) {
       const result = await action.run(
         (client) => client("UndoRolloutEffect", { ...effectKey(effect), ...(binAnyway ? { binAnyway } : {}) }),
         CHANGE_KEYS

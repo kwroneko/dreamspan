@@ -491,6 +491,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           const undone: Array<(typeof rows)[number]> = []
           const items = new Set<string>()
           for (const [at, row] of rows.entries()) {
+            if (row.kind === "library.revise" && made.has(row.targetId)) continue
             const item = itemOf(row)
             if (item !== null) {
               if (items.has(item) || reverted(row)) continue
@@ -532,6 +533,12 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
               }
             }
             undone.push(result.value)
+            if (row.kind === "library.create") {
+              for (const edit of rows.filter((e) => e.kind === "library.revise" && e.targetId === row.targetId)) {
+                const covered = yield* reader.RolloutEffectFor({ ...keyOf(edit), userId: user.id })
+                if (covered.undoneAt !== null) undone.push(covered)
+              }
+            }
           }
           return { undone, refused: null, left: [] }
         })

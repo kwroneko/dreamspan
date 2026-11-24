@@ -404,6 +404,29 @@ describe("revert all of this reply", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("bins what the reply made with its current revision and marks its edits together", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const out = yield* f.run("create_card", { name: "Ove Brekke", description: "Creation text." }, "c1")
+      const refId = JSON.parse(out.text).id as RefId
+      yield* f.run("edit_card", { card: refId, changes: [{ field: "description", text: "Expanded text." }] }, "c2")
+      const head = (yield* api.OpenEditor({ refId })).ref.headRevisionId
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.isNull(report.refused)
+      assert.sameMembers(
+        report.undone.map((e) => e.toolCallId),
+        ["c1", "c2"]
+      )
+      const [item] = (yield* api.ListBin({ limit: 50, before: null })).filter((i) => i.title === "Ove Brekke")
+      yield* api.RestoreBinItem({ itemId: item!.id })
+      const restored = yield* api.OpenEditor({ refId })
+      assert.strictEqual(restored.ref.headRevisionId, head)
+      assert.strictEqual(restored.doc.description, "Expanded text.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("stops at a conflict and says so", () => {
     const config = testConfig()
     return Effect.gen(function* () {
