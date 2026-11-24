@@ -55,6 +55,30 @@ const column = (page: Page) => page.locator("[data-portrait-column]")
 const pictureTab = (scope: Locator | Page) => scope.getByRole("tab", { name: TALL.name, exact: true })
 const picture = (scope: Locator | Page) => scope.getByRole("region", { name: `${TALL.name}'s picture`, exact: true })
 
+for (const name of ["true", "1e3"]) {
+  test(`a picture tab preserves the literal portrait name "${name}"`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const response = await page.request.post(`${server().url}/library/import?name=${name}.png`, {
+      data: shapeCard({ ...SHAPES[4]!, name }, 10),
+      headers: { origin: server().url, "content-type": "application/octet-stream" }
+    })
+    expect(response.ok()).toBeTruthy()
+    await page.goto(`${server().url}/library`)
+    await page.getByRole("link", { name: `Start a chat with ${name}`, exact: true }).click()
+    await page
+      .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
+      .first()
+      .click()
+    await column(page).getByRole("button", { name: "Viewer options", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Open as a tab", exact: true }).click()
+    const viewer = page.getByRole("region", { name: `${name}'s picture`, exact: true })
+    await expect(viewer.getByRole("heading", { name, exact: true })).toBeVisible()
+    await page.reload()
+    await expect(viewer.getByRole("heading", { name, exact: true })).toBeVisible()
+  })
+}
+
 /** Opens Tall's portrait from the first message portrait in a frame: the column, by default. */
 const openInColumn = async (page: Page, frame: Locator) => {
   await frame

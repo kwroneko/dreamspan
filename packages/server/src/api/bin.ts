@@ -25,7 +25,7 @@ export const notifyWorkshopDeletions = (userId: UserId, workshops: DeletedChatIt
       yield* Effect.forEach(generations.runningIn(chatId, forkIds ?? undefined), (versionId) =>
         Effect.ignore(generations.stop(userId, versionId))
       )
-      if (forkIds === null) hub.close(chatId, { _tag: "Deleted" })
+      if (forkIds === null) hub.close(chatId, { _tag: "Deleted" }, userId)
       else {
         hub.publish(chatId, { _tag: "Reload" })
         const chat = yield* reader.GetChat({ userId, chatId }).pipe(Effect.option)
@@ -51,7 +51,7 @@ export const makeBinHandlers = Effect.gen(function* () {
           hub.publish(chatId as ChatId, { _tag: "Reload" })
           hub.publish(chatId as ChatId, { _tag: "State" })
           hub.publish(chatId as ChatId, { _tag: "Chat", chat: chat.value })
-        } else hub.close(chatId as ChatId, { _tag: "Deleted" })
+        } else hub.close(chatId as ChatId, { _tag: "Deleted" }, id)
       }
       yield* warmth.refreshUser(id)
     })

@@ -42,6 +42,8 @@ import { CardSources } from "../sources/CardSources.ts"
 export const PARTIAL_AFTER = "300 millis"
 /** How often a branch list that is filling in is read again while the first pass goes on. */
 const PROGRESS_EVERY = "1 second"
+/** Coalesce chat notifications before resolving their owners. */
+const SHELL_INVALIDATION_BATCH = "16 millis"
 
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
 const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): StateEventData => {
@@ -374,9 +376,40 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       )
     })
 
-  // Subscribe before the first read. A one-place signal coalesces bursts without
-  // dropping a change that arrives during a read; no streamed token triggers this.
-  const shellGates = new Map<UserId, Semaphore.Semaphore>()
+  const shellWatchers = new Map<UserId, { gate: Semaphore.Semaphore; signals: Set<Queue.Queue<void>> }>()
+  const changedChats = new Set<ChatId>()
+  const changedOwners = new Set<UserId>()
+  const changes = yield* Queue.dropping<void>(1)
+  yield* hub.listen((chatId, event, owner) => {
+    if (shellWatchers.size === 0) return
+    if (owner !== undefined) {
+      changedOwners.add(owner)
+      changedChats.delete(chatId)
+    } else if (event !== undefined) changedChats.add(chatId)
+    else return
+    Queue.offerUnsafe(changes, undefined)
+  })
+  yield* Effect.gen(function* () {
+    yield* Queue.take(changes)
+    yield* Effect.sleep(SHELL_INVALIDATION_BATCH)
+    Queue.takeUnsafe(changes)
+    const chatIds = [...changedChats]
+    const owners = new Set(changedOwners)
+    changedChats.clear()
+    changedOwners.clear()
+    if (shellWatchers.size === 0) return
+    if (chatIds.length > 0) {
+      const found = yield* reader
+        .ShellChatOwners({ chatIds })
+        .pipe(Effect.catch((error) => Effect.as(Effect.logWarning("Shell chat invalidation failed", error), [])))
+      for (const owner of found) owners.add(owner)
+    }
+    for (const owner of owners)
+      for (const signal of shellWatchers.get(owner)?.signals ?? []) Queue.offerUnsafe(signal, undefined)
+  }).pipe(Effect.forever, Effect.forkScoped)
+
+  // Subscribe before the first read. A one-place signal also keeps a change that
+  // arrives while this stream is reading.
   // `filling`: the answer has rows the first pass hasn't read yet. It is read again once the
   // pass is done or `PROGRESS_EVERY` from now, whichever is first, so the rows fill in as it goes.
   const watchShell = <A, E>(
@@ -387,14 +420,21 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         let initial = true
-        const gate = shellGates.get(id) ?? Semaphore.makeUnsafe(1)
-        shellGates.set(id, gate)
         const signals = yield* Queue.dropping<void>(1)
         const streamScope = yield* Effect.scope
-        yield* Effect.addFinalizer(() => Queue.shutdown(signals))
-        yield* hub.listen(() => {
-          Queue.offerUnsafe(signals, undefined)
-        })
+        const watcher = yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const watcher = shellWatchers.get(id) ?? { gate: Semaphore.makeUnsafe(1), signals: new Set() }
+            watcher.signals.add(signals)
+            shellWatchers.set(id, watcher)
+            return watcher
+          }),
+          (watcher) =>
+            Effect.sync(() => {
+              watcher.signals.delete(signals)
+              if (watcher.signals.size === 0) shellWatchers.delete(id)
+            }).pipe(Effect.andThen(Queue.shutdown(signals)))
+        )
         const again = Effect.raceFirst(
           Effect.ignore(reader.ShellMaterialize({ userId: id })),
           Effect.sleep(PROGRESS_EVERY)
@@ -409,7 +449,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                 })
               )
             )
-            return initial ? reading : gate.withPermit(reading)
+            return initial ? reading : watcher.gate.withPermit(reading)
           }),
           Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b))
         )

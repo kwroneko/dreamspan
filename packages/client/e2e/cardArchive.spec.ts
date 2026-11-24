@@ -7,6 +7,42 @@ import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 
 test.setTimeout(180_000)
+
+test("a stale tab cannot offer Undo for another tab's archive", async ({ browser, page }) => {
+  test.setTimeout(60_000)
+  const server = await startServer(withAdmin)
+  const stale = await browser.newPage()
+  const name = "Archive race pilot"
+  try {
+    await asUser(server, ADMIN.handle, ADMIN.password, (api) => api.CreateCard({ label: name, name }))
+    for (const tab of [page, stale]) {
+      await apiLogin(tab.request, server, ADMIN.handle, ADMIN.password)
+      await tab.goto(server.url)
+    }
+    const tile = (tab: typeof page) => tab.getByRole("main").getByRole("link", { name: `Open ${name}`, exact: true })
+    const archive = (tab: typeof page) =>
+      tab.getByRole("main").getByRole("button", { name: `Archive ${name}`, exact: true })
+    await expect(archive(stale)).toBeVisible()
+    await tile(page).hover()
+    await archive(page).click({ timeout: 10_000 })
+    const undo = page
+      .locator("[data-toast]")
+      .filter({ hasText: `${name} archived` })
+      .getByRole("button", { name: "Undo", exact: true })
+    await expect(undo).toBeVisible()
+    await undo.focus()
+    await tile(stale).hover()
+    await archive(stale).click({ timeout: 10_000 })
+    await expect(tile(stale)).toHaveCount(0)
+    await expect(stale.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
+    await undo.click()
+    await expect(archive(page)).toBeVisible()
+  } finally {
+    await stale.close()
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`${width} ${theme}: archive, search, sidebar, bulk selection and Undo`, async ({ page }, info) => {

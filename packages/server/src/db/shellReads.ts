@@ -5,6 +5,7 @@ import { ActiveStateModules } from "./stateModules.ts"
 import { shownIn, shownInSql, slotDeletedIn, slotDeletedInSql } from "./forkState.ts"
 import { pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
 import {
   type ShellState,
   type Fork,
@@ -832,6 +833,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
     })
   const handlers = {
     ShellEpoch: ({ userId }) => shellEpoch(userId).pipe(query("ShellEpoch")),
+    ShellChatOwners: ({ chatIds }) =>
+      sql<{ owner_user_id: UserId }>`
+        SELECT DISTINCT owner_user_id FROM chats
+        WHERE id IN (SELECT value FROM json_each(${JSON.stringify(chatIds)}))
+      `.pipe(
+        Effect.map((rows) => rows.map((row) => row.owner_user_id)),
+        query("ShellChatOwners")
+      ),
     ShellSummarizeStale: ({ userId, chatId }) =>
       Effect.gen(function* () {
         if ((yield* ActiveStateModules) !== "") return { chats: [], remaining: 0 }

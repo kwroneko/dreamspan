@@ -292,7 +292,7 @@ export const layer = Layer.effect(
           const { userId, chatId, slotId, versionId } = request
           // Read in the fork it was started in: the chat's current fork may be another by now.
           const forkId = request.forkId ?? null
-          const slot = yield* reader
+          let slot = yield* reader
             .GetSlot({ userId, slotId, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot")))
           const parent = slot.entry.parentSlotId
@@ -325,19 +325,19 @@ export const layer = Layer.effect(
                 })
               : false
           // A reply the decision model was to choose a speaker for shows none until it's chosen:
-          // when it wasn't (nothing to ask, no sure answer, no point to ask it), Auto's pick stands.
+          // when it wasn't, the decision point can settle to an eligible fallback before this default.
           const settled =
             slot.entry.version.speakerPick?.by === "auto"
               ? yield* writer
                   .SettleSpeaker({ userId, versionId })
                   .pipe(
-                    Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
+                    Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], (error) =>
                       Effect.as(Effect.logWarning("SettleSpeaker failed", error), false)
                     )
                   )
               : false
           if (changed || settled)
-            yield* reader.GetSlot({ userId, slotId, forkId }).pipe(
+            slot = yield* reader.GetSlot({ userId, slotId, forkId }).pipe(
               Effect.tap(({ entry }) => Effect.sync(() => hub.publish(chatId, { _tag: "Slot", entry }))),
               Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot"))
             )

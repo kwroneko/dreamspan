@@ -51,6 +51,9 @@ export class EditConflict extends Schema.TaggedError<EditConflict>()("EditConfli
   )
 }) {}
 
+/** The saved ref and whether this call changed its archive state. */
+export const RefArchiveResult = Schema.Struct({ ...LibraryRef.fields, changed: Schema.Boolean })
+
 /** A ref after a change, and what happened to the refs following it, transitively. */
 export class SavedRef extends Schema.Class<SavedRef>("SavedRef")({
   ref: LibraryRef,
@@ -418,7 +421,7 @@ export class EditorApi extends RpcGroup.make(
    */
   Rpc.make("SetRefArchived", {
     payload: { refId: RefId, archived: Schema.Boolean },
-    success: LibraryRef,
+    success: RefArchiveResult,
     error: Schema.Union([...Writes])
   }),
   /** The user allows (or stops) a preset's regex scripts, as ST asks once per preset (ARCHITECTURE.md §9). */

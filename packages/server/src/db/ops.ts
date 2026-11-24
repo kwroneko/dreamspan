@@ -217,6 +217,7 @@ import {
   EditorSnapshot,
   InvalidDocument,
   NoteEntry,
+  RefArchiveResult,
   SharedNote
 } from "@dreamspan/shared/editorApi.ts"
 import { NoteDoc, ReplaceTarget } from "@dreamspan/shared/docs/note.ts"
@@ -1940,7 +1941,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SetRefArchived", {
     payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
-    success: LibraryRef,
+    success: RefArchiveResult,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /**
@@ -4583,12 +4584,12 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   }),
   /**
    * A reply whose speaker the decision model was to choose, once it didn't (nothing to ask, or no
-   * answer sure enough): Auto's pick stands, and the reply shows it. False when already settled.
+   * answer sure enough): the reply shows Auto's pick, or an eligible replacement. False when settled.
    */
   Rpc.make("SettleSpeaker", {
-    payload: { userId: UserId, versionId: VersionId },
+    payload: { userId: UserId, versionId: VersionId, speakerEntityId: Schema.optionalKey(EntityId) },
     success: Schema.Boolean,
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */
   Rpc.make("ApplyDecisionEffect", {
@@ -4829,6 +4830,12 @@ const ReadOpsOwn = RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellEpoch", { payload: { userId: UserId }, success: Schema.String, error: StorageError }),
+  /** Internal routing for chat events, including soft-deleted chats. */
+  Rpc.make("ShellChatOwners", {
+    payload: { chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(UserId),
+    error: StorageError
+  }),
   Rpc.make("ShellMaterialize", {
     payload: { userId: UserId },
     success: ShellSnapshotRead,

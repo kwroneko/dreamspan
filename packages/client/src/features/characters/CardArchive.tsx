@@ -14,7 +14,7 @@ function useArchiveCard(refId: RefId, name: string) {
   const set = async (next: boolean, undo = true): Promise<boolean> => {
     const result = await action.run((client) => client("SetRefArchived", { refId, archived: next }), ["library"])
     if (!result.ok) showToast({ title: "Couldn’t change archive", description: result.error.message })
-    else if (undo)
+    else if (undo && result.value.changed)
       showToast({
         title: `${name} ${next ? "archived" : "unarchived"}`,
         actions: [

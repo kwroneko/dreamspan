@@ -196,10 +196,10 @@ describe("card archive", () => {
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
       const archived = yield* api.SetRefArchived({ refId: card.id, archived: true })
       assert.isNumber(archived.archivedAt)
-      assert.strictEqual(
-        (yield* api.SetRefArchived({ refId: card.id, archived: true })).archivedAt,
-        archived.archivedAt
-      )
+      assert.isTrue(archived.changed)
+      const alreadyArchived = yield* api.SetRefArchived({ refId: card.id, archived: true })
+      assert.isFalse(alreadyArchived.changed)
+      assert.strictEqual(alreadyArchived.archivedAt, archived.archivedAt)
       assert.isFalse((yield* api.ListCards()).some((c) => c.entityId === card.entityId))
       assert.isFalse((yield* api.ListCardUsage()).some((c) => c.entityId === card.entityId))
       assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((c) => c.id === card.id))
@@ -211,7 +211,9 @@ describe("card archive", () => {
       assert.isTrue(
         (yield* api.GetCast({ chatId: chat.id, slotId: null })).cards.some((c) => c.entityId === card.entityId)
       )
-      yield* api.SetRefArchived({ refId: card.id, archived: false })
+      const unarchived = yield* api.SetRefArchived({ refId: card.id, archived: false })
+      assert.isTrue(unarchived.changed)
+      assert.isFalse((yield* api.SetRefArchived({ refId: card.id, archived: false })).changed)
       assert.isTrue((yield* api.GetShellCards()).cards[0]!.favourite)
     }).pipe(Effect.scoped, withServer(testConfig()))
   )

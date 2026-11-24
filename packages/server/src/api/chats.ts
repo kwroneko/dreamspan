@@ -979,7 +979,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         }
         yield* stopDeleted(id, chatId)
         // After the stopped versions, the subscriptions end.
-        hub.close(chatId, { _tag: "Deleted" })
+        hub.close(chatId, { _tag: "Deleted" }, id)
         yield* warmth.refreshUser(id)
         return new BinItem(item)
       }).pipe(Effect.uninterruptible, internal("DeleteChat")),

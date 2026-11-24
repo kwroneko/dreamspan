@@ -3,21 +3,23 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { useWorkbenchTab } from "../workbench/tab.tsx"
 
 export function ReplyChoicesSetting() {
   const navigate = useNavigate()
+  const tab = useWorkbenchTab()
   const choose = async () => {
-    const trigger =
-      document.querySelector<HTMLButtonElement>("[data-frame][data-focused] [data-reply-picker] button") ??
-      document.querySelector<HTMLButtonElement>("[data-reply-picker] button")
     await navigate({
       to: ".",
       search: ({ panel: _panel, ...prev }: Record<string, unknown>) => prev,
       state: (prev) => ({ ...prev, chatPanel: true }),
       resetScroll: false
     })
+    tab?.store.focusTab(tab.tabId)
     // Let a phone's sheet return focus before opening the composer's existing picker.
     window.setTimeout(() => {
+      const scope = tab ? document.querySelector(`[data-workbench-tab="${CSS.escape(tab.tabId)}"]`) : document
+      const trigger = scope?.querySelector<HTMLButtonElement>("[data-reply-picker] button")
       trigger?.scrollIntoView({ block: "nearest", inline: "nearest" })
       trigger?.focus()
       trigger?.click()
