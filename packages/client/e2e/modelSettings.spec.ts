@@ -120,6 +120,20 @@ for (const [width, height] of [
     await expect(context).toHaveValue("1100")
     await page.keyboard.press("End")
     await expect(context).toHaveValue("")
+    // The kept draft takes it too, and its reply doesn't put the old value back (it did: the
+    // emptied samplers group was restored whole).
+    const draftOf = (modelId: string) =>
+      asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.flatMap(api.Whoami(), (user) =>
+          Effect.map(
+            api.GetUserDraft({ ownerId: user.id, targetId: `model:${modelId}`, field: "Custom settings" }),
+            (draft) => draft?.content ?? ""
+          )
+        )
+      )
+    const modelId = (await saved(key)).id
+    await expect.poll(() => draftOf(modelId)).not.toContain("openai_max_context")
+    await expect(context).toHaveValue("")
     // Exact entry.
     await context.fill("50000")
     await expect(contextSlider).toHaveAttribute("aria-valuetext", "50,000")
