@@ -944,8 +944,6 @@ export const filesRoutes = Layer.unwrap(
         const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
         let outcome: UploadOutcome["outcome"] = "written"
         let replacedBytes = 0
-        /** What replacing frees for sure: a file with other links keeps its bytes. */
-        let freesOnReplace = 0
         if (base !== null) {
           const now = existing?.isFile() ? yield* currentHash(root, segments) : null
           if (now !== base)
@@ -963,7 +961,6 @@ export const filesRoutes = Layer.unwrap(
             outcome = "replaced"
             // A file with other links keeps its bytes: nothing is replaced, nothing freed.
             replacedBytes = existing.isFile() && existing.nlink === 1 ? existing.size : 0
-            freesOnReplace = replacedBytes
           } else {
             const taken = new Set(
               (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
@@ -1053,7 +1050,24 @@ export const filesRoutes = Layer.unwrap(
           Effect.gen(function* () {
             yield* stillPlaced(placed)
             if (base !== null && (yield* currentHash(root, target)) !== base) return false
-            if (outcome === "replaced")
+            let replacedNow = 0
+            let reserved = Math.max(0, taken - replacedBytes)
+            if (outcome === "replaced") {
+              // Another upload may have replaced the file while this one was streaming.
+              const current = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
+              if (current?.isDirectory())
+                return yield* Effect.fail(new Answer(409, `“${name}” is a folder here. Choose Keep both or Skip.`))
+              if (current?.isFile() && current.nlink === 1) replacedNow = current.size
+              const more = Math.max(0, taken - replacedNow - reserved)
+              if (more > 0) {
+                if (!held.reserve(more, room.quotaBytes)) {
+                  const now = yield* quota.usage(userId)
+                  return yield* Effect.fail(
+                    new Answer(507, quota.overMessage(now.usedBytes + more, now.quotaBytes, "upload files"))
+                  )
+                }
+                reserved += more
+              }
               keptBytes = yield* keepVersion(
                 userId,
                 root,
@@ -1062,11 +1076,12 @@ export const filesRoutes = Layer.unwrap(
                 base === null ? "upload" : "editor",
                 placed.actorId
               )
+            }
             yield* Effect.tryPromise(async () => {
               // What the new file takes is already counted as it arrived; the old one's bytes are
               // freed unless a version kept them (counted in keepVersion). Lowered before the
               // old file goes, so a measurement in between can only over-count.
-              freeToken = quota.freed(userId, Math.max(0, freesOnReplace - taken))
+              freeToken = quota.freed(userId, reserved + replacedNow - taken)
               try {
                 if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
                 else await renameNoReplace(at(dir, temporary), at(dir, name))
