@@ -114,6 +114,21 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
     })
   )
 
+  it.effect("a recorded story slot deleted on one fork falls back to its live predecessor", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      yield* h.branchStory(h.s3.slotId)
+      const position = { userId: h.userId, chatId: h.workshop.id, forkId: h.w }
+      const path = yield* h.reader.GetPath({ ...position, leafSlotId: null, limit: 20 })
+      const versionId = path.entries.find((entry) => entry.version.content.startsWith("W2:"))!.version.id
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, h.s2.slotId)
+      yield* h.api.DeleteMessage({ slotId: h.s2.slotId, forkId: h.main })
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, h.s1.slotId)
+      yield* h.api.DeleteMessage({ slotId: h.s1.slotId, forkId: h.main })
+      assert.strictEqual((yield* h.reader.WorkshopStoryPosition({ ...position, versionId }))?.leafSlotId, null)
+    })
+  )
+
   it.effect("branching the story branches its workshop; the two go on apart; going back finds A's as it was", () =>
     Effect.gen(function* () {
       const h = yield* setup

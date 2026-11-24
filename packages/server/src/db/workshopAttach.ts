@@ -10,7 +10,8 @@ import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
-import { onDisplayPath, pathPieces } from "./displayPath.ts"
+import { displaySlots, pathPieces, positionOf } from "./displayPath.ts"
+import { slotDeletedIn } from "./forkState.ts"
 
 export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -109,13 +110,19 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         const [fork] = yield* sql<{
           tip_slot_id: string | null
         }>`SELECT tip_slot_id FROM forks WHERE id = ${now.forkId}`
-        const [place] = yield* sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots
+        const [place] = yield* sql<{ chain_id: string; depth: number; deleted: number }>`
+          SELECT chain_id, depth, ${slotDeletedIn(sql, now.forkId, "s")} AS deleted FROM slots s
           WHERE id = ${recorded.leaf} AND chat_id = ${now.chatId}`
         if (!fork || !place) return now
         const pieces = yield* pathPieces(sql, now.chatId, now.forkId, fork.tip_slot_id)
-        return onDisplayPath(pieces, { id: recorded.leaf, chainId: place.chain_id, depth: place.depth })
-          ? { ...now, leafSlotId: recorded.leaf as SlotId }
-          : now
+        const position = positionOf(pieces, { id: recorded.leaf, chainId: place.chain_id, depth: place.depth })
+        if (position === null) return now
+        if (place.deleted === 0) return { ...now, leafSlotId: recorded.leaf as SlotId }
+        // A deleted slot can still be on the path. Stay within the recorded boundary.
+        const [previous] = yield* sql<{ id: SlotId }>`${displaySlots(sql, pieces, 0, position - 1)}
+          SELECT d.id FROM display_slots d JOIN slots s ON s.id = d.id
+          WHERE NOT ${slotDeletedIn(sql, now.forkId, "s")} ORDER BY d.position DESC LIMIT 1`
+        return { ...now, leafSlotId: previous?.id ?? null }
       }).pipe(query("WorkshopStoryPosition")),
     WorkshopStories: ({ userId, chatIds }) =>
       Effect.gen(function* () {
