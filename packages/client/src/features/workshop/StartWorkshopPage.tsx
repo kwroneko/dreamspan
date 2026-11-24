@@ -4,6 +4,7 @@
 // its messages will be with the start card's choices (the assistant, the persona, in the URL as
 // there) and its title (the same draft as the card's), still changeable, and the saved
 // workshop's composer (`PendingWorkshop`). The first send makes it, then its page opens in place.
+import type { CastCard } from "@dreamspan/shared/chat.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -12,7 +13,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
-import { ChatHeaderFrame } from "../chat/ChatHeader.tsx"
+import { aboutLine, ChatHeaderFrame } from "../chat/ChatHeader.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { useTitle } from "../shell.tsx"
 import { PendingWorkshop } from "./PendingWorkshop.tsx"
@@ -32,11 +33,13 @@ export function StartWorkshopPage() {
   const titleDraft = useUserDraft(NEW_WORKSHOP_TITLE, "Title", "")
   const title = titleDraft.text.trim() || "New workshop"
   useTitle(title)
-  const header = (
+  // The assistant's portrait where the saved workshop's header shows it, so the first send moves nothing.
+  const header = (characters: ReadonlyArray<CastCard>) => (
     <ChatHeaderFrame
-      characters={[]}
+      characters={characters}
+      portraitsOpen={false}
       loading={false}
-      about={null}
+      about={aboutLine(characters, title, null)}
       actions={null}
       title={
         <>
