@@ -81,6 +81,7 @@ export const commitPendingChatOf = (sql: SqlClient.SqlClient, slotId: string, at
   )
 
 interface SweptDraft {
+  readonly id: string
   readonly target_kind: DraftKey["targetKind"]
   readonly target_id: string
   readonly field: string
@@ -90,41 +91,44 @@ interface SweptDraft {
 /**
  * Removes a pending chat of the user's that nobody keeps (left, or abandoned: the caller decides),
  * in the caller's transaction. Its typing goes to recovered texts first, as "New chat with
- * <names>": the composer, a greeting edit not saved, anything else typed into it. The chat is
- * deleted with everything in it (its greetings, state and drafts go with it by cascade). An
- * untouched one files nothing. Nothing for a chat that isn't pending. True when it was swept.
+ * <names>": the composer, a greeting edit not saved, anything else typed into it, each with what
+ * its history protects (the text before a destructive change or another tab's, as a discard
+ * keeps it), even when the draft is empty now. The chat is deleted with everything in it (its
+ * greetings, state and drafts go with it by cascade). An untouched one files nothing. Nothing
+ * for a chat that isn't pending. True when it was swept.
  */
-export const sweepPendingChat = (sql: SqlClient.SqlClient, recover: Bin["recover"], userId: UserId, chatId: string) =>
+export const sweepPendingChat = (sql: SqlClient.SqlClient, bin: Bin, userId: UserId, chatId: string) =>
   Effect.gen(function* () {
     const chat = yield* pendingRow(sql, chatId)
     if (chat === null || chat.owner_user_id !== userId) return false
     const typed = yield* sql<SweptDraft>`
-      SELECT d.target_kind, d.target_id, d.field, d.content FROM drafts d
-      WHERE d.user_id = ${userId} AND d.status = 'active' AND d.content <> '' AND (
+      SELECT d.id, d.target_kind, d.target_id, d.field, d.content FROM drafts d
+      WHERE d.user_id = ${userId} AND d.status = 'active' AND (
         (d.target_kind IN ('composer', 'insert', 'queue_edit') AND d.target_id = ${chatId})
         OR (d.target_kind = 'version_edit' AND d.target_id IN (
           SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE s.chat_id = ${chatId}))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT id FROM slots WHERE chat_id = ${chatId})))
       ORDER BY d.updated_at`
-    if (typed.length > 0) {
-      const names = yield* castNames(sql, chat)
-      const source = names.length === 0 ? "New chat" : `New chat with ${names.join(" & ")}`
-      for (const draft of typed) {
-        // A greeting edit typed but not saved still holds the greeting itself: only an edit is filed.
-        if (draft.target_kind === "version_edit") {
-          const [version] = yield* sql<{
-            content: string
-          }>`SELECT content FROM version_records WHERE id = ${draft.target_id}`
-          if (version?.content === draft.content) continue
-        }
-        yield* recover(
-          userId,
-          new DraftKey({ targetKind: draft.target_kind, targetId: draft.target_id, field: draft.field }),
-          [draft.content],
-          "discard",
-          source
-        )
+    let source: string | null = null
+    for (const draft of typed) {
+      // A greeting edit still holds the greeting itself, and the card holds it: only edits are filed.
+      const [version] =
+        draft.target_kind === "version_edit"
+          ? yield* sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${draft.target_id}`
+          : []
+      const lost = yield* bin.drafts.unsaved(draft.id, draft.content, version === undefined ? [] : [version.content])
+      if (lost.length === 0) continue
+      if (source === null) {
+        const names = yield* castNames(sql, chat)
+        source = names.length === 0 ? "New chat" : `New chat with ${names.join(" & ")}`
       }
+      yield* bin.recover(
+        userId,
+        new DraftKey({ targetKind: draft.target_kind, targetId: draft.target_id, field: draft.field }),
+        lost,
+        "discard",
+        source
+      )
     }
     yield* sql`DELETE FROM chats WHERE id = ${chatId} AND status = 'pending' /* chat:includes-pending: sweeps it */`
     return true

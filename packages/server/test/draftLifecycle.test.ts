@@ -236,4 +236,40 @@ describe("pending chats", () => {
       })
     )
   )
+
+  it.live("a sweep files the composer's protected history, even once it was cleared", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, mira } = yield* setup
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const composer = yield* api.OpenComposer({ chatId: draft.id, forkId: null })
+        const paragraph = "The lighthouse keeper counted the boats twice before dawn, then wrote them down."
+        const typed = yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: composer.rowVersion,
+          session: composer.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: paragraph
+        })
+        // Select all and clear it: the paragraph is only in the draft's history now.
+        yield* api.SaveComposer({
+          chatId: draft.id,
+          draftId: composer.id,
+          rowVersion: typed.draft!.rowVersion,
+          session: typed.draft!.session,
+          next: false,
+          operationId: crypto.randomUUID(),
+          content: ""
+        })
+        assert.isTrue(yield* (yield* Writer).SweepPendingChat({ userId, chatId: draft.id }))
+        const recovered = yield* api.ListRecoveredTexts({ limit: 10, before: null })
+        assert.deepInclude(
+          recovered.map((text) => [text.content, text.sourceLabel]),
+          [paragraph, "New chat with Mira"]
+        )
+      })
+    )
+  )
 })
