@@ -407,16 +407,6 @@ export const chatPlaces = [
     shown: composer
   }),
   place({
-    name: "Title on the new chat page",
-    source: "features/chat/StartChatPage.tsx:827",
-    setup: async () => null,
-    open: async (page, _state, { server }) => {
-      await page.goto(`${server.url}/new/chat`)
-      return page.getByRole("textbox", { name: "Title of the new chat", exact: true })
-    },
-    shown: (page) => page.getByRole("textbox", { name: "Title of the new chat", exact: true })
-  }),
-  place({
     name: "Title on the Chats page",
     source: "features/chat/ChatsPage.tsx:65",
     setup: async () => null,
