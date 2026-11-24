@@ -17,9 +17,9 @@ export function NextRequestPage() {
   useTitle("Your next request")
   useSyncExternalStore(nextRequests.subscribe, nextRequests.version)
   const live = chat === null ? null : nextRequests.find(chat)
-  const at = live ?? { leaf, fork, tokens: null }
+  const at = live ?? { leaf, fork, revision: null }
   const call = useCaller()
-  const asked = JSON.stringify([chat, at.leaf, at.fork, at.tokens])
+  const asked = JSON.stringify([chat, at.leaf, at.fork, at.revision])
   const [state, setState] = useState<{ asked: string | null; request: DraftRequest | null; error: string | null }>({
     asked: null,
     request: null,

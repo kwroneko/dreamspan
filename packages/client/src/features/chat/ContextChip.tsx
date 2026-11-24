@@ -55,11 +55,15 @@ export const ContextChip = memo(function ContextChip({
   const chatId = (view.chat?.id ?? null) as ChatId | null
   // Where this view stands, for the next request's tab (nextRequest.ts).
   const [token] = useState(() => Symbol("next request"))
-  const sizeTokens = size?.tokens ?? null
   useEffect(() => {
-    if (chatId === null || sizeTokens === null) nextRequests.withdraw(token)
-    else nextRequests.publish(token, chatId, { leaf: view.leafSlotId, fork: view.forkId, tokens: sizeTokens })
-  }, [token, chatId, view.leafSlotId, view.forkId, sizeTokens])
+    if (chatId === null || view.contextRevision === 0) nextRequests.withdraw(token)
+    else
+      nextRequests.publish(token, chatId, {
+        leaf: view.leafSlotId,
+        fork: view.forkId,
+        revision: view.contextRevision
+      })
+  }, [token, chatId, view.leafSlotId, view.forkId, view.contextRevision])
   useEffect(() => () => nextRequests.withdraw(token), [token])
   if (view.loading || size === undefined || chatId === null) return null
   // The typed text as the request would hold it: its tokens, and 3 for its message.

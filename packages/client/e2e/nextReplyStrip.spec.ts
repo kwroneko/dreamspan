@@ -299,6 +299,36 @@ test.describe("the strip", () => {
       })
 })
 
+test("an open next request refreshes after a sampler-only model edit", async ({ page }) => {
+  const chatId = await chatWith(
+    { provider: "openai-compatible", kind: "openai-chat", baseUrl: `${provider.url}/v1` },
+    "synthetic-sampler-preview"
+  )
+  const setTemperature = (temperature: number) =>
+    admin((api) =>
+      Effect.gen(function* () {
+        const { model: choice } = yield* api.GetGenerationDefaults()
+        const models = yield* api.ListModels({ connectionId: choice!.connection, includeHidden: true })
+        const model = models.find((model) => model.id === choice!.model)!
+        yield* api.EditModel({
+          modelId: model.id,
+          expectedRowVersion: model.rowVersion,
+          overrides: { settings: { samplers: { temperature } } }
+        })
+      })
+    )
+  await setTemperature(0.5)
+  await openChat(page, chatId)
+  await contextChip(page).click()
+  await page.getByRole("link", { name: "View request", exact: true }).click()
+  const size = page.getByText(/^Built now: .* tokens\./)
+  await expect(page.getByText(/temperature 0\.5\b/)).toBeVisible()
+  const before = await size.textContent()
+  await setTemperature(0.8)
+  await expect(page.getByText(/temperature 0\.8\b/)).toBeVisible()
+  await expect(size).toHaveText(before!)
+})
+
 test.describe("a chat not sent yet", () => {
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
