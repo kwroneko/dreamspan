@@ -5,6 +5,7 @@
 // others. A column action computes the whole stack's next state and hands each view its part.
 import { useSyncExternalStore } from "react"
 import type { Portrait, PortraitViewer } from "../../ui/Portrait.tsx"
+import { pictureUrl } from "../../ui/mediaImage.ts"
 import { even, keepOnly, move, split, type Stack, type StackEntry } from "../../ui/portraitStack.ts"
 import type { WorkbenchStore } from "../workbench/store.ts"
 import type { useOpenAsTab } from "../workbench/tab.tsx"
@@ -17,14 +18,18 @@ interface PortraitSource {
   readonly asTab: OpenAsTab | null
 }
 
-/** A picture in the shared stack: its view's tab and its own id, as one id. */
+/** A holder in the shared stack: its view's tab and its own id. */
 const keyOf = (tabId: string, id: string) => `${tabId}\u0001${id}`
 const idOf = (key: string) => key.slice(key.indexOf("\u0001") + 1)
+
+/** Each card can show a different image or crop in a different view. */
+const pictureKey = ({ id, src, mediaId, picture }: Portrait) =>
+  JSON.stringify([id, src ?? (mediaId === null ? null : pictureUrl(mediaId, picture))])
 
 const signature = (stack: Stack<Portrait>, single: boolean) =>
   JSON.stringify([
     single,
-    stack.map((e) => [e.portrait.id, e.portrait.name, e.portrait.mediaId, e.portrait.picture ?? null, e.weight])
+    stack.map(({ portrait: p, weight }) => [p.id, p.name, p.mediaId, p.picture, p.src, p.image, weight])
   ])
 
 interface Owned {
@@ -78,28 +83,25 @@ class PortraitSources {
     const ids = shown.map((e) => e.portrait.id)
     // A view's first pictures that the column already shows from another view (a pane split
     // from this one, or the tabs coming back after a reload) keep their place, below it.
-    const held = new Map<string, string>()
-    if (first) {
-      for (const key of this.order) {
-        const id = idOf(key)
-        if (ids.includes(id) && !held.has(id)) held.set(id, key)
-      }
-    }
+    const held = first ? new Map(this.state.entries.map((e) => [pictureKey(e.owned.portrait), e.key])) : null
     this.published.set(tabId, ids)
     const removed = new Set(before.filter((id) => !ids.includes(id)).map((id) => keyOf(tabId, id)))
-    const added = ids.filter((id) => !before.includes(id))
     // One swapped for another (a card replaced) keeps its place; a new one goes on top, as does
     // one that replaced the rest with "Keep one image open".
     const inPlace = new Map<string, string>()
+    const below = new Map<string, string>()
     const onTop: Array<string> = []
-    for (const id of added) {
-      const was = before[ids.indexOf(id)]
+    for (const [index, { portrait }] of shown.entries()) {
+      const id = portrait.id
+      if (before.includes(id)) continue
+      const key = keyOf(tabId, id)
+      const existing = held?.get(pictureKey(portrait))
+      const was = before[index]
       const wasKey = was === undefined ? undefined : keyOf(tabId, was)
-      if (held.has(id)) continue
-      if (!source.viewer.single && wasKey && removed.has(wasKey)) inPlace.set(wasKey, keyOf(tabId, id))
-      else onTop.push(keyOf(tabId, id))
+      if (existing !== undefined) below.set(existing, key)
+      else if (!source.viewer.single && wasKey && removed.has(wasKey)) inPlace.set(wasKey, key)
+      else onTop.push(key)
     }
-    const below = new Map([...held].map(([id, key]) => [key, keyOf(tabId, id)]))
     this.order = [
       ...onTop,
       ...this.order.flatMap((key) =>
@@ -110,10 +112,14 @@ class PortraitSources {
   }
 
   /** A portrait click or single-image open also updates the other views' stacks. */
-  changeOtherViews(tabId: string, id: string, action: "close" | "keep") {
+  changeOtherViews(tabId: string, portrait: Portrait, action: "close" | "keep") {
+    const key = pictureKey(portrait)
     for (const [other, { viewer }] of this.sources) {
       if (other === tabId) continue
-      const next = viewer.shown.filter((e) => (action === "keep" ? e.portrait.id === id : e.portrait.id !== id))
+      const next = viewer.shown.filter(({ portrait }) => {
+        const samePicture = pictureKey(portrait) === key
+        return action === "keep" ? samePicture : !samePicture
+      })
       if (next.length !== viewer.shown.length) viewer.set(next)
     }
   }
@@ -135,16 +141,16 @@ class PortraitSources {
       for (const entry of source.viewer.shown)
         all.set(keyOf(tabId, entry.portrait.id), { owned: { tabId, portrait: entry.portrait }, weight: entry.weight })
     }
-    const byId = new Map<string, { key: string; owned: Owned; weight: number; holders: Array<string> }>()
+    const byPicture = new Map<string, { key: string; owned: Owned; weight: number; holders: Array<string> }>()
     for (const key of this.order) {
       const found = all.get(key)
       if (!found) continue
-      const id = found.owned.portrait.id
-      const entry = byId.get(id)
+      const picture = pictureKey(found.owned.portrait)
+      const entry = byPicture.get(picture)
       if (entry) entry.holders.push(key)
-      else byId.set(id, { key, ...found, holders: [key] })
+      else byPicture.set(picture, { key, ...found, holders: [key] })
     }
-    return [...byId.values()]
+    return [...byPicture.values()]
   }
 
   /** The source of the picture with shared id `key`. */
