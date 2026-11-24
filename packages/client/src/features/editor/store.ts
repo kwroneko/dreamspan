@@ -33,6 +33,7 @@ import {
   withHeld
 } from "@dreamspan/shared/presetHeld.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
+import { onEntriesChanged } from "../../libraryChanges.ts"
 import { type Draft, deletedSince, entityDraftTarget } from "@dreamspan/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@dreamspan/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@dreamspan/shared/library.ts"
@@ -129,6 +130,35 @@ const KEEPALIVE_LIMIT = 64 * 1024
 export const STRUCTURE = "structure"
 const DRAFTS = "drafts"
 
+/**
+ * The stores some unsaved marker observes (`unsavedSource`, ui/UnsavedChanges.tsx), each with how
+ * many observe it. A marker keeps its sources after their editors close, so an entry deleted,
+ * moved to the bin, restored, or saved or discarded elsewhere would leave a marker standing on
+ * what it knew last: on any change that could be one of those, each store with changes, or whose
+ * entry is gone, reads its entry again (`recheck`). An entry that no longer opens has no changes
+ * here; its drafts went with it, and come back with it if it's restored.
+ */
+const watched = new Map<EditorStore, number>()
+let stopWatching: (() => void) | null = null
+const watchStore = (store: EditorStore) => {
+  watched.set(store, (watched.get(store) ?? 0) + 1)
+  stopWatching ??= onEntriesChanged(() => {
+    for (const each of [...watched.keys()]) each.recheck()
+  })
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    const count = (watched.get(store) ?? 1) - 1
+    if (count > 0) watched.set(store, count)
+    else watched.delete(store)
+    if (watched.size === 0) {
+      stopWatching?.()
+      stopWatching = null
+    }
+  }
+}
+
 export class EditorStore {
   snapshot: EditorSnapshot | null = null
   loadError: AppError | null = null
@@ -197,10 +227,45 @@ export class EditorStore {
 
   private cachedState: { readonly version: number; readonly state: EditorState } | null = null
 
+  /**
+   * The entry no longer opens (deleted, in the bin, its chat or branch gone): nothing here counts
+   * as unsaved, since its drafts went with it. Set and cleared by each read of the entry.
+   */
+  gone = false
+
   /** Stable source for editor and ancestor tab indicators. */
   readonly unsavedSource = {
-    subscribe: (listener: () => void) => this.subscribe(DRAFTS, STRUCTURE)(listener),
-    changed: () => this.dirtyFields().length > 0 || this.held() !== null
+    subscribe: (listener: () => void) => {
+      const stop = this.subscribe(DRAFTS, STRUCTURE)(listener)
+      const unwatch = watchStore(this)
+      return () => {
+        stop()
+        unwatch()
+      }
+    },
+    changed: () => !this.gone && (this.dirtyFields().length > 0 || this.held() !== null)
+  }
+
+  private rechecking: Promise<void> | null = null
+  private recheckAgain = false
+  /**
+   * Something may have changed this entry elsewhere: a store with changes, or whose entry is
+   * gone, reads it again, so its markers follow. One read at a time; a change during it reads once more.
+   */
+  recheck() {
+    if (this.readOnly || this.snapshot === null) return
+    if (!this.gone && !this.unsavedSource.changed()) return
+    if (this.rechecking !== null) {
+      this.recheckAgain = true
+      return
+    }
+    this.rechecking = this.refresh().finally(() => {
+      this.rechecking = null
+      if (this.recheckAgain) {
+        this.recheckAgain = false
+        this.recheck()
+      }
+    })
   }
 
   /** The page's view of the store: a new object only when it changes. */
@@ -213,7 +278,7 @@ export class EditorStore {
           snapshot: this.snapshot,
           loadError: this.loadError,
           saveError: this.saveError,
-          dirty: this.dirtyFields().length,
+          dirty: this.gone ? 0 : this.dirtyFields().length,
           saving: this.isSaving(),
           restored: this.restored,
           recovered: this.recovered,
@@ -279,6 +344,7 @@ export class EditorStore {
     )
     if (result.ok) this.apply(result.value)
     else this.loadError = result.error
+    if (result.ok || result.error.tag === "NotFound") this.gone = !result.ok
     this.bumpAll()
     // An entry that can't be opened (in the bin, say) keeps its copies here until it can.
     if (result.ok) await this.restoreCopies()
@@ -793,8 +859,12 @@ export class EditorStore {
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
     if (result.ok) {
+      this.gone = false
       this.apply(result.value)
       this.bumpAll()
+    } else if (result.error.tag === "NotFound" && !this.gone) {
+      this.gone = true
+      this.bump(DRAFTS, STRUCTURE)
     }
   }
 

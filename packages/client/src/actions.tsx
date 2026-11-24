@@ -1,4 +1,4 @@
-import { notifyLibraryChange } from "./libraryChanges.ts"
+import { notifyEntriesChanged, notifyLibraryChange } from "./libraryChanges.ts"
 // Calling the server from components: queries render through `AsyncView`, and actions
 // (writes) run through `useAction`, which tracks their pending state and error. Both send
 // the user back to login when the session has ended.
@@ -65,8 +65,9 @@ export function useAction() {
  * Reloads the queries of these reactivity keys in this tab, as a write's `invalidates`
  * does, for a change the server announced (a notice) rather than one this tab made.
  */
-export const invalidateKeys = (registry: AtomRegistry.AtomRegistry, keys: ReadonlyArray<string>) =>
-  Effect.runFork(
+export const invalidateKeys = (registry: AtomRegistry.AtomRegistry, keys: ReadonlyArray<string>) => {
+  if (keys.length > 0) notifyEntriesChanged()
+  return Effect.runFork(
     Effect.map(AtomRegistry.getResult(registry, AppClient.runtime), (services) =>
       Context.get(
         services as unknown as Context.Context<Reactivity.Reactivity>,
@@ -74,6 +75,7 @@ export const invalidateKeys = (registry: AtomRegistry.AtomRegistry, keys: Readon
       ).invalidateUnsafe(keys)
     )
   )
+}
 
 /** An error from the server, as an alert. */
 export function ErrorAlert({ error, title, actions }: { error: AppError | null; title?: string; actions?: ReactNode }) {
