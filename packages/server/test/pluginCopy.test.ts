@@ -17,7 +17,7 @@ import { setPresence } from "../src/agent/tools/presence.ts"
 import { presenceContext } from "../src/agent/tools/presenceAdapter.ts"
 import { appSource } from "../src/plugins/reference.ts"
 import { frozenTool, type ToolContext } from "../src/agent/tools.ts"
-import { ExecutionRegistry } from "../src/execution.ts"
+import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
 import { declaredHandles } from "../src/plugins/handles.ts"
 import { PluginManifest } from "@dreamspan/shared/plugins.ts"
@@ -26,6 +26,10 @@ import { pluginConsent, pluginAccessGrows } from "@dreamspan/shared/pluginConsen
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
 import { FILE_TOOLS } from "../src/agent/tools/files.ts"
+import { toolDataBody } from "../src/agent/toolData.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -397,6 +401,79 @@ for (const part of builtinCopies.filter(
       expect(report, JSON.stringify(report)).toMatchObject({ ok: true, step: "ready" })
     }
   )
+
+const catalogFixture = (config: ReturnType<typeof testConfig>) =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const execution = yield* ExecutionRegistry
+    const reader = yield* Reader
+    const writer = yield* Writer
+    const user = yield* api.Whoami()
+    const chat = yield* api.CreateWorkshop({})
+    const rolloutId = `copy-list-${chat.id}`
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+        params: [rolloutId, chat.id]
+      }
+    ])
+    const tool = execution.rolloutTools.get("plugin_copy_builtin")!
+    const context: ToolContext = {
+      userId: user.id,
+      chatId: chat.id,
+      forkId: chat.currentForkId,
+      slotId: "unused" as never,
+      versionId: "unused" as never,
+      rolloutId,
+      toolCallId: "list",
+      leafSlotId: null,
+      reader,
+      writer,
+      viewers: null,
+      cache: new Map()
+    }
+    const list = (ids?: ReadonlyArray<string>) => {
+      const offer = ids && {
+        kind: chat.kind,
+        tools: ids.map((id) => frozenTool(toolForKind(execution, chat.kind, id)!)),
+        loaded: new Set(ids),
+        cardSkills: []
+      }
+      return tool.execute({ ...context, ...(offer ? { offer } : {}) }, {} as never).pipe(
+        Effect.map((result) => {
+          expect(result.isError, result.text).toBeUndefined()
+          return result.text
+        })
+      )
+    }
+    return { api, chat, list }
+  })
+
+it("lists shipped operation tools and limits workshop rows to the run's offer and live grants", () => {
+  const config = testConfig()
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { api, chat, list } = yield* catalogFixture(config)
+        const settings = (yield* api.ListBuiltinParts())
+          .filter((part) => part.registry === "rolloutTools")
+          .map((part) => part.id)
+        expect(settings).toContain("list_card_sources")
+        expect(settings).toContain("list_files")
+        const ids = ["plugin_copy_builtin", "list_card_sources", "read_file"]
+        const before = toolDataBody(yield* list(ids))
+        expect(before).toContain('"list_card_sources"')
+        expect(before).toContain('"read_file"')
+        expect(before).not.toContain('"list_files"')
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "files", mode: "off" })
+        const after = toolDataBody(yield* list(ids))
+        expect(after).toContain('"list_card_sources"')
+        expect(after).not.toContain('"read_file"')
+        expect(after).toContain('"display.regex"')
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+})
 
 it("the assistant catalog keeps every new part within its unchanged result budget", async () => {
   await Effect.runPromise(

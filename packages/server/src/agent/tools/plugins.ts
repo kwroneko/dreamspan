@@ -434,7 +434,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         if (args.registry === undefined && args.id === undefined)
           return {
             dataOnly: true as const,
-            text: data(JSON.stringify(builtinCopyListing(yield* host.builtinParts(actor))))
+            text: data(JSON.stringify(builtinCopyListing(yield* host.builtinParts(actor, ctx))))
           }
         const part = builtinCopy(String(args.registry), String(args.id))
         if (!part)
