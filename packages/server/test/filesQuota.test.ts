@@ -2,7 +2,7 @@
 // a small quota is refused new writes and commands with how much it uses, the usage RPC says
 // so, an admin's quota lifts it, and retention removes old versions and the media only they
 // named. Synthetic data only.
-import { link, mkdir, rename, lstat, symlink, truncate, writeFile } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, rename, symlink, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
@@ -52,19 +52,27 @@ describe("a walk that stops at its limits", () => {
         await mkdir(join(root, "files"), { recursive: true })
         for (let i = 0; i < 20; i++) await writeFile(join(root, "files", `f${i}`), "")
       })
+      let prunes = 0
       const quota = makeFilesQuota({
         reader: {
           GetAppSetting: () => Effect.succeed(null),
           FileVersionBytes: () => Effect.succeed(0)
         } as never,
-        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
+        writer: {
+          PruneFileVersions: () =>
+            Effect.sync(() => {
+              prunes++
+              return { versions: 0, attachments: 0, media: 0 }
+            })
+        } as never,
         folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
         defaultBytes: 10 * 2 ** 30,
         walkMaxEntries: 5
       })
       const refused = yield* Effect.exit(quota.check("u", 1, "write files"))
       assert.strictEqual(refused._tag, "Failure")
-      assert.match(String(yield* quota.afterCommand("u")), /too many to count/)
+      assert.strictEqual(prunes, 0)
+      assert.match(String(yield* quota.afterCommand("u")), /couldn't be fully counted/)
     })
   )
 })
@@ -344,6 +352,24 @@ describe("measuring", () => {
     assert.isNull(parseByteSize("-1G"))
   })
 
+  it.live.skipIf(process.getuid?.() === 0)(
+    "marks an unreadable directory as partial and a missing path as complete",
+    () =>
+      Effect.promise(async () => {
+        const root = tempDir("measure-unreadable")
+        const folder = join(root, "restricted")
+        await mkdir(folder)
+        await writeFile(join(folder, "hidden"), "synthetic contents")
+        await chmod(folder, 0)
+        try {
+          assert.isTrue((await measureTree(root)).partial)
+          assert.isFalse((await measureTree(join(root, "missing"))).partial)
+        } finally {
+          await chmod(folder, 0o700)
+        }
+      })
+  )
+
   it.live("counts sizes, each inode once, and never follows links", () =>
     Effect.promise(async () => {
       const root = tempDir("measure")
@@ -459,6 +485,29 @@ it.live.skipIf(!commands)(
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   120_000
+)
+
+it.live("concurrent admin edits keep each account's quota override", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const admin = yield* api.Whoami()
+    const writer = yield* Writer
+    const other = yield* writer.CreateUser({
+      handle: "quota-neighbor",
+      displayName: "Neighbor",
+      role: "user",
+      passwordHash: "synthetic"
+    })
+    yield* Effect.all(
+      [
+        api.SetFilesQuota({ userId: admin.id, quotaBytes: 100_000 }),
+        api.SetFilesQuota({ userId: other.id, quotaBytes: 200_000 })
+      ],
+      { concurrency: "unbounded" }
+    )
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: admin.id })).quotaBytes, 100_000)
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: other.id })).quotaBytes, 200_000)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 )
 
 it.live("retention removes old versions, and the media only they named", () => {

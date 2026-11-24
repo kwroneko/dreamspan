@@ -6,7 +6,7 @@
 // never opened. Main-thread async file I/O; SQLite only through the writer (file versions).
 import { createHash, randomBytes } from "node:crypto"
 import { constants, type Stats } from "node:fs"
-import { lstat, mkdir, open, readFile, rename, rm, unlink, type FileHandle } from "node:fs/promises"
+import { lstat, mkdir, open, readFile, rename, rm, rmdir, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -32,11 +32,13 @@ import {
   isWithin,
   keepBothName,
   nameProblem,
+  numberedFileName,
   TEXT_OPEN_MAX_BYTES,
   type TextFile,
   UploadConflict,
   type FolderListing,
-  type UploadOutcome
+  type UploadOutcome,
+  UploadUndoEntry
 } from "@dreamspan/shared/files.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { ByteSize, Cause, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
@@ -50,6 +52,7 @@ import { Formats } from "../importer/Formats.ts"
 import { describeImage } from "../importer/images.ts"
 import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
 import { isSafePath } from "../formats/zip.ts"
+import { QuotaExceeded } from "./quota.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { withFileTree } from "./treeLocks.ts"
@@ -61,6 +64,7 @@ import {
   openFolder,
   readRegularFile,
   renameNoReplace,
+  sameFileEntry,
   statPath,
   writeRegularFile
 } from "./safePath.ts"
@@ -301,6 +305,29 @@ const answering = <R>(effect: Effect.Effect<HttpServerResponse.HttpServerRespons
   )
 
 const PathBody = Schema.Struct({ path: Schema.String.check(Schema.isMaxLength(4096)) })
+const CreateFolderBody = Schema.Struct({ ...PathBody.fields, upload: Schema.optionalKey(Schema.Boolean) })
+const RemoveBody = Schema.Struct({ ...PathBody.fields, upload: Schema.optionalKey(UploadUndoEntry) })
+
+const pathAtDepth = (path: string, segments: number, depth: number) => {
+  const parts = path.split("/")
+  return parts.slice(0, parts.length - segments + depth + 1).join("/")
+}
+
+const uploadEntry = (path: string, kind: UploadUndoEntry["kind"], info: Stats): UploadUndoEntry => ({
+  path,
+  kind,
+  device: info.dev,
+  inode: info.ino,
+  birth: info.birthtimeMs,
+  changed: kind === "file" ? info.ctimeMs : null
+})
+
+const isUploadEntry = (entry: UploadUndoEntry, info: Stats) =>
+  entry.device === info.dev &&
+  entry.inode === info.ino &&
+  entry.birth === info.birthtimeMs &&
+  (entry.kind === "folder" ? info.isDirectory() : info.isFile() && entry.changed === info.ctimeMs)
+
 const AttachBody = Schema.Struct({ ...PathBody.fields, composer: Schema.optionalKey(AttachmentComposer) })
 const RestoreBody = Schema.Struct({ binItemId: Schema.String.check(Schema.isMaxLength(64)) })
 const SHA256 = /^[0-9a-f]{64}$/
@@ -507,17 +534,7 @@ export const filesRoutes = Layer.unwrap(
         )
       })
 
-    /** Keeps a file's content as a version before it's replaced or removed (§1.3), if it's small enough. */
-    const keepVersion = (
-      userId: string,
-      root: string,
-      segments: ReadonlyArray<string>,
-      path: string,
-      origin: string,
-      actorId: string = userId
-    ) => Effect.map(keptVersion(userId, root, segments, path, origin, actorId), (kept) => kept.bytes)
-
-    /** As `keepVersion`, with the version's id (null when nothing was kept). */
+    /** Keeps a version for restore, with the charge and the saved version id. */
     const keptVersion = (
       userId: string,
       root: string,
@@ -875,12 +892,37 @@ export const filesRoutes = Layer.unwrap(
       return HttpServerResponse.jsonUnsafe(file, { headers: { "cache-control": "private, no-store" } })
     })
 
-    /** The hash of a file as it is now, or null when it isn't a regular file the editor could have opened. */
-    const currentHash = (root: string, segments: ReadonlyArray<string>) =>
-      Effect.tryPromise(() => readRegularFile(root, segments, TEXT_OPEN_MAX_BYTES)).pipe(
-        Effect.map((read) => (read.truncated ? null : sha256Of(read.bytes))),
-        Effect.catch(() => Effect.succeed(null))
-      )
+    /** Remove a recorded directory only while its identity matches and it is empty. */
+    const removeUploadedFolder = async (
+      userId: string,
+      root: string,
+      segments: ReadonlyArray<string>,
+      entry: UploadUndoEntry
+    ) => {
+      try {
+        const dir = await openFolder(root, segments.slice(0, -1))
+        try {
+          const path = at(dir, segments.at(-1)!)
+          const info = await lstat(path)
+          if (!isUploadEntry(entry, info)) return false
+          const credit = quota.freed(userId, info.blocks * 512)
+          try {
+            await rmdir(path)
+          } catch (error) {
+            quota.unfreed(userId, credit)
+            throw error
+          }
+          return true
+        } finally {
+          await dir.close()
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST" || error instanceof FilePathRefused)
+          return false
+        throw error
+      }
+    }
 
     const upload = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -908,75 +950,96 @@ export const filesRoutes = Layer.unwrap(
       const parentPath = placed.full.slice(0, placed.full.lastIndexOf("/"))
       const ownerParent = placed.ownerFull.slice(0, placed.ownerFull.lastIndexOf("/"))
       const message = NodeHttpServerRequest.toIncomingMessage(request)
-      // Folders this upload makes take room too (counted until the next measurement).
-      const made = yield* Effect.tryPromise(async () => {
-        for (let i = 0; i < parent.length; i++)
-          if (!(await statPath(root, parent.slice(0, i + 1)).catch(() => null))) return parent.length - i
-        return 0
+      const created: Array<UploadUndoEntry> = []
+      const folders: Array<{ depth: number; entry: UploadUndoEntry }> = []
+      let reported = false
+      const dropUnreportedFolders = Effect.promise(async () => {
+        if (!reported)
+          for (const { depth, entry } of folders.toReversed())
+            await removeUploadedFolder(userId, root, parent.slice(0, depth + 1), entry).catch(() => false)
       })
-      const dir = yield* Effect.tryPromise(() => openFolder(root, parent, { create: true }))
-      quota.wrote(userId, made * FOLDER_BYTES)
+      const dir = yield* Effect.tryPromise(() =>
+        openFolder(root, parent, {
+          create: true,
+          onCreated: (depth, info) => {
+            quota.wrote(userId, FOLDER_BYTES)
+            const path = pathAtDepth(placed.full, segments.length, depth)
+            const entry = uploadEntry(path, "folder", info)
+            created.push(entry)
+            folders.push({ depth, entry })
+          }
+        })
+      ).pipe(Effect.tapError(() => dropUnreportedFolders))
       let cleanUpUpload: (() => Promise<void>) | undefined
       return yield* Effect.gen(function* () {
-        let name = segments.at(-1)!
-        const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
+        const originalName = segments.at(-1)!
+        let name = originalName
+        let nextNumber = 2
+        const existing = yield* Effect.tryPromise(() =>
+          lstat(at(dir, name)).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return null
+            throw error
+          })
+        )
         let outcome: UploadOutcome["outcome"] = "written"
-        let replacedBytes = 0
-        if (base !== null) {
-          const now = existing?.isFile() ? yield* currentHash(root, segments) : null
-          if (now !== base)
-            return HttpServerResponse.jsonUnsafe(
-              { changed: true, message: existing ? "It changed since you opened it." : "It isn't there any more." },
-              { status: 409 }
-            )
-        }
+        const changedFile = () =>
+          HttpServerResponse.jsonUnsafe(
+            { changed: true, message: existing ? "It changed since you opened it." : "It isn't there any more." },
+            { status: 409 }
+          )
         if (existing) {
           if (conflict.value === "ask") return HttpServerResponse.jsonUnsafe({ taken: true }, { status: 409 })
-          if (conflict.value === "skip")
-            return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome: "skipped" })
+          if (conflict.value === "skip") {
+            reported = true
+            return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome: "skipped", created })
+          }
           if (conflict.value === "replace") {
             if (existing.isDirectory()) return refuse(409, `“${name}” is a folder here. Choose Keep both or Skip.`)
             outcome = "replaced"
-            // A file with other links keeps its bytes: nothing is replaced, nothing freed.
-            replacedBytes = existing.isFile() && existing.nlink === 1 ? existing.size : 0
-          } else {
-            const taken = new Set(
-              (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
-            )
-            name = keepBothName(name, taken)
-          }
+          } else name = numberedFileName(originalName, nextNumber++)
         }
-        // Over the quota, or past it with what the request says it sends, it's refused before
-        // a byte is written; as it streams, each chunk takes room (uploads at once share it).
-        // A replaced file's bytes are free again once it lands.
-        const room = yield* quota.check(userId, Math.max(0, declared - replacedBytes), "upload files").pipe(
-          Effect.catch((error) =>
-            Effect.andThen(
-              Effect.promise(() => drain(message)),
-              Effect.fail(new Answer(507, error.message))
-            )
-          )
-        )
-        const digest = createHash("sha256")
-        let taken = 0
+        const readReplacement = (before: Stats | null) =>
+          Effect.gen(function* () {
+            const previous =
+              before?.isFile() && before.size <= VERSION_MAX_BYTES
+                ? yield* Effect.tryPromise(() => readRegularFile(root, segments, VERSION_MAX_BYTES))
+                : null
+            if (previous && (previous.truncated || !sameFileEntry(before, previous.info))) return null
+            const version = previous ? { sha256: sha256Of(previous.bytes), byteSize: previous.bytes.byteLength } : null
+            return { before, previous, version }
+          })
+        const initial = yield* readReplacement(outcome === "replaced" ? existing : null)
+        if (!initial) return changedFile()
+        if (base !== null && (initial.version?.sha256 !== base || initial.version.byteSize > TEXT_OPEN_MAX_BYTES))
+          return changedFile()
+        let replacing = initial
         const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
-        /** What the quota's room took for this upload: given back whole on failure. */
-        const held = quota.hold(userId, { temporaryName: temporary })
-        const take = (bytes: number) => {
-          const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
-          if (more > 0 && !held.reserve(more, room.quotaBytes)) return false
-          taken += bytes
-          return true
-        }
-        let writing: Promise<Stats> | undefined
-        let ownsTemporary = false
+        let held = quota.hold(userId, { temporaryName: temporary })
+        let releaseReservation = held.release
+        let keptBytes = 0
+        let taken = 0
         let committed = false
+        let ownsTemporary = false
+        let writing: Promise<Stats> | undefined
+        const digest = createHash("sha256")
+        const price = (bytes: number) =>
+          quota.replacement(userId, replacing.before, replacing.version, bytes, "upload files", held)
+        const quotaAnswer = (error: unknown) =>
+          error instanceof QuotaExceeded ? new Answer(507, error.message) : error
         cleanUpUpload = async () => {
           if (committed) return
           await writing?.catch(() => undefined)
           if (ownsTemporary) await unlink(at(dir, temporary)).catch(() => undefined)
-          held.release()
+          releaseReservation()
+          quota.wrote(userId, keptBytes)
         }
+        let reservation = yield* price(declared).pipe(
+          Effect.tapError((error) =>
+            error instanceof QuotaExceeded ? Effect.promise(() => drain(message)) : Effect.void
+          ),
+          Effect.mapError(quotaAnswer)
+        )
+        releaseReservation = reservation.release
         const stream = async (signal: AbortSignal) => {
           const handle = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
           ownsTemporary = true
@@ -996,13 +1059,11 @@ export const filesRoutes = Layer.unwrap(
                 done(dropped > REFUSED_DRAIN_BYTES ? refused : null)
               } else if (received > MAX_FILE_UPLOAD_BYTES)
                 done(new Answer(413, `A file can be at most ${formatByteSize(MAX_FILE_UPLOAD_BYTES)}.`))
-              else if (!take(chunk.length)) {
-                refused = new Answer(
-                  507,
-                  quota.overMessage(room.usedBytes + received - replacedBytes, room.quotaBytes, "upload files")
-                )
+              else if (!reservation.reserve(received)) {
+                refused = new Answer(507, reservation.over(received))
                 done()
               } else {
+                taken = received
                 digest.update(chunk)
                 done(null, chunk)
               }
@@ -1010,9 +1071,9 @@ export const filesRoutes = Layer.unwrap(
           })
           idle = setTimeout(() => counter.destroy(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
           try {
-            const file = await handle.stat()
             // The write stream owns the handle: it syncs (`flush`) and closes it when done. With
             // `autoClose: false` the pipeline would wait for a close that never comes.
+            const file = await handle.stat()
             await pipeline(message, counter, handle.createWriteStream({ flush: true }), { signal })
             if (refused) throw refused
             return file
@@ -1024,100 +1085,141 @@ export const filesRoutes = Layer.unwrap(
           }
         }
         const uploaded = yield* Effect.tryPromise((signal) => (writing = stream(signal)))
-        // It lands under the owner's tree lock (§8.2): the share is checked again, an editor save's base
-        // is checked again just before the rename, and the content replaced is kept as a version
-        // as it is at that moment. A name taken meanwhile (not replacing) is never written over.
-        const target = [...parent, name]
+        // An ordinary replacement uses the entry present under the tree lock. Editor saves
+        // retain their original precondition if another writer landed while this one streamed.
         const landed = yield* withFileTree(
           userId,
           Effect.gen(function* () {
             yield* stillPlaced(placed)
-            if (base !== null && (yield* currentHash(root, target)) !== base) return false
-            let replacedNow = 0
-            let reserved = Math.max(0, taken - replacedBytes)
-            if (outcome === "replaced") {
-              // Another upload may have replaced the file while this one was streaming.
-              const current = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
-              if (current?.isDirectory())
-                return yield* Effect.fail(new Answer(409, `“${name}” is a folder here. Choose Keep both or Skip.`))
-              if (current?.isFile() && current.nlink === 1) replacedNow = current.size
-              const more = Math.max(0, taken - replacedNow - reserved)
-              if (more > 0) {
-                if (!held.reserve(more, room.quotaBytes)) {
-                  const now = yield* quota.usage(userId)
-                  return yield* Effect.fail(
-                    new Answer(507, quota.overMessage(now.usedBytes + more, now.quotaBytes, "upload files"))
-                  )
-                }
-                reserved += more
+            if (replacing.before) {
+              const current = yield* Effect.tryPromise(() => statPath(root, segments))
+              if (!sameFileEntry(replacing.before, current)) {
+                if (base !== null) return false
+                if (current?.isDirectory())
+                  return yield* Effect.fail(new Answer(409, `“${name}” is a folder here. Choose Keep both or Skip.`))
+                const updated = yield* readReplacement(current)
+                if (!updated) return false
+                replacing = updated
+                if (!current) outcome = "written"
+                releaseReservation()
+                held = quota.hold(userId, { temporaryName: temporary })
+                releaseReservation = held.release
+                reservation = yield* price(taken).pipe(Effect.mapError(quotaAnswer))
+                releaseReservation = reservation.release
               }
-              const keptBytes = yield* keepVersion(
-                userId,
-                root,
-                target,
-                `${ownerParent}/${name}`,
-                base === null ? "upload" : "editor",
-                placed.actorId
-              )
-              quota.wrote(userId, keptBytes)
             }
-            yield* Effect.tryPromise(async () => {
-              // What the new file takes is already counted as it arrived; the old one's bytes are
-              // freed unless a version kept them (counted in keepVersion). Lowered before the
-              // old file goes, so a measurement in between can only over-count.
-              const freeToken = quota.freed(userId, reserved + replacedNow - taken)
-              try {
-                if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
-                else await renameNoReplace(at(dir, temporary), at(dir, name))
-              } catch (error) {
-                quota.unfreed(userId, freeToken)
-                throw error
+            const { before, previous, version } = replacing
+            if (!reservation.reserve(taken)) return yield* Effect.fail(new Answer(507, reservation.over(taken)))
+            if (version && previous) {
+              const kept = yield* holds
+                .holding(
+                  [version.sha256],
+                  Effect.andThen(
+                    storeMedia(config.dataDir, version.sha256, previous.bytes),
+                    reservation.keep(taken, version.byteSize, (maxAddedBytes) =>
+                      writer.RecordReplacementVersion({
+                        userId: userId as never,
+                        maxAddedBytes,
+                        version: {
+                          ...version,
+                          inode: previous.info.ino,
+                          path: `${ownerParent}/${name}`,
+                          mime: "application/octet-stream",
+                          origin: base === null ? "upload" : "editor"
+                        },
+                        ...(placed.actorId === userId ? {} : { actorUserId: placed.actorId as never })
+                      })
+                    )
+                  )
+                )
+                .pipe(Effect.mapError(quotaAnswer))
+              keptBytes = kept.addedBytes
+            }
+            return yield* Effect.tryPromise(async () => {
+              if (before) {
+                const current = await lstat(at(dir, name)).catch(() => null)
+                if (!sameFileEntry(before, current)) return false
               }
-              held.landed(uploaded)
+              reservation.committing(taken, keptBytes)
+              if (before) await rename(at(dir, temporary), at(dir, name))
+              else {
+                const staged = await lstat(at(dir, temporary))
+                for (;;) {
+                  try {
+                    await renameNoReplace(at(dir, temporary), at(dir, name))
+                    break
+                  } catch (error) {
+                    if (conflict.value !== "keep" || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+                    name = numberedFileName(originalName, nextNumber++)
+                  }
+                }
+                const info = await lstat(at(dir, name)).catch(() => null)
+                if (
+                  info?.dev === staged.dev &&
+                  info.ino === staged.ino &&
+                  info.birthtimeMs === staged.birthtimeMs &&
+                  info.mtimeMs === staged.mtimeMs &&
+                  info.size === staged.size
+                )
+                  created.push(uploadEntry(`${parentPath}/${name}`, "file", info))
+              }
+              reservation.landed(uploaded)
               committed = true
+              return true
             })
-            return true
           }).pipe(Effect.uninterruptible)
         )
-        if (!landed) {
-          return HttpServerResponse.jsonUnsafe(
-            { changed: true, message: "It changed since you opened it." },
-            { status: 409 }
-          )
-        }
+        if (!landed) return changedFile()
+        reported = true
         changedAt({ ...placed, full: `${parentPath}/${name}`, ownerFull: `${ownerParent}/${name}` })
         return HttpServerResponse.jsonUnsafe({
           path: `${parentPath}/${name}`,
           outcome,
-          sha256: digest.digest("hex")
+          sha256: digest.digest("hex"),
+          ...(created.length ? { created } : {})
         } satisfies UploadOutcome)
       }).pipe(
         Effect.ensuring(
-          Effect.promise(async () => {
-            await cleanUpUpload?.()
-            await dir.close()
-          })
+          Effect.promise(() => cleanUpUpload?.() ?? Promise.resolve()).pipe(
+            Effect.ensuring(Effect.promise(() => dir.close())),
+            Effect.ensuring(dropUnreportedFolders)
+          )
         )
       )
     })
 
     const folder = Effect.gen(function* () {
-      const body = yield* jsonBody(PathBody)
+      const body = yield* jsonBody(CreateFolderBody)
       const placed = yield* place(body.path)
       const { userId, root, full, segments } = placed
       if (segments.length === 0 || (placed.share && full.split("/").length <= 5)) return refuse(400, "Name the folder.")
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
-      const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
+      const created: Array<UploadUndoEntry> = []
       yield* withFileTree(
         userId,
-        stillPlaced(placed).pipe(
-          Effect.andThen(Effect.tryPromise(() => mkdir(at(dir, segments.at(-1)!), { mode: 0o755 })))
-        )
-      ).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
-      quota.wrote(userId, FOLDER_BYTES)
+        Effect.gen(function* () {
+          yield* stillPlaced(placed)
+          const dir = yield* Effect.tryPromise(() =>
+            openFolder(root, segments.slice(0, -1), {
+              create: body.upload === true,
+              onCreated: (depth, info) => {
+                quota.wrote(userId, FOLDER_BYTES)
+                const path = pathAtDepth(full, segments.length, depth)
+                created.push(uploadEntry(path, "folder", info))
+              }
+            })
+          )
+          yield* Effect.tryPromise(async () => {
+            const name = at(dir, segments.at(-1)!)
+            await mkdir(name, { mode: 0o755 })
+            quota.wrote(userId, FOLDER_BYTES)
+            if (body.upload) created.push(uploadEntry(full, "folder", await lstat(name)))
+          }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
+        })
+      )
       changedAt(placed)
-      return HttpServerResponse.jsonUnsafe({ path: full })
+      return HttpServerResponse.jsonUnsafe({ path: full, ...(created.length ? { created } : {}) })
     })
 
     const move = Effect.gen(function* () {
@@ -1171,38 +1273,50 @@ export const filesRoutes = Layer.unwrap(
     })
 
     const remove = Effect.gen(function* () {
-      const body = yield* jsonBody(PathBody)
+      const body = yield* jsonBody(RemoveBody)
       const placed = yield* place(body.path)
       const { userId, root, segments } = placed
+      const uploaded = body.upload
       if (segments.length === 0) return refuse(400, "The top folder can't be deleted.")
       if (placed.share && placed.full.split("/").length <= 5)
         return refuse(400, "Only its owner can delete a shared folder.")
-      const info = yield* Effect.tryPromise(() => statPath(root, segments))
-      if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
-      // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied. In a
-      // shared folder, the owner's bin: they can restore it; the caller has no Undo.
-      const user = yield* CurrentUser
-      // Shares of it or of folders in it stop as it goes to the bin: their accounts' commands too.
-      const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
-        .filter((share) => isWithin(share.path, placed.ownerFull))
-        .map((share) => share.granteeUserId)
-      const item = yield* withFileTree(
-        userId,
-        stillPlaced(placed).pipe(
-          Effect.andThen(
-            bin.toBin(
-              userId,
-              root,
-              segments,
-              placed.ownerFull,
-              placed.share ? { userId: user.id, handle: user.handle } : undefined
-            )
+      const skipped = () => ({ response: HttpServerResponse.jsonUnsafe({ binItemId: null }), stopping: [] })
+      if (uploaded && uploaded.path !== placed.full) return skipped().response
+      const removeEntry = Effect.gen(function* () {
+        yield* stillPlaced(placed)
+        const info = yield* Effect.tryPromise(() => statPath(root, segments)).pipe(
+          Effect.catch((error) =>
+            uploaded && unwrap(error) instanceof FilePathRefused ? Effect.succeed(null) : Effect.fail(error)
           )
         )
-      )
-      changedAt(placed)
+        if (uploaded && (!info || !isUploadEntry(uploaded, info))) return skipped()
+        if (!info) return { response: refuse(404, "Not found. It may have been moved or deleted."), stopping: [] }
+        const stopping = (yield* reader.SharedByMe({ userId: userId as never }))
+          .filter((share) => isWithin(share.path, placed.ownerFull))
+          .map((share) => share.granteeUserId)
+        if (uploaded?.kind === "folder") {
+          if (stopping.length > 0) return skipped()
+          const removed = yield* Effect.tryPromise(() => removeUploadedFolder(userId, root, segments, uploaded))
+          if (removed) changedAt(placed)
+          return skipped()
+        }
+        // A deleted file stays charged in the bin until the bin is emptied.
+        const user = yield* CurrentUser
+        const item = yield* bin.toBin(
+          userId,
+          root,
+          segments,
+          placed.ownerFull,
+          placed.share ? { userId: user.id, handle: user.handle } : undefined,
+          uploaded ? (current) => isUploadEntry(uploaded, current) : undefined
+        )
+        if (!item) return skipped()
+        changedAt(placed)
+        return { response: HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id }), stopping }
+      })
+      const { response, stopping } = yield* withFileTree(userId, removeEntry)
       if (stopping.length > 0) yield* recheckCommands([...new Set(stopping)])
-      return HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id })
+      return response
     })
 
     /** Attach copies running per account, with how many wait (`ATTACH_AT_ONCE`, `ATTACH_WAITING`). */

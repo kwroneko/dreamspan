@@ -63,6 +63,19 @@ it("redacts nested serialized credentials without corrupting JSON or ordinary ca
   assert.isArray(JSON.parse(data))
 })
 
+it("withholds a truncated serialized result whose credential boundary is unknown", () => {
+  const source = JSON.stringify({ raw: JSON.stringify({ password: "synthetic phrase remaining words" }) })
+  const fragment = source.slice(0, source.indexOf(" words") + " words".length)
+  for (const part of [fragment, source.slice(0, -1)]) {
+    const wrapped = `<step><result>\n${part}\n</result></step>`
+    const result = { ...messages[2]!, content: [{ type: "text", text: wrapped }] } as AgentMessage
+    for (const safe of [summarySafeText(wrapped), transcriptData([result])]) {
+      assert.notInclude(safe, "remaining words")
+      assert.include(safe, "partial JSON data withheld")
+    }
+  }
+})
+
 const setup = (summaryWindow: number) => {
   const sent: Array<unknown> = []
   // A deterministic local counter, so the threshold and tiny-window cases have exact bounds.

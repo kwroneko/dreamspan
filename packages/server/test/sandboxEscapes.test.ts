@@ -254,7 +254,7 @@ sandboxed("the Linux sandbox", () => {
     expect(await reachableAddresses("localhost", async () => ["93.184.215.14"])).toEqual([])
   })
 
-  it("stops a fork bomb at its process limit and timeout", async () => {
+  it("stops a fork bomb at its process limit and timeout", { tags: ["slow"] }, async () => {
     const started = Date.now()
     const result = await run("bomb() { bomb | bomb & }; bomb; sleep 2; echo survived", {
       limits: { timeoutMs: 8000, processes: 64, memoryBytes: 2 ** 30, fileBytes: 2 ** 30, openFiles: 256 }
@@ -265,7 +265,7 @@ sandboxed("the Linux sandbox", () => {
     expect(execFileSync("/bin/sh", ["-c", "echo ok"], { encoding: "utf8" }).trim()).toBe("ok")
   })
 
-  it("caps a process's memory", async () => {
+  it("caps a process's memory", { tags: ["slow"] }, async () => {
     // The markers are built when printed, so a traceback quoting the source doesn't contain them.
     const result = await run(
       [
@@ -300,7 +300,7 @@ sandboxed("the Linux sandbox", () => {
     expect(output(result)).not.toContain("never")
   })
 
-  it("kills the command and everything it started at the timeout", async () => {
+  it("kills the command and everything it started at the timeout", { tags: ["slow"] }, async () => {
     const marker = `rp-leftover-${randomBytes(4).toString("hex")}`
     const started = Date.now()
     const result = await run(
@@ -316,7 +316,7 @@ sandboxed("the Linux sandbox", () => {
     expect(hostProcesses(marker)).toEqual([])
   })
 
-  it("leaves no process behind when the command ends, daemons included", async () => {
+  it("leaves no process behind when the command ends, daemons included", { tags: ["slow"] }, async () => {
     const marker = `rp-leftover-${randomBytes(4).toString("hex")}`
     const result = await run(
       `(exec -a ${marker} sleep 300 &); setsid bash -c 'exec -a ${marker} sleep 300' & nohup bash -c 'exec -a ${marker} sleep 300' >/dev/null 2>&1 & disown -a; echo started`
@@ -326,7 +326,7 @@ sandboxed("the Linux sandbox", () => {
     expect(hostProcesses(marker)).toEqual([])
   })
 
-  it("kills the process tree when the run is stopped", async () => {
+  it("kills the process tree when the run is stopped", { tags: ["slow"] }, async () => {
     const marker = `rp-leftover-${randomBytes(4).toString("hex")}`
     const stop = new AbortController()
     const pending = linuxBwrap.run(spec(`bash -c 'exec -a ${marker} sleep 300' & wait`), stop.signal)
@@ -433,25 +433,29 @@ sandboxed("the Linux sandbox, further attempts", () => {
     expect(text).toMatch(/^1000$/m)
   })
 
-  it("doesn't start, or is stopped, when the disk the app shares goes below the reserve", async () => {
-    const marker = `reserve-${randomBytes(4).toString("hex")}`
-    const refused = await run(`echo x > ${marker}`, {
-      limits: { ...small, reserve: { bytes: Number.MAX_SAFE_INTEGER, inodes: 0 } }
-    })
-    expect(refused.diskLow).toBe(true)
-    expect(refused.exitCode).toBeNull()
-    expect(existsSync(join(files, marker))).toBe(false)
-    // Going below it mid-run: stopped during the sleep, so it never says it finished.
-    const fs = await statfs(files)
-    const free = fs.bavail * fs.bsize
-    const stopped = await run(`head -c 157286400 /dev/urandom > ${marker}; sync; sleep 15; echo never`, {
-      limits: { ...small, timeoutMs: 40_000, reserve: { bytes: free - 50 * 2 ** 20, inodes: 0 } }
-    })
-    await rm(join(files, marker), { force: true })
-    expect(stopped.diskLow).toBe(true)
-    expect(stopped.timedOut).toBe(false)
-    expect(output(stopped)).not.toContain("never")
-  }, 60_000)
+  it(
+    "doesn't start, or is stopped, when the disk the app shares goes below the reserve",
+    { tags: ["slow"], timeout: 60_000 },
+    async () => {
+      const marker = `reserve-${randomBytes(4).toString("hex")}`
+      const refused = await run(`echo x > ${marker}`, {
+        limits: { ...small, reserve: { bytes: Number.MAX_SAFE_INTEGER, inodes: 0 } }
+      })
+      expect(refused.diskLow).toBe(true)
+      expect(refused.exitCode).toBeNull()
+      expect(existsSync(join(files, marker))).toBe(false)
+      // Going below it mid-run: stopped during the sleep, so it never says it finished.
+      const fs = await statfs(files)
+      const free = fs.bavail * fs.bsize
+      const stopped = await run(`head -c 157286400 /dev/urandom > ${marker}; sync; sleep 15; echo never`, {
+        limits: { ...small, timeoutMs: 40_000, reserve: { bytes: free - 50 * 2 ** 20, inodes: 0 } }
+      })
+      await rm(join(files, marker), { force: true })
+      expect(stopped.diskLow).toBe(true)
+      expect(stopped.timedOut).toBe(false)
+      expect(output(stopped)).not.toContain("never")
+    }
+  )
 
   it("refuses numeric, mapped and zero forms of loopback, and tunnels to ports other than HTTP and HTTPS", async () => {
     const proxied = await run(
@@ -485,45 +489,49 @@ if ("none" in limiter) console.warn(`sandboxEscapes: no cgroup limiter here, its
 describe.skipIf(skipReason !== null || "none" in limiter)("the Linux sandbox with a cgroup per command", () => {
   const capped = { timeoutMs: 30_000, processes: 64, memoryBytes: 2 ** 30, fileBytes: 4 * 2 ** 30, openFiles: 256 }
 
-  it("stops 1.5 GiB of shared mappings, memfds and processes together under a 1 GiB cap", async () => {
-    // A shared anonymous mapping and a memfd aren't counted by `ulimit -d`; four processes of
-    // 400 MiB each pass any per-process cap. The markers are built when printed.
-    const shared = [
-      "import mmap",
-      "m = mmap.mmap(-1, 1536 << 20, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS)",
-      "for i in range(0, 1536 << 20, 4096): m[i] = 1",
-      'print("SHARED" + "-OK")'
-    ].join("\n")
-    const memfd = [
-      "import os",
-      "fd = os.memfd_create('x')",
-      "chunk = b'x' * (1 << 20)",
-      "for _ in range(1536): os.write(fd, chunk)",
-      'print("MEMFD" + "-OK")'
-    ].join("\n")
-    const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
-    for (const [script, marker] of [
-      [`python3 -c ${quote(shared)}`, "SHARED-OK"],
-      [`python3 -c ${quote(memfd)}`, "MEMFD-OK"],
-      [
-        `for i in 1 2 3 4; do python3 -c 'import time; x = bytearray(400 << 20); time.sleep(4); print("EACH" + "-OK")' & done; wait; echo "ALL" "DONE"`,
-        "EACH-OK"
-      ]
-    ] as const) {
-      const result = await run(script, { limits: capped })
-      expect(output(result)).not.toContain(marker)
-      expect(result.exitCode).not.toBe(0)
-      expect(result.memoryCapped).toBe(true)
+  it(
+    "stops 1.5 GiB of shared mappings, memfds and processes together under a 1 GiB cap",
+    { tags: ["slow"], timeout: 120_000 },
+    async () => {
+      // A shared anonymous mapping and a memfd aren't counted by `ulimit -d`; four processes of
+      // 400 MiB each pass any per-process cap. The markers are built when printed.
+      const shared = [
+        "import mmap",
+        "m = mmap.mmap(-1, 1536 << 20, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS)",
+        "for i in range(0, 1536 << 20, 4096): m[i] = 1",
+        'print("SHARED" + "-OK")'
+      ].join("\n")
+      const memfd = [
+        "import os",
+        "fd = os.memfd_create('x')",
+        "chunk = b'x' * (1 << 20)",
+        "for _ in range(1536): os.write(fd, chunk)",
+        'print("MEMFD" + "-OK")'
+      ].join("\n")
+      const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
+      for (const [script, marker] of [
+        [`python3 -c ${quote(shared)}`, "SHARED-OK"],
+        [`python3 -c ${quote(memfd)}`, "MEMFD-OK"],
+        [
+          `for i in 1 2 3 4; do python3 -c 'import time; x = bytearray(400 << 20); time.sleep(4); print("EACH" + "-OK")' & done; wait; echo "ALL" "DONE"`,
+          "EACH-OK"
+        ]
+      ] as const) {
+        const result = await run(script, { limits: capped })
+        expect(output(result)).not.toContain(marker)
+        expect(result.exitCode).not.toBe(0)
+        expect(result.memoryCapped).toBe(true)
+      }
+      // Below the cap, programs work.
+      const fine = await run(
+        `python3 -c ${quote(shared.replace(/1536/g, "256"))}; node -e 'const b = Buffer.alloc(256 * 2 ** 20); b.fill(1); console.log("SMALL" + "-OK")'`,
+        { limits: capped }
+      )
+      expect(output(fine)).toContain("SHARED-OK")
+      expect(output(fine)).toContain("SMALL-OK")
+      expect(fine.memoryCapped).toBeUndefined()
     }
-    // Below the cap, programs work.
-    const fine = await run(
-      `python3 -c ${quote(shared.replace(/1536/g, "256"))}; node -e 'const b = Buffer.alloc(256 * 2 ** 20); b.fill(1); console.log("SMALL" + "-OK")'`,
-      { limits: capped }
-    )
-    expect(output(fine)).toContain("SHARED-OK")
-    expect(output(fine)).toContain("SMALL-OK")
-    expect(fine.memoryCapped).toBeUndefined()
-  }, 120_000)
+  )
 
   it("leaves $ in a command to bash inside the sandbox, never the host's wrapper", async () => {
     // systemd-run would otherwise expand ${NAME}, a whole-argument $NAME and $$ with the
@@ -664,7 +672,7 @@ describe("the commands proxy", () => {
 })
 
 sandboxed("the Linux sandbox when the server dies", () => {
-  it("leaves no command behind when the server is killed outright", async () => {
+  it("leaves no command behind when the server is killed outright", { tags: ["slow"], timeout: 30_000 }, async () => {
     const marker = `rp-orphan-${randomBytes(4).toString("hex")}`
     const dir = tempDir("orphan")
     const script = join(dir, "server.ts")
@@ -694,5 +702,5 @@ sandboxed("the Linux sandbox when the server dies", () => {
     const deadline = Date.now() + 5000
     while (hostProcesses(marker).length > 0 && Date.now() < deadline) await new Promise((done) => setTimeout(done, 100))
     expect(hostProcesses(marker)).toEqual([])
-  }, 30_000)
+  })
 })

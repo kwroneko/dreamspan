@@ -45,19 +45,24 @@ const refuseLinks = (error: unknown, name: string): never => {
 export const openFolder = async (
   root: string,
   segments: ReadonlyArray<string>,
-  options: { readonly create?: boolean } = {}
+  options: { readonly create?: boolean; readonly onCreated?: (depth: number, info: Stats) => void } = {}
 ): Promise<FileHandle> => {
   let dir = await open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   try {
-    for (const name of segments) {
+    for (const [depth, name] of segments.entries()) {
       let next: FileHandle
       try {
         next = await open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT" || !options.create) refuseLinks(error, name)
-        await mkdir(at(dir, name), { mode: 0o755 }).catch((e: NodeJS.ErrnoException) => {
-          if (e.code !== "EEXIST") throw e
-        })
+        const created = await mkdir(at(dir, name), { mode: 0o755 }).then(
+          () => true,
+          (e: NodeJS.ErrnoException) => {
+            if (e.code !== "EEXIST") throw e
+            return false
+          }
+        )
+        if (created && options.onCreated) options.onCreated(depth, await lstat(at(dir, name)))
         next = await open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW).catch((e) => refuseLinks(e, name))
       }
       await dir.close()
@@ -130,6 +135,16 @@ export const readRegularFile = async (
   }
 }
 
+/** The entry and its live byte charge are still those inspected before a write. */
+export const sameFileEntry = (before: Stats | null, current: Stats | null): boolean =>
+  before === null || current === null
+    ? before === current
+    : before.dev === current.dev &&
+      before.ino === current.ino &&
+      before.ctimeMs === current.ctimeMs &&
+      before.size === current.size &&
+      before.nlink === current.nlink
+
 /**
  * Writes `bytes` as the file at `segments`: a fresh name in the opened folder, renamed over the
  * target. A folder there is refused; a link there is replaced, never followed.
@@ -138,7 +153,13 @@ export const writeRegularFile = async (
   root: string,
   segments: ReadonlyArray<string>,
   bytes: Uint8Array,
-  options: { readonly createFolders?: boolean } = {}
+  options: {
+    readonly createFolders?: boolean
+    readonly expected?: Stats | null
+    readonly stage?: (temporaryName: string) => void
+    readonly committing?: () => void
+    readonly landed?: (info: Stats) => void
+  } = {}
 ): Promise<Stats> => {
   const { parent, name } = split(segments)
   const dir = await openFolder(root, parent, { create: options.createFolders === true })
@@ -146,15 +167,29 @@ export const writeRegularFile = async (
     const existing = await lstat(at(dir, name)).catch(() => null)
     if (existing?.isDirectory()) throw new FilePathRefused(`“${name}” is a folder.`)
     const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
+    options.stage?.(temporary)
     const file = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, existing?.mode ?? 0o644)
     try {
-      await file.writeFile(bytes)
-      await file.sync()
-    } finally {
-      await file.close()
-    }
-    try {
-      await rename(at(dir, temporary), at(dir, name))
+      let staged: Stats | undefined
+      try {
+        if (options.landed) staged = await file.stat()
+        await file.writeFile(bytes)
+        await file.sync()
+      } finally {
+        await file.close()
+      }
+      if (options.expected !== undefined) {
+        const current = await lstat(at(dir, name)).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null
+          throw error
+        })
+        if (!sameFileEntry(options.expected, current))
+          throw new FilePathRefused(`“${name}” changed before it could be written. Read it again before changing it.`)
+      }
+      options.committing?.()
+      if (options.expected === null) await renameNoReplace(at(dir, temporary), at(dir, name))
+      else await rename(at(dir, temporary), at(dir, name))
+      if (staged) options.landed?.(staged)
     } catch (error) {
       await unlink(at(dir, temporary)).catch(() => undefined)
       throw error

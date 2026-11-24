@@ -2221,6 +2221,12 @@ const WriteOpsChatOwn = RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /** Changes one account's override in the instance quota setting. */
+  Rpc.make("SetAccountFilesQuota", {
+    payload: { userId: UserId, bytes: Schema.NullOr(Schema.Int) },
+    success: Schema.Void,
+    error: StorageError
+  }),
   // --- The usage ledger (PROVIDERS §9.1).
   Rpc.make("OpenLlmRequest", {
     payload: { userId: UserId, request: OpenLlmRequest },
@@ -2451,6 +2457,18 @@ const WriteOpsChatOwn = RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   })
 )
+
+const FileVersionWrite = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  inode: Schema.NullOr(Schema.Number),
+  /** null: a recorded deletion or creation, with no content. */
+  sha256: Schema.NullOr(Sha256),
+  mime: Schema.String,
+  byteSize: Schema.Int,
+  origin: Schema.String,
+  rolloutId: Schema.optionalKey(Schema.String),
+  toolCallId: Schema.optionalKey(Schema.String)
+})
 
 export class WriteOpsChat extends mergeOps(WriteOpsChatOwn, McpWriteOps) {}
 
@@ -2968,23 +2986,22 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("RecordFileVersions", {
     payload: {
       userId: UserId,
-      versions: Schema.Array(
-        Schema.Struct({
-          path: Schema.String.check(Schema.isMaxLength(4096)),
-          inode: Schema.NullOr(Schema.Number),
-          /** null: a recorded deletion or creation, with no content. */
-          sha256: Schema.NullOr(Sha256),
-          mime: Schema.String,
-          byteSize: Schema.Int,
-          origin: Schema.String,
-          rolloutId: Schema.optionalKey(Schema.String),
-          toolCallId: Schema.optionalKey(Schema.String)
-        })
-      ),
+      versions: Schema.Array(FileVersionWrite),
       /** The account that acted, when not the owner (a command through a folder shared to edit). */
       actorUserId: Schema.optionalKey(UserId)
     },
     success: Schema.Array(Schema.String),
+    error: StorageError
+  }),
+  /** Keeps a replacement's earlier contents only if their new charge fits its reservation. */
+  Rpc.make("RecordReplacementVersion", {
+    payload: {
+      userId: UserId,
+      version: FileVersionWrite,
+      maxAddedBytes: Schema.Int,
+      actorUserId: Schema.optionalKey(UserId)
+    },
+    success: Schema.NullOr(Schema.Struct({ id: Schema.String, addedBytes: Schema.Int })),
     error: StorageError
   }),
   /**

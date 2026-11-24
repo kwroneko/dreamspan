@@ -15,10 +15,10 @@ import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { WorkshopPresetChoice } from "@dreamspan/shared/workshopApi.ts"
-import { useAtomValue } from "@effect/atom-react"
+import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import { Effect, Option } from "effect"
-import { AsyncResult } from "effect/reactivity"
-import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
+import { AsyncResult, AtomRegistry } from "effect/reactivity"
+import { type CSSProperties, type ReactNode, useContext, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -48,7 +48,7 @@ import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
 import { BUILTIN, type PresetSelection, usePresetSelection } from "../pickers/presetSelection.ts"
 import { PendingCapabilityChip } from "./CapabilityChip.tsx"
 import { PendingSubagentModelsChip } from "./SubagentModelsChip.tsx"
-import type { PendingGrants } from "./capabilities.ts"
+import { newCapabilitiesAtom, offeredPendingGrants, type PendingGrants } from "./capabilities.ts"
 import { pendingWorkshopCopy, SIDE_CHATS_KEY } from "./sideChat.ts"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
 import { NO_PERSONA } from "./workshopStart.ts"
@@ -202,6 +202,8 @@ export function PendingWorkshop({
   const [presetChoice, setPresetChoice] = useState<PresetChoice>({ _tag: "Default" })
   const preset = usePendingPresetSelection(presetChoice, setPresetChoice)
   const [grants, setGrants] = useState<PendingGrants>(new Map())
+  const registry = useContext(RegistryContext)
+  const capabilityQuery = newCapabilitiesAtom(attachTo ?? "")
   const [guidance, setGuidance] = useState(false)
   // The speaker picked at the chip; none: the persona, as a saved workshop's composer starts.
   const [picked, setPicked] = useState<EntityId | null>(null)
@@ -231,6 +233,9 @@ export function PendingWorkshop({
   const send = async (first: "send" | "generate") => {
     const submitted = text
     if (busy || !ready || (first === "send" && submitted.trim() === "")) return
+    const available = registry.get(capabilityQuery)
+    const choices = AsyncResult.isSuccess(available) ? offeredPendingGrants(grants, available.value) : grants
+    if (choices !== grants) setGrants(choices)
     let requestId = pendingStart.current?.key === startKey ? pendingStart.current.id : null
     try {
       requestId ??= sessionStorage.getItem(startKey)
@@ -259,8 +264,20 @@ export function PendingWorkshop({
             ...(start.card === "" ? {} : { card: start.card }),
             ...(start.persona === "" ? {} : { persona: start.persona === NO_PERSONA ? null : start.persona }),
             ...(presetChoice._tag === "Default" ? {} : { preset: presetChoice }),
-            ...(grants.size === 0 ? {} : { grants: [...grants.values()] })
-          })
+            ...(choices.size === 0 ? {} : { grants: [...choices.values()] })
+          }).pipe(
+            Effect.tapError((error) =>
+              error._tag === "GrantRefused"
+                ? Effect.gen(function* () {
+                    registry.refresh(capabilityQuery)
+                    const refreshed = yield* AtomRegistry.getResult(registry, capabilityQuery, {
+                      suspendOnWaiting: true
+                    })
+                    setGrants((current) => offeredPendingGrants(current, refreshed))
+                  }).pipe(Effect.ignore)
+                : Effect.void
+            )
+          )
           const chatId = chat.id
           const opening = yield* client("ReadPath", {
             chatId,

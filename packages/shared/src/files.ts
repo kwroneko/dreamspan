@@ -207,17 +207,35 @@ export type FolderListing = typeof FolderListing.Type
 export const UploadConflict = Schema.Literals(["ask", "keep", "replace", "skip"])
 export type UploadConflict = typeof UploadConflict.Type
 
+/** The entry created by an upload. Folder identity stays stable as its children change. */
+export const UploadUndoEntry = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  kind: Schema.Literals(["file", "folder"]),
+  device: Schema.Number,
+  inode: Schema.Number,
+  birth: Schema.Number,
+  changed: Schema.NullOr(Schema.Number)
+})
+export type UploadUndoEntry = typeof UploadUndoEntry.Type
+
 export const UploadOutcome = Schema.Struct({
   /** Where it was written: another name under Keep both. */
   path: Schema.String,
   outcome: Schema.Literals(["written", "replaced", "skipped"]),
   /** SHA-256 of what was written, hex (not for a skip): the base of the next editor save. */
-  sha256: Schema.optionalKey(Schema.String)
+  sha256: Schema.optionalKey(Schema.String),
+  created: Schema.optionalKey(Schema.Array(UploadUndoEntry))
 })
 export type UploadOutcome = typeof UploadOutcome.Type
 
 export const Changed = Schema.Struct({ path: Schema.String })
 export type Changed = typeof Changed.Type
+
+export const CreatedFolder = Schema.Struct({
+  ...Changed.fields,
+  created: Schema.optionalKey(Schema.Array(UploadUndoEntry))
+})
+export type CreatedFolder = typeof CreatedFolder.Type
 
 export const Deleted = Schema.Struct({ binItemId: Schema.NullOr(Schema.String) })
 export type Deleted = typeof Deleted.Type
@@ -279,13 +297,18 @@ export const nameProblem = (name: string): string | null => {
   return null
 }
 
-/** "report (2).pdf" for a taken "report.pdf": the first free number, as Keep both names it (§1.1). */
-export const keepBothName = (name: string, taken: ReadonlySet<string>) => {
+/** The numbered name used for Keep both (§1.1). */
+export const numberedFileName = (name: string, n: number) => {
   const dot = name.lastIndexOf(".")
   const stem = dot > 0 ? name.slice(0, dot) : name
   const ext = dot > 0 ? name.slice(dot) : ""
+  return `${stem} (${n})${ext}`
+}
+
+/** "report (2).pdf" for a taken "report.pdf": the first free number. */
+export const keepBothName = (name: string, taken: ReadonlySet<string>) => {
   for (let n = 2; ; n++) {
-    const candidate = `${stem} (${n})${ext}`
+    const candidate = numberedFileName(name, n)
     if (!taken.has(candidate)) return candidate
   }
 }

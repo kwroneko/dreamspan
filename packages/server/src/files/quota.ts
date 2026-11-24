@@ -54,12 +54,12 @@ export interface Usage {
   readonly usedBytes: number
   readonly quotaBytes: number
   readonly measuredAt: number
-  /** The walk stopped at its limits: the real usage is higher. */
+  /** The walk was incomplete: some usage may be uncounted. */
   readonly partial: boolean
 }
 
 const PARTIAL_TEXT = (what: string) =>
-  `Your files are too many to count. Delete files you don't need and empty the bin to ${what} again.`
+  `Your files couldn't be fully counted. Check that the folders are accessible, or delete files and empty the bin to ${what} again.`
 
 export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
@@ -87,11 +87,16 @@ export const measureTree = async (
   const deadline = Date.now() + maxMs
   let bytes = 0
   let entries = 0
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return null
+  }
   const stack = [root]
   while (stack.length) {
     const path = stack.pop()!
     if (skip?.(path)) continue
-    const info = await lstat(path, { bigint: false }).catch(() => null)
+    const info = await lstat(path, { bigint: false }).catch(missing)
     if (!info) continue
     const key = inodeKey(info)
     if (seen.has(key)) continue
@@ -101,11 +106,11 @@ export const measureTree = async (
     bytes += size
     if (++entries >= maxEntries || Date.now() > deadline) return { bytes, entries, partial: true }
     if (info.isDirectory()) {
-      const names = await readdir(path).catch(() => [] as Array<string>)
-      for (const name of names) stack.push(join(path, name))
+      const names = await readdir(path).catch(missing)
+      for (const name of names ?? []) stack.push(join(path, name))
     }
   }
-  return { bytes, entries, partial: false }
+  return { bytes, entries, partial }
 }
 
 /**
@@ -123,12 +128,17 @@ export const measureBin = async (
   items = true
 ) => {
   const deadline = Date.now() + maxMs
-  const holders = items ? await readdir(bin).catch(() => [] as Array<string>) : [""]
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return []
+  }
+  const holders = items ? await readdir(bin).catch(missing) : [""]
   let bytes = 0
   let entries = 0
   for (const holder of holders) {
     const folder = holder === "" ? bin : join(bin, holder)
-    for (const name of await readdir(folder).catch(() => [] as Array<string>)) {
+    for (const name of await readdir(folder).catch(missing)) {
       const left = Math.max(1, maxEntries - entries)
       const measured = await measureTree(
         join(folder, name),
@@ -142,7 +152,7 @@ export const measureBin = async (
       if (measured.partial || entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
     }
   }
-  return { bytes, partial: false }
+  return { bytes, partial }
 }
 
 export interface QuotaDeps {
@@ -332,14 +342,19 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const check = (userId: string, adding: number, what: string): Effect.Effect<Usage, QuotaExceeded> =>
     Effect.gen(function* () {
       let now = yield* usage(userId)
-      // A walk that stopped at its limits counted only part of the files: what it didn't reach
-      // could hold any amount (millions of empty files first, large ones after), so it isn't room.
       if (!now.partial && now.usedBytes + adding <= now.quotaBytes) return now
-      const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
-      if (trimmed > 0 || now.partial || Date.now() - now.measuredAt > 60_000) {
-        yield* measure(userId)
-        // With what landed while it walked, which its figure doesn't hold.
+      if (now.partial || Date.now() - now.measuredAt > 60_000) {
+        yield* measure(userId, true)
         now = yield* usage(userId)
+      }
+      // An incomplete walk can justify pressure retention only from bytes it actually saw.
+      const counted = now.partial ? (usages.get(userId)?.usedBytes ?? 0) - total(frees.get(userId)) : now.usedBytes
+      if (counted + adding > now.quotaBytes) {
+        const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
+        if (trimmed > 0) {
+          yield* measure(userId, true)
+          now = yield* usage(userId)
+        }
       }
       if (now.partial) return yield* Effect.fail(new QuotaExceeded(PARTIAL_TEXT(what)))
       if (now.usedBytes + adding <= now.quotaBytes) return now
@@ -356,25 +371,36 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const hold = (userId: string, stage?: "outside-files" | { readonly temporaryName: string }) => {
     const id = nextId++
     if (stage !== undefined) stagingHolds.add(id)
-    if (typeof stage === "object") {
+    let temporaryName: string | undefined
+    const stageName = (name: string) => {
+      temporaryName = name
       const names = stagingNames.get(userId) ?? new Set<string>()
-      names.add(stage.temporaryName)
+      names.add(name)
       stagingNames.set(userId, names)
     }
+    if (typeof stage === "object") stageName(stage.temporaryName)
     const unstage = () => {
       stagingHolds.delete(id)
-      if (typeof stage !== "object") return
+      if (temporaryName === undefined) return
       const names = stagingNames.get(userId)
-      names?.delete(stage.temporaryName)
+      names?.delete(temporaryName)
       if (names?.size === 0) stagingNames.delete(userId)
     }
     let released = false
     let reserved = 0
+    const fits = (bytes: number, quotaBytes: number) => {
+      const known = usages.get(userId)
+      return (
+        !released &&
+        known?.partial !== true &&
+        (known?.usedBytes ?? 0) + total(pending.get(userId)) - total(frees.get(userId)) + bytes <= quotaBytes
+      )
+    }
     return {
+      stage: stageName,
+      fits,
       reserve: (bytes: number, quotaBytes: number) => {
-        if (released) return false
-        const known = usages.get(userId)?.usedBytes ?? 0
-        if (known + total(pending.get(userId)) - total(frees.get(userId)) + bytes > quotaBytes) return false
+        if (!fits(bytes, quotaBytes)) return false
         reserved += bytes
         grow(userId, id, bytes)
         return true
@@ -385,6 +411,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },
       release: () => {
+        if (released) return
         released = true
         unstage()
         landing.get(userId)?.delete(id)
@@ -392,6 +419,62 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       }
     }
   }
+
+  /** Reserve the net charge after the old live file is replaced and its version is kept. */
+  const replacement = (
+    userId: string,
+    before: Stats | null,
+    version: { readonly sha256: string; readonly byteSize: number } | null,
+    bytes: number,
+    what: string,
+    held?: ReturnType<typeof hold>
+  ) =>
+    Effect.gen(function* () {
+      const released = before?.isFile() && before.nlink === 1 ? before.size : 0
+      const retained =
+        version && (yield* deps.reader.FileVersionBytes({ userId: userId as never, sha256: version.sha256 })) === 0
+          ? version.byteSize
+          : 0
+      const cost = (size: number, kept = retained) => size + kept - released
+      const room = yield* check(userId, cost(bytes), what)
+      const holdBytes = held ?? hold(userId, "outside-files")
+      let reserved = 0
+      let credit = 0
+      const over = (size: number, kept = retained) => overText(room.usedBytes + cost(size, kept), room.quotaBytes, what)
+      const reserve = (size: number, kept = retained) => {
+        const more = cost(size, kept) - reserved
+        if (more <= 0) return holdBytes.fits(more, room.quotaBytes)
+        if (!holdBytes.reserve(more, room.quotaBytes)) return false
+        reserved += more
+        return true
+      }
+      return {
+        over,
+        reserve,
+        keep: <A, E, R>(
+          size: number,
+          previousBytes: number,
+          record: (maxAddedBytes: number) => Effect.Effect<A | null, E, R>
+        ) =>
+          Effect.gen(function* () {
+            const first = yield* record(retained)
+            if (first !== null) return first
+            if (!reserve(size, previousBytes)) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            const saved = yield* record(previousBytes)
+            if (saved === null) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            return saved
+          }),
+        stage: holdBytes.stage,
+        committing: (size: number, kept: number) => {
+          credit = freed(userId, reserved - cost(size, kept))
+        },
+        landed: holdBytes.landed,
+        release: () => {
+          holdBytes.release()
+          unfreed(userId, credit)
+        }
+      }
+    })
 
   /** The refusal for a streaming write that ran out of room. */
   const overMessage = (used: number, quotaBytes: number, what: string) => overText(used, quotaBytes, what)
@@ -460,12 +543,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   /** An admin's quota for one account; null returns it to the instance default. */
   const setQuota = (userId: string, bytes: number | null) =>
     Effect.gen(function* () {
-      const raw = yield* deps.reader.GetAppSetting({ key: QUOTAS_SETTING })
-      const decoded = Schema.decodeUnknownOption(Quotas)(raw ?? {})
-      const quotas: Record<string, number> = { ...(decoded._tag === "Some" ? decoded.value : {}) }
-      if (bytes === null) delete quotas[userId]
-      else quotas[userId] = bytes
-      yield* deps.writer.SetAppSetting({ key: QUOTAS_SETTING, value: quotas })
+      yield* deps.writer.SetAccountFilesQuota({ userId: userId as never, bytes })
       return yield* usage(userId)
     })
 
@@ -482,6 +560,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     setQuota,
     sweepVersions,
     remeasureActive,
+    replacement,
     intervals: { measureMs: MEASURE_EVERY, retentionMs: 60 * 60_000 }
   }
 }

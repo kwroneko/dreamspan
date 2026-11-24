@@ -16,11 +16,12 @@
 //   the host's values in it: `--expand-environment=no` turns that off where systemd-run has it
 //   (254 on). The probe checks that arguments arrive unchanged; where they wouldn't, the limiter
 //   isn't used.
-import { execFile, spawnSync } from "node:child_process"
+import { execFile } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { constants, existsSync } from "node:fs"
 import { access, mkdir, readFile, rmdir, writeFile } from "node:fs/promises"
 import { delimiter, join } from "node:path"
+import { promisify } from "node:util"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { serverEnvironment } from "../serverEnvironment.ts"
 import type { Availability } from "./registry.ts"
@@ -162,13 +163,17 @@ const userBusEnv = (): Record<string, string> => {
   }
 }
 
+const runProbe = promisify(execFile)
+
 /** Whether systemd-run has `--expand-environment` (systemd 254 on); asked once per binary. */
-const expandOptionKnown = new Map<string, boolean>()
+const expandOptionKnown = new Map<string, Promise<boolean>>()
 const hasExpandOption = (systemdRun: string) => {
   let known = expandOptionKnown.get(systemdRun)
   if (known === undefined) {
-    const help = spawnSync(systemdRun, ["--help"], { encoding: "utf8", timeout: 5000, env: userBusEnv() })
-    known = help.status === 0 && help.stdout.includes("--expand-environment")
+    known = runProbe(systemdRun, ["--help"], { encoding: "utf8", timeout: 5000, env: userBusEnv() }).then(
+      ({ stdout }) => stdout.includes("--expand-environment"),
+      () => false
+    )
     expandOptionKnown.set(systemdRun, known)
   }
   return known
@@ -202,14 +207,14 @@ const systemdScope: CgroupLimiter = {
     if (!systemdRun) return { ok: false, reason: "systemd-run isn't installed." }
     // The scope must really carry the limits: a user manager without the memory controller
     // delegated accepts MemoryMax and ignores it.
-    const probe = spawnSync(
+    const probe = await runProbe(
       systemdRun,
       [
         ...scopeArgs(
           { memoryBytes: 64 * 2 ** 20, processes: 16 },
           `dreamspan-probe-${randomBytes(6).toString("hex")}`,
           true,
-          hasExpandOption(systemdRun)
+          await hasExpandOption(systemdRun)
         ),
         "/bin/sh",
         "-c",
@@ -218,11 +223,17 @@ const systemdScope: CgroupLimiter = {
         ...LITERAL_ARGS
       ],
       { encoding: "utf8", timeout: 10_000, env: userBusEnv() }
+    ).then(
+      ({ stdout }) => ({ ok: true as const, stdout }),
+      (error: NodeJS.ErrnoException & { stderr?: string }) => ({
+        ok: false as const,
+        detail: (error.stderr || String(error)).trim().slice(0, 200)
+      })
     )
-    if (probe.status !== 0)
+    if (!probe.ok)
       return {
         ok: false,
-        reason: `systemd-run can't make a user scope here (${(probe.stderr || String(probe.error ?? "")).trim().slice(0, 200)}).`
+        reason: `systemd-run can't make a user scope here (${probe.detail}).`
       }
     const [memory, pids, ...passed] = probe.stdout.trim().split("\n")
     if (memory !== String(64 * 2 ** 20) || pids !== "16")
@@ -236,7 +247,7 @@ const systemdScope: CgroupLimiter = {
     if (!systemdRun) throw new Error("systemd-run isn't installed.")
     const unit = `dreamspan-cmd-${randomBytes(8).toString("hex")}`
     const env = userBusEnv()
-    const noExpand = hasExpandOption(systemdRun)
+    const noExpand = await hasExpandOption(systemdRun)
     return {
       env,
       // Not collected on failure, so its result can be read after; reset below.
@@ -268,14 +279,21 @@ export const bwrapLimiters = makeRegistry<CgroupLimiter>([delegatedCgroup, syste
 
 let chosen: { readonly at: number; readonly value: CgroupLimiter | { readonly none: string } } | null = null
 
-/**
- * The limiter commands use here, or why there is none (checked again each minute, like the
- * sandbox itself).
- */
-export const selectLimiter = async (
-  registry: { readonly list: () => ReadonlyArray<CgroupLimiter> } = bwrapLimiters
-): Promise<CgroupLimiter | { readonly none: string }> => {
-  if (registry === bwrapLimiters && chosen && Date.now() - chosen.at < 60_000) return chosen.value
+type LimiterRegistry = { readonly list: () => ReadonlyArray<CgroupLimiter> }
+type LimiterSelection = CgroupLimiter | { readonly none: string }
+const selecting = new WeakMap<LimiterRegistry, Promise<LimiterSelection>>()
+
+/** The limiter commands use here, or why there is none. Production results last a minute. */
+export const selectLimiter = (registry: LimiterRegistry = bwrapLimiters): Promise<LimiterSelection> => {
+  if (registry === bwrapLimiters && chosen && Date.now() - chosen.at < 60_000) return Promise.resolve(chosen.value)
+  const running = selecting.get(registry)
+  if (running) return running
+  const probe = probeLimiters(registry).finally(() => selecting.delete(registry))
+  selecting.set(registry, probe)
+  return probe
+}
+
+const probeLimiters = async (registry: LimiterRegistry): Promise<LimiterSelection> => {
   let value: CgroupLimiter | { readonly none: string } = { none: "No cgroup limiter is registered." }
   const reasons: Array<string> = []
   for (const limiter of registry.list()) {

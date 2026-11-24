@@ -24,7 +24,7 @@ import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
 import type { Stability } from "../src/assembler/st.ts"
-import { charDefinitions } from "@dreamspan/shared/presetOrder.ts"
+import { agentInstructionsPrompt, charDefinitions } from "@dreamspan/shared/presetOrder.ts"
 import { endOfRequestText } from "@dreamspan/shared/endOfRequest.ts"
 import { builtinSourceDescriptors } from "../src/assembler/sourceDescriptors.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
@@ -2293,6 +2293,31 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       }
     })
     const activate = (note: NoteInput) => at(null, { key: "note.activate", value: { note: note.entity as never } })
+    it("uses a chat's replacement note when Agent instructions are last", async () => {
+      const base = preset()
+      const original = "Use the original instruction."
+      const replacement = tailNote("Read the ledger first. {{original}}", "system")
+      const identifier = agentInstructionsPrompt.identifier
+      const snapshot = await assembled(
+        chat({
+          notes: [{ ...replacement, doc: { ...replacement.doc, replaces: { kind: "preset_prompt", identifier } } }],
+          events: [activate(replacement)],
+          preset: {
+            ...base,
+            prompts: [
+              ...base.prompts.filter((p) => p.identifier !== identifier),
+              { ...agentInstructionsPrompt, content: original }
+            ],
+            order: [...base.order.filter((p) => p.identifier !== identifier), { identifier, enabled: true }]
+          }
+        }),
+        { agent: { instructions: "Built-in instructions.", speakerCardOnly: false } }
+      )
+      const last = contents(snapshot).at(-1)!
+      expect(last.startsWith("user: ")).toBe(true)
+      expect(last.endsWith(`\nRead the ledger first. ${original}`)).toBe(true)
+    })
+
     /** The preset with its end-of-request texts emptied. */
     const emptied = (doc: PresetDoc): PresetDoc => ({
       ...doc,

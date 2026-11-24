@@ -167,6 +167,36 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
     })
   )
 
+  it.effect("branching at the visible story end keeps workshop messages about a deleted trailing insertion", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const anchor = yield* h.reader.GetSlot({ userId: h.userId, slotId: h.s3.slotId, forkId: h.main })
+      const inserted = yield* h.writer.InsertMessage({
+        userId: h.userId,
+        chatId: h.story.id,
+        forkId: h.main,
+        anchorSlotId: h.s3.slotId,
+        expectedRowVersion: anchor.entry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "They stop at the river." }
+      })
+      const discussed = yield* h.append(h.workshop.id, h.w, "W4: the river gives them a place to rest.")
+      const position = yield* h.reader.WorkshopStoryPosition({
+        userId: h.userId,
+        chatId: h.workshop.id,
+        forkId: h.w,
+        versionId: discussed.version.id
+      })
+      assert.strictEqual(position?.leafSlotId, inserted.slotId)
+      yield* h.writer.DeleteMessage({ userId: h.userId, forkId: h.main, slotId: inserted.slotId })
+
+      const { preview, fork } = yield* h.branchStory(h.s3.slotId)
+      assert.isEmpty(preview.workshops)
+      const [paired] = yield* h.pairedIn(h.workshop, fork)
+      assert.isDefined(paired)
+      assert.deepStrictEqual(yield* h.texts(h.workshop.id, paired!), yield* h.texts(h.workshop.id, h.w))
+    })
+  )
+
   it.effect("the dialog offers then and now, lists what then leaves out, and each choice does what it says", () =>
     Effect.gen(function* () {
       const h = yield* setup

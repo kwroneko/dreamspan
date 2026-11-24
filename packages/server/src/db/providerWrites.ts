@@ -1,4 +1,4 @@
-import { writeSetting } from "./settings.ts"
+import { readSetting, writeSetting } from "./settings.ts"
 import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
@@ -8,7 +8,7 @@ import type { ConnectionSettings, ModelId, ModelOverrides } from "@dreamspan/sha
 import { findProvider, providerChanges } from "@dreamspan/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { ModelKeyTaken, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import {
@@ -456,6 +456,17 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       writeSetting(sql, "app", "", key, value)
         .pipe(Effect.catchTag("StaleWrite", Effect.die))
         .pipe(Effect.asVoid, transaction(sql, "SetAppSetting")),
+
+    SetAccountFilesQuota: ({ userId, bytes }) =>
+      Effect.gen(function* () {
+        const key = "files.quotas"
+        const { value } = yield* readSetting(sql, "app", "", key)
+        const decoded = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Int))(value ?? {})
+        const quotas = { ...(decoded._tag === "Some" ? decoded.value : {}) }
+        if (bytes === null) delete quotas[userId]
+        else quotas[userId] = bytes
+        yield* writeSetting(sql, "app", "", key, quotas).pipe(Effect.catchTag("StaleWrite", Effect.die))
+      }).pipe(transaction(sql, "SetAccountFilesQuota")),
 
     RecordImageTokenCount: ({ userId, sha256, kind, modelKey, detail, tokens }) =>
       sql`INSERT INTO image_token_counts ${sql.insert({
