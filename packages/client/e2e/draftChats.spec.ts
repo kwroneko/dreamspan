@@ -61,6 +61,26 @@ const start = async (page: Page) => {
 
 test.describe.configure({ mode: "parallel" })
 
+test("an owned card's pending composer reloads its saved Guidance choice", async ({ page }) => {
+  await start(page)
+  const card = await importCard(page, { name: "Guidance fixture", first_mes: "A lamp glows." })
+  const id = (await openDraft(page, `/cards/${card.entityId}/chat`)) as ChatId
+  const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+  await toggle.click()
+  const direction = "Describe the lamp."
+  const box = page.getByTestId("composer")
+  await box.fill(direction)
+  await expect
+    .poll(() => admin((api) => api.OpenComposer({ chatId: id, forkId: null })))
+    .toMatchObject({
+      guidance: true,
+      content: direction
+    })
+  await page.reload()
+  await expect(box).toHaveText(direction)
+  await expect(toggle).toBeChecked()
+})
+
 const NOT_STARTED = "Available once the chat is started: send a message first."
 
 test("a card's new chat changes nothing until it starts, and a reload keeps it", async ({ page }) => {

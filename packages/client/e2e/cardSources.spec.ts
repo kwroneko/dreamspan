@@ -37,6 +37,40 @@ const archive = (port: number) => ({
 
 const tiles = (scope: ReturnType<Page["locator"]>) => scope.locator("[data-remote-card]")
 
+test("a source-card draft reload keeps guidance out of the posted messages", async ({ page }) => {
+  const port = await freePort()
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port), FAKE_GENERATOR_TPS: "10000" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.goto(server.url)
+    const main = page.getByRole("main")
+    await main.getByRole("group", { name: "Show", exact: true }).getByRole("button", { name: "cardex" }).click()
+    await tiles(main).first().getByRole("link").click()
+    await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
+    expect(new URL(page.url()).searchParams.has("guidance")).toBe(false)
+    const guidance = page.getByRole("switch", { name: "Guidance", exact: true })
+    await guidance.click()
+    const direction = "Mention the blue hour."
+    const box = page.getByTestId("composer")
+    await box.fill(direction)
+    await page.reload()
+    await expect(box).toHaveValue(direction)
+    await expect(guidance).toBeChecked()
+    await box.press("Enter")
+    await expect(page).toHaveURL(/\/chats\/[^/]+/)
+    const chat = await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const [chat] = yield* api.ListChats({ limit: 1, before: null })
+        return yield* api.ReadPath({ chatId: chat!.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      })
+    )
+    expect(chat.entries.at(-1)?.version.direction).toBe(direction)
+    expect(chat.entries.some(({ version }) => version.writer === "human" && version.content === direction)).toBe(false)
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const place of ["Home", "Sidebar"] as const)
   test(`${place}: leaving cardex for Groups keeps the archive visible until the group page arrives`, async ({
     page

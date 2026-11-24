@@ -74,13 +74,36 @@ import { preloadChatPage } from "./chatPageLoader.ts"
 import { type PreviewInput, useDraftPreview } from "./draftRequest.tsx"
 import { FIRST_REQUEST_PATH, firstRequests } from "./firstRequest.ts"
 
+const guidanceKey = (userId: string, entityId: EntityId) =>
+  `dreamspan.pendingGuidance:${userId}:${pendingChatCopy(entityId)}`
+
+const readGuidance = (key: string, inherited: boolean) => {
+  try {
+    const stored = localStorage.getItem(key)
+    return stored === null ? inherited : stored === "on"
+  } catch {
+    return inherited
+  }
+}
+
+const keepGuidance = (key: string, guidance: boolean | null) => {
+  try {
+    if (guidance === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, guidance ? "on" : "off")
+  } catch {
+    // A browser without storage can still use Guidance for the current draft.
+  }
+}
+
 function Pending({
   pending,
-  card
+  card,
+  modeKey
 }: {
   pending: PendingChat
   /** The card that greets first: the source's card. */
   card: CardForChat
+  modeKey: string
 }) {
   const composerId = useId()
   const action = useAction()
@@ -122,9 +145,11 @@ function Pending({
     typed.current = durable.text
     setTextState(durable.text)
   }, [durable.ready, durable.text])
+  const guidance = state.guidance
   const copy = useRef<Copy | null>(null)
   const keep = (content: string) => {
     if (destination.current === null) {
+      keepGuidance(modeKey, guidance)
       durable.setText(content)
       return Promise.resolve()
     }
@@ -146,8 +171,10 @@ function Pending({
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
   const { compact: phone, ref: composerRef } = useCompactComposer()
-  const guidance = state.guidance
-  const setGuidance = (guidance: boolean) => pending.change((state) => ({ ...state, guidance }))
+  const setGuidance = (guidance: boolean) => {
+    keepGuidance(modeKey, guidance)
+    pending.change((state) => ({ ...state, guidance }))
+  }
   const repliers = greeters.filter((item) => item.card.entityId !== persona)
   // Who answers the first message: in a chat without characters, an unnamed reply, as its composer asks for.
   const replyId =
@@ -279,7 +306,8 @@ function Pending({
   useEffect(() => () => firstRequests.withdraw(publishToken), [publishToken])
 
   const start = async (first: "send" | "generate") => {
-    if (!viewPrefs.ready || action.pending || attachments?.busy || (first === "send" && !hasMessage)) return
+    if (!durable.ready || !viewPrefs.ready || action.pending || attachments?.busy || (first === "send" && !hasMessage))
+      return
     const personaId = playing?.entityId ?? null
     // Attachments go with a sent message, in the transaction that makes the chat; with
     // Generate they stay, and move to the saved chat's composer.
@@ -385,7 +413,7 @@ function Pending({
     await keep(typed.current)
     // Whatever the first send didn't take goes along too: to the composer of the fork it made.
     await attachments?.carry(result.value.chat.id, result.value.composer.key.field)
-    await durable.commit(durable.text, async () => true)
+    if (await durable.commit(durable.text, async () => true)) keepGuidance(modeKey, null)
     // Restore tab-strip focus only if it is still there as this route is replaced; typing
     // in the composer or clicking Send keeps the normal destination focus behaviour.
     const panelFocused = Boolean(document.activeElement?.closest("[data-chat-panel-tabs]"))
@@ -422,7 +450,7 @@ function Pending({
     submitKey: composerSubmitKey(viewPrefs.prefs.enterSends),
     speakerPlayed: speakerId === null || speakerId === playing?.entityId,
     guidance,
-    prefsReady: viewPrefs.ready,
+    prefsReady: viewPrefs.ready && durable.ready,
     changeGuidance: setGuidance,
     busy: action.pending,
     attaching: attachments?.busy ?? false,
@@ -531,6 +559,7 @@ function Pending({
                 data-testid="composer"
                 data-has-attachments={attachments?.count ? true : undefined}
                 value={text}
+                readOnly={!durable.ready}
                 // Short, so it fits one line on a phone, as the chat's composer does.
                 placeholder={guidance ? "Guidance for the next message…" : "Message…"}
                 onKeyDown={(event) =>
@@ -591,12 +620,16 @@ function PendingFor({
 }) {
   const call = useCaller()
   const search = useSearch({ strict: false }) as { guidance?: string }
+  const modeKey = guidanceKey(useSession().user.id, card.card.entityId)
   // A source's card has no persona lock: only a card of the user's has one.
-  const [pending] = useState(() => new PendingChat(cards, [card], call, defaultPersona, search.guidance === "on"))
+  const [pending] = useState(() => {
+    const guidance = readGuidance(modeKey, search.guidance === "on")
+    return new PendingChat(cards, [card], call, defaultPersona, guidance)
+  })
   // Attachments are kept by the key the first message's text is (Pending's `copyKey`).
   return (
     <PendingAttachmentScope scope={pendingChatCopy(card.card.entityId)}>
-      <Pending pending={pending} card={card} />
+      <Pending pending={pending} card={card} modeKey={modeKey} />
     </PendingAttachmentScope>
   )
 }
