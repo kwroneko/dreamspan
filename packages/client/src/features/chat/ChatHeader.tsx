@@ -4,7 +4,7 @@ import { kindTitle } from "./kindLooks.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatBranchControls, chatHeaderAbout, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
-// The open chat's header, one row: whose chat it is (the cast's faces, the chat's readable
+// The open chat's header, one row: whose chat it is (the cast's portraits or the chat's cover image, its readable
 // name, never ST's file name, which a click renames in place, and the cast's names under it),
 // then the branch control and the chat's buttons (the pin, ⋯, the side panel), which are
 // contributions (`chatBranchControls`, `chatHeaderActions`). On a phone it replaces the app's
@@ -391,7 +391,7 @@ export function ChatHeader({
 
 /**
  * A chat not made yet has the same header (owner, 2026-11-02: it looks and works like any
- * other chat): the name it will be saved under, its cast's faces, and its buttons
+ * other chat): the name it will be saved under, its cast's portraits, and its buttons
  * (`pendingChatHeaderActions`: the side panel). The name isn't renamed until it's saved.
  */
 export function PendingChatHeader({
@@ -442,7 +442,7 @@ export function ChatHeaderFrame({
   renaming = false
 }: {
   characters: ReadonlyArray<CastCard>
-  /** The chat's own picture, shown in place of its characters' faces. */
+  /** The chat's own cover image, shown in place of its characters' portraits. */
   picture?: { readonly id: string; readonly name: string; readonly mediaId: string } | null
   loading: boolean
   title: ReactNode
@@ -455,7 +455,7 @@ export function ChatHeaderFrame({
   return (
     <TooltipProvider>
       {/* Narrow by the chat column's own width, not the screen's: below 40rem it takes the phone's
-          layout, leaving out the faces, the pin and the rename pencil (the side panel has the cast,
+          layout, leaving out the portraits, the pin and the rename pencil (the side panel has the cast,
           the chat lists the pin, ⋯ has Rename), and the chat's name gives up room before a short
           branch name does. */}
       <CenterHeader endControls={false}>
@@ -484,7 +484,7 @@ export function ChatHeaderFrame({
         {loading ? (
           <span className="h-12 w-8 shrink-0 animate-pulse rounded-sm bg-surface-raised motion-reduce:animate-none @max-[40rem]/header:hidden" />
         ) : picture ? (
-          <Tooltip label="This chat’s picture. Opens This chat in the side panel." side="bottom">
+          <Tooltip label="This chat’s cover image. Opens This chat in the side panel." side="bottom">
             <button
               type="button"
               data-chat-picture

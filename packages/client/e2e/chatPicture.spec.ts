@@ -1,5 +1,5 @@
-// A chat's own picture (audit item 010): chosen, changed and removed from This chat, with Undo,
-// and shown for the chat in the chats list and its header in place of its characters' faces.
+// A chat's own cover image (audit item 010): chosen, changed and removed from This chat, with Undo,
+// and shown for the chat in the chats list and its header in place of its characters' portraits.
 // Synthetic cards, chats and pixels only.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -37,15 +37,15 @@ for (const width of [1440, 390])
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
         await page.goto(`${server.url}/chats/${seed.pictured}`)
         const tab = await openPanel(page, "This chat")
-        const section = tab.getByRole("region", { name: "Chat picture", exact: true })
+        const section = tab.getByRole("region", { name: "Chat cover image", exact: true })
         const scope = '[role="tabpanel"][aria-label="This chat"]'
-        await expect(section.getByText("The characters’ faces", { exact: true })).toBeVisible()
-        const choose = section.getByRole("button", { name: "Choose a picture", exact: true })
+        await expect(section.getByText("The characters’ portraits", { exact: true })).toBeVisible()
+        const choose = section.getByRole("button", { name: "Pick custom image", exact: true })
         await choose.hover()
         await expect(
           page
             .locator('[data-layout-overlay="Tooltip floats above the page"]')
-            .filter({ hasText: "in place of the characters’ faces" })
+            .filter({ hasText: "in place of the characters’ portraits" })
         ).toBeVisible()
         const plainBox = await section.boundingBox()
         await expectLayout(page, info, `this-chat-plain-${width}-${theme}`, { scope })
@@ -62,9 +62,9 @@ for (const width of [1440, 390])
         await picker.setInputFiles({ name: "notes.png", mimeType: "image/png", buffer: Buffer.from("not an image") })
         await expect(section.getByRole("alert")).toContainText("PNG, JPEG, GIF or WebP")
         await picker.setInputFiles({ name: "lighthouse.png", mimeType: "image/png", buffer: portraitPng() })
-        await expect(section.getByText("This chat’s own", { exact: true })).toBeVisible()
+        await expect(section.getByText("Custom image", { exact: true })).toBeVisible()
         await expect(section.getByRole("alert")).toHaveCount(0)
-        await expect(toast("Picture set")).toBeVisible()
+        await expect(toast("Cover image set")).toBeVisible()
         const first = await shownSrc()
         // The picture takes the box that was reserved for it: nothing in the section moved.
         expect((await section.boundingBox())!.height).toBe(plainBox!.height)
@@ -74,21 +74,24 @@ for (const width of [1440, 390])
 
         // Changed, then Undo puts the first one back.
         await picker.setInputFiles({ name: "harbor.png", mimeType: "image/png", buffer: portraitPng([], 5) })
-        await expect(toast("Picture changed")).toBeVisible()
+        await expect(toast("Cover image changed")).toBeVisible()
         expect(await shownSrc()).not.toBe(first)
-        await toast("Picture changed").getByRole("button", { name: "Undo", exact: true }).click()
+        await toast("Cover image changed").getByRole("button", { name: "Undo", exact: true }).click()
         await expect.poll(shownSrc).toBe(first)
         // Removed, then Undo.
         await section.getByRole("button", { name: "Remove", exact: true }).click()
-        await expect(section.getByText("The characters’ faces", { exact: true })).toBeVisible()
-        await toast("Picture removed").getByRole("button", { name: "Undo", exact: true }).click()
-        await expect(section.getByText("This chat’s own", { exact: true })).toBeVisible()
+        await expect(section.getByText("The characters’ portraits", { exact: true })).toBeVisible()
+        await toast("Cover image removed").getByRole("button", { name: "Undo", exact: true }).click()
+        await expect(section.getByText("Custom image", { exact: true })).toBeVisible()
         expect(await shownSrc()).toBe(first)
 
         // It survives a reload, and the header shows it where it shows faces.
         await page.reload()
-        const again = (await openPanel(page, "This chat")).getByRole("region", { name: "Chat picture", exact: true })
-        await expect(again.getByText("This chat’s own", { exact: true })).toBeVisible()
+        const again = (await openPanel(page, "This chat")).getByRole("region", {
+          name: "Chat cover image",
+          exact: true
+        })
+        await expect(again.getByText("Custom image", { exact: true })).toBeVisible()
         if (width === 1440) {
           await expect(page.locator("[data-chat-picture] img")).toBeVisible()
           await page
@@ -124,10 +127,10 @@ for (const width of [1440, 390])
         // Removed for good: the faces are back, in a row as tall as it was with the picture.
         const panel = await openPanel(page, "This chat")
         await panel
-          .getByRole("region", { name: "Chat picture", exact: true })
+          .getByRole("region", { name: "Chat cover image", exact: true })
           .getByRole("button", { name: "Remove", exact: true })
           .click()
-        await expect(toast("Picture removed")).toBeVisible()
+        await expect(toast("Cover image removed")).toBeVisible()
         if (width === 390) await closePanel(page)
         await showAppNavigation(page)
         await expect(row(seed.pictured).locator("[data-row-portraits] [data-portrait]")).toHaveCount(2)
@@ -135,6 +138,14 @@ for (const width of [1440, 390])
         await expectLayout(page, info, `chats-list-faces-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath(`chats-list-faces-${width}-${theme}.png`) })
         await hideAppNavigation(page)
+
+        // A chat with one character says so in the singular.
+        await page.goto(`${server.url}/chats/${seed.plain}?panel=chat`)
+        await expect(
+          page
+            .getByRole("region", { name: "Chat cover image", exact: true })
+            .getByText("The character’s portraits", { exact: true })
+        ).toBeVisible()
       } finally {
         await server.stop()
       }
