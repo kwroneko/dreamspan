@@ -3,3 +3,5 @@ spec/
 *.md
 package-lock.json
 packages/client/src/routeTree.gen.ts
+# Written by its capture script, as captured.
+packages/server/test/fixtures/cardex/*.json

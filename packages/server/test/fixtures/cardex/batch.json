@@ -1,0 +1,127 @@
+{
+  "name": "batch",
+  "request": {
+    "path": "/api/v1/cards/batch",
+    "query": {
+      "ids": "appleh-82167127,ber-sail-gla-db22bb49"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"678ceef7b8aad2e964da86f38decf5f833839785da9fa6cc456c26732443cc8b\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "slug": "appleh-82167127",
+        "url": "/c/appleh-82167127",
+        "name": "Candle",
+        "creator": {
+          "name": "trailberryelmlaurels",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "mountains",
+          "winter",
+          "summer",
+          "festival",
+          "puzzle",
+          "inventor",
+          "scholar",
+          "fantasy",
+          "knight",
+          "healer",
+          "bard",
+          "merchant",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "baker",
+          "painter",
+          "poet",
+          "steampunk",
+          "teacher",
+          "friendly",
+          "cheerful",
+          "calm",
+          "curious",
+          "wholesome",
+          "cozy"
+        ],
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1435,
+        "stats": {
+          "popularity": 182,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "image_url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "version": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:03:37.883206Z",
+        "superseded_by": null,
+        "file_sha256": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc"
+      },
+      {
+        "slug": "ber-sail-gla-db22bb49",
+        "url": "/c/ber-sail-gla-db22bb49",
+        "name": "Paper raven.",
+        "creator": {
+          "name": "Harbormarbl",
+          "source": "janitorai",
+          "handle": "61ca8f90-32f8-0c0e-83f8-9c70b44ef564",
+          "url": "/u/janitorai/61ca8f90-32f8-0c0e-83f8-9c70b44ef564"
+        },
+        "tags": [
+          "action",
+          "strategy",
+          "worldbuilding",
+          "fantasy",
+          "places",
+          "factions",
+          "creatures",
+          "english",
+          "adventure",
+          "original"
+        ],
+        "tagline": "Jade delta beacon nectar brook meadow autumn velvet paper mellow petal tulip clover hill blossom orchard lagoon breeze moss hazel timber basin clover north lemon mint brook cotton thyme coral creek otter jade d.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 19019,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/0d001334b7939975ac836db83ff35ea59483f3f91f415378571a8a1457d6676d.512.webp?v=1",
+        "image_url": "/i/0d001334b7939975ac836db83ff35ea59483f3f91f415378571a8a1457d6676d.webp",
+        "version": "03a9c5b5029cde399a62d46288a324cebda2a87652c3971bf9319f7fdd1e6dab",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:07:14.360381Z",
+        "superseded_by": null,
+        "file_sha256": "03a9c5b5029cde399a62d46288a324cebda2a87652c3971bf9319f7fdd1e6dab"
+      }
+    ],
+    "missing": []
+  }
+}

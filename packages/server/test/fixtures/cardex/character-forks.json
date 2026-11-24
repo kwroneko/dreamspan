@@ -1,0 +1,54 @@
+{
+  "name": "character-forks",
+  "request": {
+    "path": "/api/v1/forks/botbooru/character%2F7735",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "parent": null,
+    "children": [],
+    "next": null,
+    "viewed_slug": "appleh-82167127",
+    "compared_with": {
+      "compare": {
+        "fields": {
+          "description": "b45984cf32bb9e3d",
+          "examples": "ab7d09fb6b5696a0",
+          "greetings": "dda1d32dbd2f5ff1",
+          "lorebook_text": "c0ad86b8b27eeebe",
+          "name": "9d91aa54ea775f24",
+          "nickname": "8c59786027ce01fd",
+          "notes": "7ef6b0cf3d8c821c",
+          "other": "0afd00a51f6f8196"
+        },
+        "lens": {
+          "depth_prompt": 0,
+          "examples": 1571,
+          "first_mes": 1321,
+          "notes": 369,
+          "personality": 0,
+          "post_history": 0,
+          "scenario": 0,
+          "system_prompt": 0
+        },
+        "greetings": 3,
+        "first_mes_key": "58c2ca5d7b811ddd",
+        "depth_prompt_key": null,
+        "tokens": 1435
+      },
+      "lorebook_entries": 0,
+      "lorebook_attached_by": null
+    }
+  }
+}

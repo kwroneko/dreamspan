@@ -1,0 +1,22 @@
+{
+  "name": "tags-bad-cursor",
+  "request": {
+    "path": "/api/v1/tags",
+    "query": {
+      "limit": "10",
+      "cursor": "Qmc8doW-2T1WYo2z"
+    }
+  },
+  "status": 400,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "error": "invalid_cursor",
+    "message": "invalid cursor, or a cursor for another list or query"
+  }
+}

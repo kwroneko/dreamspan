@@ -1,0 +1,212 @@
+{
+  "name": "search-sort-created_desc",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "sort": "created_desc",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"29576b40533b77d8c945acdc2104743bd1b0d78a475e7172c62683676ef37511\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "created_desc",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "atlasba-48b63278",
+        "path": "/c/atlasba-48b63278",
+        "name": "Gladeau",
+        "tagline": "Timber amber raven lark ocean tide yarrow button saffron hollow crane heron crystal sky poppy maple clover fern reed pond timber fjord poppy ember mellow garden bamboo silver daisy fable hazel thistle timber amber raven lark ocean tide.",
+        "thumb_url": "/t/bf5d7bc03749b783e0643cdc97057406745e6e633d8dafb1119006e891a2fac4.512.webp?v=1",
+        "cover_w": 677,
+        "cover_h": 399,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "caveduck"
+        ],
+        "top_tags": [
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "has-lorebook-4",
+            "label": "has lorebook 4"
+          },
+          {
+            "slug": "western-7",
+            "label": "Western 7"
+          },
+          {
+            "slug": "pirates-7",
+            "label": "pirates 7"
+          },
+          {
+            "slug": "dragons-7",
+            "label": "DRAGONS 7"
+          },
+          {
+            "slug": "castle-4",
+            "label": "castle 4"
+          },
+          {
+            "slug": "robots-7",
+            "label": "robots 7"
+          },
+          {
+            "slug": "ghosts-7",
+            "label": "Ghosts 7"
+          }
+        ],
+        "tag_count": 12,
+        "token_budget": 1958,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:04:13.875087Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Anchoram",
+          "path": "/u/caveduck/7cf0e586-5628-962b-dd7f-db89ec27c13f",
+          "source": "caveduck",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "atlasba-48b63278",
+        "url": "/c/atlasba-48b63278",
+        "name": "Gladeau",
+        "creator": {
+          "name": "Anchoram",
+          "source": "caveduck",
+          "handle": "7cf0e586-5628-962b-dd7f-db89ec27c13f",
+          "url": "/u/caveduck/7cf0e586-5628-962b-dd7f-db89ec27c13f"
+        },
+        "tags": [
+          "robots-7",
+          "ghosts-7",
+          "castle-4",
+          "village-2",
+          "pirates-7",
+          "western-7",
+          "dragons",
+          "steampunk",
+          "original-6",
+          "friendly-3",
+          "dragons-7",
+          "has-lorebook-4"
+        ],
+        "tagline": "Timber amber raven lark ocean tide yarrow button saffron hollow crane heron crystal sky poppy maple clover fern reed pond timber fjord poppy ember mellow garden bamboo silver daisy fable hazel thistle timber amber raven lark ocean tide.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1958,
+        "stats": {
+          "popularity": 1,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/bf5d7bc03749b783e0643cdc97057406745e6e633d8dafb1119006e891a2fac4.512.webp?v=1",
+        "image_url": "/i/bf5d7bc03749b783e0643cdc97057406745e6e633d8dafb1119006e891a2fac4.jpg",
+        "version": "fce51dce30c52aee4fb37529b818010b3b85901b8e3cb723bf6f364f20788eaf",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:04:13.875087Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "G98onOYdoHxHxV1eVe1jBaI76KIGeqRpmhRzxae_rx8HNPORjH08KYZV5HD0gp47pOvdaqyKfn3Hl8Ouo80EesNNZ39THEcvVKKmGTmhb3CnT5dH9me6auxG0q8ZxEW5AcDOOuVpILlR1eQEZ0Gt-Vvb0dyGuoWIyF1Htil7uLPwgksZccNc7K2d.r0lwUSTiYBTzDpkaAAnIqbEtKIGWWw2SMryNnMrlExx",
+    "has_more": true
+  }
+}

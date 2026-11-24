@@ -1,0 +1,234 @@
+{
+  "name": "search-semantic",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "mode": "semantic",
+      "limit": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"f01a2dba4288478f53c0e6df614d48d4768b7a9dbb524ada15de3fd858388b24\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "semantic",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "relevance",
+      "page": 1,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "oceanca-northc-44448376",
+        "path": "/c/oceanca-northc-44448376",
+        "name": "Kettle pine blo",
+        "tagline": "Cider wind quill apple wren bell crane mist paper maple timber dune orchard lemon boat flint chime mint berry ec",
+        "thumb_url": "/t/4024c0e8e0b6d0d0b6fa6da280886a9c0d7b10fa8c00215aba83660b39033bd2.512.webp?v=1",
+        "cover_w": 200,
+        "cover_h": 200,
+        "nsfw": false,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "cyberpunk-7",
+            "label": "Cyberpunk 7"
+          },
+          {
+            "slug": "strategy-4",
+            "label": "Strategy 4"
+          },
+          {
+            "slug": "fairy-tale-7",
+            "label": "fairy tale 7"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "cyberpunk-7",
+            "label": "Cyberpunk 7"
+          },
+          {
+            "slug": "strategy-4",
+            "label": "Strategy 4"
+          },
+          {
+            "slug": "fairy-tale-7",
+            "label": "fairy tale 7"
+          }
+        ],
+        "tag_count": 3,
+        "token_budget": 1014,
+        "fork_count": 0,
+        "first_seen_at": "2025-03-16T02:23:53.971024Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "reedlemon_honeyc_8151",
+          "path": "/u/chub/reedlemon_honeyc_8151",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "northc-isla-0bd3e02c",
+        "path": "/c/northc-isla-0bd3e02c",
+        "name": "Orchard cha",
+        "tagline": null,
+        "thumb_url": null,
+        "cover_w": null,
+        "cover_h": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 363,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-05T03:18:04.723588Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Lotus",
+          "path": "/u/chub/Lotus",
+          "source": "chub",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": 240,
+    "total_capped": true,
+    "page": 1,
+    "pages": 120,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": {
+      "embedded_cards": 3705578,
+      "search_cards": 3710543
+    },
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": null,
+      "hidden_capped": false
+    },
+    "items": [
+      {
+        "slug": "oceanca-northc-44448376",
+        "url": "/c/oceanca-northc-44448376",
+        "name": "Kettle pine blo",
+        "creator": {
+          "name": "reedlemon_honeyc_8151",
+          "source": "chub",
+          "handle": "reedlemon_honeyc_8151",
+          "url": "/u/chub/reedlemon_honeyc_8151"
+        },
+        "tags": [
+          "fairy-tale-7",
+          "strategy-4",
+          "cyberpunk-7"
+        ],
+        "tagline": "Cider wind quill apple wren bell crane mist paper maple timber dune orchard lemon boat flint chime mint berry ec",
+        "nsfw": false,
+        "kind": "lorebook",
+        "token_count": 1014,
+        "stats": {
+          "popularity": 62,
+          "rating_avg": 5,
+          "rating_count": 1
+        },
+        "thumbnail_url": "/t/4024c0e8e0b6d0d0b6fa6da280886a9c0d7b10fa8c00215aba83660b39033bd2.512.webp?v=1",
+        "image_url": "/i/4024c0e8e0b6d0d0b6fa6da280886a9c0d7b10fa8c00215aba83660b39033bd2.webp",
+        "version": "f0f657992374859d9bec238c1b8d520755ef8caab705de40025af136267a2f35",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-08T03:42:40.928708Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "northc-isla-0bd3e02c",
+        "url": "/c/northc-isla-0bd3e02c",
+        "name": "Orchard cha",
+        "creator": {
+          "name": "Lotus",
+          "source": "chub",
+          "handle": "Lotus",
+          "url": "/u/chub/Lotus"
+        },
+        "tags": [],
+        "tagline": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "token_count": 363,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "0a8224d3f3e19d4e589b6d3b2ee0f95760ab82403e2b5bb22d2f0e21afc15e05",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-05T13:43:50.917650Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": true,
+    "next_cursor": null,
+    "has_more": true
+  }
+}

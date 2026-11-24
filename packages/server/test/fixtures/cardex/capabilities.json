@@ -1,0 +1,789 @@
+{
+  "name": "capabilities",
+  "request": {
+    "path": "/api/v1/capabilities",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"d0d623ef2aac021a0908ff0899cbb739ac424cd512809d083cded91a28b8cf8a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "sort_labels": [
+      {
+        "value": "relevance",
+        "label": "Relevance"
+      },
+      {
+        "value": "newest",
+        "label": "Newest added"
+      },
+      {
+        "value": "oldest",
+        "label": "Oldest added"
+      },
+      {
+        "value": "created_desc",
+        "label": "Newest created"
+      },
+      {
+        "value": "created_asc",
+        "label": "Oldest created"
+      },
+      {
+        "value": "popular",
+        "label": "Popular"
+      },
+      {
+        "value": "name",
+        "label": "Name, A to Z"
+      },
+      {
+        "value": "name_desc",
+        "label": "Name, Z to A"
+      },
+      {
+        "value": "tokens_asc",
+        "label": "Fewest tokens"
+      },
+      {
+        "value": "tokens_desc",
+        "label": "Most tokens"
+      }
+    ],
+    "download_mode_labels": [
+      {
+        "value": "mirrored",
+        "label": "Mirrored (default): images link to this archive"
+      },
+      {
+        "value": "self-contained",
+        "label": "Self-contained (.png, images bundled)"
+      },
+      {
+        "value": "json",
+        "label": "Card JSON"
+      },
+      {
+        "value": "original",
+        "label": "Original file"
+      }
+    ],
+    "thumbnail_variant_labels": [
+      {
+        "value": "512",
+        "label": "512 px"
+      },
+      {
+        "value": "64",
+        "label": "64 px"
+      }
+    ],
+    "version": "v1",
+    "filters": [
+      {
+        "label": "Search",
+        "description": "Search card text.",
+        "allowed_value_labels": [],
+        "name": "q",
+        "type": "string",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": 500
+      },
+      {
+        "label": "Search in",
+        "allowed_value_labels": [
+          {
+            "value": "name",
+            "label": "Name"
+          },
+          {
+            "value": "description",
+            "label": "Tagline and description"
+          },
+          {
+            "value": "character",
+            "label": "Character definition"
+          },
+          {
+            "value": "lorebook",
+            "label": "Lorebook, creator and tags"
+          }
+        ],
+        "name": "fields",
+        "type": "list",
+        "allowed_values": [
+          "name",
+          "description",
+          "character",
+          "lorebook"
+        ],
+        "default": [],
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "NSFW",
+        "allowed_value_labels": [
+          {
+            "value": "include",
+            "label": "Show NSFW"
+          },
+          {
+            "value": "exclude",
+            "label": "Hide NSFW"
+          },
+          {
+            "value": "only",
+            "label": "Only NSFW"
+          }
+        ],
+        "name": "nsfw",
+        "type": "enum",
+        "allowed_values": [
+          "include",
+          "exclude",
+          "only"
+        ],
+        "default": "include",
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Kind",
+        "allowed_value_labels": [
+          {
+            "value": "character",
+            "label": "Characters"
+          },
+          {
+            "value": "lorebook",
+            "label": "Lorebooks"
+          },
+          {
+            "value": "both",
+            "label": "All"
+          },
+          {
+            "value": "character_lorebook",
+            "label": "Characters with a lorebook"
+          }
+        ],
+        "name": "kind",
+        "type": "enum",
+        "allowed_values": [
+          "character",
+          "lorebook",
+          "both",
+          "character_lorebook"
+        ],
+        "default": "both",
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Sources",
+        "allowed_value_labels": [
+          {
+            "value": "janitorai",
+            "label": "JanitorAI"
+          },
+          {
+            "value": "chub",
+            "label": "Chub"
+          },
+          {
+            "value": "botbooru",
+            "label": "Botbooru"
+          },
+          {
+            "value": "catbox",
+            "label": "Catbox"
+          },
+          {
+            "value": "pephop",
+            "label": "PepHop"
+          },
+          {
+            "value": "caveduck",
+            "label": "Caveduck"
+          },
+          {
+            "value": "crushon",
+            "label": "Crushon"
+          },
+          {
+            "value": "wyvern",
+            "label": "Wyvern"
+          },
+          {
+            "value": "char_tavern",
+            "label": "Character Tavern"
+          },
+          {
+            "value": "risuai",
+            "label": "RisuAI"
+          },
+          {
+            "value": "venusai",
+            "label": "VenusAI"
+          },
+          {
+            "value": "pygmalion",
+            "label": "Pygmalion"
+          },
+          {
+            "value": "webring",
+            "label": "Webring"
+          },
+          {
+            "value": "backyard",
+            "label": "Backyard"
+          },
+          {
+            "value": "booru",
+            "label": "booru.plus"
+          },
+          {
+            "value": "generic",
+            "label": "Other"
+          },
+          {
+            "value": "nyaime",
+            "label": "Nyaime"
+          },
+          {
+            "value": "aicc",
+            "label": "AICC"
+          }
+        ],
+        "name": "source",
+        "type": "list",
+        "allowed_values": [
+          "janitorai",
+          "chub",
+          "botbooru",
+          "catbox",
+          "pephop",
+          "caveduck",
+          "crushon",
+          "wyvern",
+          "char_tavern",
+          "risuai",
+          "venusai",
+          "pygmalion",
+          "webring",
+          "backyard",
+          "booru",
+          "generic",
+          "nyaime",
+          "aicc"
+        ],
+        "default": [],
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Exclude sources",
+        "allowed_value_labels": [
+          {
+            "value": "janitorai",
+            "label": "JanitorAI"
+          },
+          {
+            "value": "chub",
+            "label": "Chub"
+          },
+          {
+            "value": "botbooru",
+            "label": "Botbooru"
+          },
+          {
+            "value": "catbox",
+            "label": "Catbox"
+          },
+          {
+            "value": "pephop",
+            "label": "PepHop"
+          },
+          {
+            "value": "caveduck",
+            "label": "Caveduck"
+          },
+          {
+            "value": "crushon",
+            "label": "Crushon"
+          },
+          {
+            "value": "wyvern",
+            "label": "Wyvern"
+          },
+          {
+            "value": "char_tavern",
+            "label": "Character Tavern"
+          },
+          {
+            "value": "risuai",
+            "label": "RisuAI"
+          },
+          {
+            "value": "venusai",
+            "label": "VenusAI"
+          },
+          {
+            "value": "pygmalion",
+            "label": "Pygmalion"
+          },
+          {
+            "value": "webring",
+            "label": "Webring"
+          },
+          {
+            "value": "backyard",
+            "label": "Backyard"
+          },
+          {
+            "value": "booru",
+            "label": "booru.plus"
+          },
+          {
+            "value": "generic",
+            "label": "Other"
+          },
+          {
+            "value": "nyaime",
+            "label": "Nyaime"
+          },
+          {
+            "value": "aicc",
+            "label": "AICC"
+          }
+        ],
+        "name": "not_source",
+        "type": "list",
+        "allowed_values": [
+          "janitorai",
+          "chub",
+          "botbooru",
+          "catbox",
+          "pephop",
+          "caveduck",
+          "crushon",
+          "wyvern",
+          "char_tavern",
+          "risuai",
+          "venusai",
+          "pygmalion",
+          "webring",
+          "backyard",
+          "booru",
+          "generic",
+          "nyaime",
+          "aicc"
+        ],
+        "default": [],
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Tags",
+        "allowed_value_labels": [],
+        "name": "tags",
+        "type": "list",
+        "allowed_values": [],
+        "default": [],
+        "min": null,
+        "max": 20
+      },
+      {
+        "label": "Exclude tags",
+        "allowed_value_labels": [],
+        "name": "not_tags",
+        "type": "list",
+        "allowed_values": [],
+        "default": [],
+        "min": null,
+        "max": 20
+      },
+      {
+        "label": "Any of these tags",
+        "allowed_value_labels": [],
+        "name": "any_tags",
+        "type": "groups",
+        "allowed_values": [],
+        "default": [],
+        "min": null,
+        "max": 20
+      },
+      {
+        "label": "Minimum tokens",
+        "allowed_value_labels": [],
+        "name": "min_tokens",
+        "type": "integer",
+        "allowed_values": [],
+        "default": 300,
+        "min": 0,
+        "max": 10000000
+      },
+      {
+        "label": "Maximum tokens",
+        "allowed_value_labels": [],
+        "name": "max_tokens",
+        "type": "integer",
+        "allowed_values": [],
+        "default": null,
+        "min": 0,
+        "max": 10000000
+      },
+      {
+        "label": "Only cards with a cover",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "has_cover",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": true,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Author",
+        "allowed_value_labels": [],
+        "name": "author",
+        "type": "identity",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Any of these authors",
+        "allowed_value_labels": [],
+        "name": "any_author",
+        "type": "identities",
+        "allowed_values": [],
+        "default": [],
+        "min": null,
+        "max": 20
+      },
+      {
+        "label": "Not by these authors",
+        "allowed_value_labels": [],
+        "name": "not_author",
+        "type": "identities",
+        "allowed_values": [],
+        "default": [],
+        "min": null,
+        "max": 20
+      },
+      {
+        "label": "Picture",
+        "allowed_value_labels": [],
+        "name": "picture",
+        "type": "sha256",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Added after",
+        "allowed_value_labels": [],
+        "name": "added_after",
+        "type": "date",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Added before",
+        "allowed_value_labels": [],
+        "name": "added_before",
+        "type": "date",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Created after",
+        "allowed_value_labels": [],
+        "name": "created_after",
+        "type": "date",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Created before",
+        "allowed_value_labels": [],
+        "name": "created_before",
+        "type": "date",
+        "allowed_values": [],
+        "default": null,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Hide forks",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "exclude_forks",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": false,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Deleted from all sources",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "deleted_from_source",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": false,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Deleted from a source",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "deleted_from_any_source",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": false,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Chub verified",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "chub_verified",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": false,
+        "min": null,
+        "max": null
+      },
+      {
+        "label": "Chub recommended",
+        "allowed_value_labels": [
+          {
+            "value": "true",
+            "label": "Yes"
+          },
+          {
+            "value": "false",
+            "label": "No"
+          },
+          {
+            "value": "1",
+            "label": "Yes"
+          },
+          {
+            "value": "0",
+            "label": "No"
+          }
+        ],
+        "name": "chub_recommended",
+        "type": "boolean",
+        "allowed_values": [
+          "true",
+          "false",
+          "1",
+          "0"
+        ],
+        "default": false,
+        "min": null,
+        "max": null
+      }
+    ],
+    "sorts": [
+      "relevance",
+      "newest",
+      "oldest",
+      "created_desc",
+      "created_asc",
+      "popular",
+      "name",
+      "name_desc",
+      "tokens_asc",
+      "tokens_desc"
+    ],
+    "default_sort": "relevance with q; newest without q",
+    "modes": [
+      {
+        "label": "Text",
+        "pagination_labels": [
+          {
+            "value": "page",
+            "label": "Page"
+          },
+          {
+            "value": "cursor",
+            "label": "Cursor"
+          }
+        ],
+        "name": "fts",
+        "pagination": [
+          "page",
+          "cursor"
+        ],
+        "max_results": 10000
+      },
+      {
+        "label": "Semantic",
+        "pagination_labels": [
+          {
+            "value": "page",
+            "label": "Page"
+          }
+        ],
+        "name": "semantic",
+        "pagination": [
+          "page"
+        ],
+        "max_results": 240
+      }
+    ],
+    "page_size": {
+      "min": 1,
+      "max": 100,
+      "default": 24,
+      "max_results": 10000,
+      "count_cap": 100000
+    },
+    "thumbnail_variants": [
+      "512",
+      "64"
+    ],
+    "download_modes": [
+      "mirrored",
+      "self-contained",
+      "json",
+      "original"
+    ],
+    "rate_limits": {
+      "requests_per_second": 10,
+      "burst": 60
+    },
+    "terms_url": null
+  }
+}

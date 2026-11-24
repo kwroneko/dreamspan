@@ -1,0 +1,85 @@
+{
+  "name": "batch-missing",
+  "request": {
+    "path": "/api/v1/cards/batch",
+    "query": {
+      "ids": "appleh-82167127,lark-mi-pond-card"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"3cf54ff127ecc5402179a0f0231888ab7b5b3851a41d3595280df91a133a5502\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "slug": "appleh-82167127",
+        "url": "/c/appleh-82167127",
+        "name": "Candle",
+        "creator": {
+          "name": "trailberryelmlaurels",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "mountains",
+          "winter",
+          "summer",
+          "festival",
+          "puzzle",
+          "inventor",
+          "scholar",
+          "fantasy",
+          "knight",
+          "healer",
+          "bard",
+          "merchant",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "baker",
+          "painter",
+          "poet",
+          "steampunk",
+          "teacher",
+          "friendly",
+          "cheerful",
+          "calm",
+          "curious",
+          "wholesome",
+          "cozy"
+        ],
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1435,
+        "stats": {
+          "popularity": 182,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "image_url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "version": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:03:37.883206Z",
+        "superseded_by": null,
+        "file_sha256": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc"
+      }
+    ],
+    "missing": [
+      "lark-mi-pond-card"
+    ]
+  }
+}

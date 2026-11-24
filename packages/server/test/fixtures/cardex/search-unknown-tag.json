@@ -1,0 +1,153 @@
+{
+  "name": "search-unknown-tag",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "tags": "gardening-14",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"815975c9824151c0ad41ff8f5dd4e18f4e700102df6b1a7efd53d9822868a00a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [
+        "gardening-14"
+      ],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "bellblo-jun8-oakpetali-1425959a",
+        "path": "/c/bellblo-jun8-oakpetali-1425959a",
+        "name": "Marbles-BER8-oakpetali",
+        "tagline": "Otter lark cricket crystal button ridge swan banner lantern pine petal birch pine heron rain petal drift bamboo beacon lemon plum maple valley canyon laurel clover pine mint hazel badge ridge berry otter lark cricket crystal button ridge",
+        "thumb_url": "/t/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.512.webp?v=1",
+        "cover_w": 624,
+        "cover_h": 390,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "travel",
+            "label": "travel"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 317,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:12:10.962115Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Crystalolivec",
+          "path": "/u/crushon/453f2f3a-605e-8c10-9953-5512648b0da0",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [
+      "gardening-14"
+    ],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "bellblo-jun8-oakpetali-1425959a",
+        "url": "/c/bellblo-jun8-oakpetali-1425959a",
+        "name": "Marbles-BER8-oakpetali",
+        "creator": {
+          "name": "Crystalolivec",
+          "source": "crushon",
+          "handle": "453f2f3a-605e-8c10-9953-5512648b0da0",
+          "url": "/u/crushon/453f2f3a-605e-8c10-9953-5512648b0da0"
+        },
+        "tags": [
+          "travel"
+        ],
+        "tagline": "Otter lark cricket crystal button ridge swan banner lantern pine petal birch pine heron rain petal drift bamboo beacon lemon plum maple valley canyon laurel clover pine mint hazel badge ridge berry otter lark cricket crystal button ridge",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 317,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.512.webp?v=1",
+        "image_url": "/i/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.webp",
+        "version": "e424e33f41ebb8480f6867257b348f72ebc35f08a8a9087b37c6367a8ba329d1",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:12:10.962115Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "AFpHezzrzl1V5zUwTmEdXWRLbPFC2H0oKHEIkSmpE1I6o7-miQL9w5GwysPChr9Z4tzMm-5IMx56c5LmSq-go4nVy4oGWBA1xGkm-kzlyG-nvcUn24TRUokhm_89wHREUaISFU5UP9IS1X4fe32JHsN7-ifTJeFRk2MueRHgdUb4UuC30u1TsJDOoquWtD64.CmDCsFHUF-qzagMZtZR82MZJ84f_IRvNe98FapB953t",
+    "has_more": true
+  }
+}

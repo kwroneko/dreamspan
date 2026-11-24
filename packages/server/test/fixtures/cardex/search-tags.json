@@ -1,0 +1,330 @@
+{
+  "name": "search-tags",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "tags": "village-2",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"c77abf69b888d44fe811db1877f6ae71a30ce1425c87f28674344b526f10894f\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [
+        "village-2"
+      ],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "maple-6aae8162",
+        "path": "/c/maple-6aae8162",
+        "name": "Autum",
+        "tagline": "Otter fjord flint snow larch birch ridge jade mist dawn crane pine grove maple timber larch rain coral otter breeze jade bramble berry quiet hollow cove fern amber coral yarrow echo bell otter fjord flint snow larch birch ridge jade mist d",
+        "thumb_url": "/t/8d633ef32ebf98dda858b2c259ce99e441f0985449ab5574d071c5c590b989e4.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "steampunk",
+            "label": "steampunk"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "puzzle",
+            "label": "puzzle"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "oc-5",
+            "label": "Oc 5"
+          },
+          {
+            "slug": "poet",
+            "label": "poet"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "puzzle-2",
+            "label": "PUZZLE 2"
+          },
+          {
+            "slug": "healer",
+            "label": "healer"
+          },
+          {
+            "slug": "anime-4",
+            "label": "anime 4"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "multiple-greetings-3",
+            "label": "multiple greetings 3"
+          },
+          {
+            "slug": "travel-7",
+            "label": "Travel 7"
+          },
+          {
+            "slug": "library-7",
+            "label": "Library 7"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "strategy-4",
+            "label": "Strategy 4"
+          },
+          {
+            "slug": "merchant",
+            "label": "merchant"
+          },
+          {
+            "slug": "museum-7",
+            "label": "museum 7"
+          },
+          {
+            "slug": "village-7",
+            "label": "village 7"
+          },
+          {
+            "slug": "castle-7",
+            "label": "Castle 7"
+          },
+          {
+            "slug": "oc-4",
+            "label": "Oc 4"
+          },
+          {
+            "slug": "forest-7",
+            "label": "Forest 7"
+          },
+          {
+            "slug": "ocean-7",
+            "label": "Ocean 7"
+          },
+          {
+            "slug": "desert-7",
+            "label": "Desert 7"
+          },
+          {
+            "slug": "mountains-7",
+            "label": "mountains 7"
+          },
+          {
+            "slug": "winter-7",
+            "label": "winter 7"
+          }
+        ],
+        "tag_count": 33,
+        "token_budget": 4231,
+        "fork_count": 1,
+        "first_seen_at": "2026-11-06T18:11:40.472298Z",
+        "group": null,
+        "creator": {
+          "kind": "named",
+          "name": "junipe6",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [
+      {
+        "slug": "village-2",
+        "label": "village 2",
+        "card_count": 147164
+      }
+    ],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "maple-6aae8162",
+        "url": "/c/maple-6aae8162",
+        "name": "Autum",
+        "creator": {
+          "name": "junipe6",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "puzzle-2",
+          "travel-7",
+          "teacher-3",
+          "museum-7",
+          "winter",
+          "festival",
+          "multiple-greetings-3",
+          "puzzle",
+          "strategy-4",
+          "oc-4",
+          "scholar",
+          "village-2",
+          "fantasy",
+          "healer",
+          "village-7",
+          "forest-7",
+          "mountains-7",
+          "merchant",
+          "sailor",
+          "astronomer",
+          "desert-7",
+          "baker",
+          "poet",
+          "steampunk",
+          "teacher",
+          "winter-7",
+          "cheerful",
+          "calm",
+          "library-7",
+          "castle-7",
+          "ocean-7",
+          "wholesome",
+          "oc-5"
+        ],
+        "tagline": "Otter fjord flint snow larch birch ridge jade mist dawn crane pine grove maple timber larch rain coral otter breeze jade bramble berry quiet hollow cove fern amber coral yarrow echo bell otter fjord flint snow larch birch ridge jade mist d",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 4231,
+        "stats": {
+          "popularity": 371,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/8d633ef32ebf98dda858b2c259ce99e441f0985449ab5574d071c5c590b989e4.512.webp?v=1",
+        "image_url": "/i/8d633ef32ebf98dda858b2c259ce99e441f0985449ab5574d071c5c590b989e4.png",
+        "version": "0ab50dafbf025dc39ba3a9c86150d0322543d5272e1363b9ce47fe15d8c4880c",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:11:40.472298Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "Tbz_204eaB_M1EUrmu0fv6sJSecGY_DpAb-0vuqBpjMQ7QbigAkeVuem9pnfQPZX1jQhEJxYPe-Zw8KxK4U1_cXtvvC93AfeZJxKNKQktfK7bNSBg6R37kTvCKAGtQwzkvk48hp-RVuBND6KhEZHL_TJQl7uSQLQ6XBZudiW9tu8p_u4HqCht-R9Z-E6_vSXBg.AIcl8Nv228SyDluQ76K4l27j2sDzcnbYbwqWHo0VZfZ",
+    "has_more": true
+  }
+}

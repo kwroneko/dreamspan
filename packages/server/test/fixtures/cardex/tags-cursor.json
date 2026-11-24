@@ -1,0 +1,88 @@
+{
+  "name": "tags-cursor",
+  "request": {
+    "path": "/api/v1/tags",
+    "query": {
+      "limit": "10",
+      "cursor": "-Xd6LpnBjR7fYb0RAftSJgGhnqnKAzGprw35hBwag6A_6AukWHrETISFPPEeOFJK"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"aa1e7263dfa52755742af578da9307b1da0513bd6cab04f54174bc81b91ccb3f\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "q": null,
+    "tags": [
+      {
+        "slug": "places-3",
+        "label": "Places 3",
+        "card_count": 513753,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "slice-of-life",
+        "label": "slice of life",
+        "card_count": 470536,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "fairy-tale-4",
+        "label": "fairy tale 4",
+        "card_count": 446841,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "steampunk",
+        "label": "steampunk",
+        "card_count": 431404,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "comedy",
+        "label": "Comedy",
+        "card_count": 423442,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "explorer",
+        "label": "explorer",
+        "card_count": 357246,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "dragons",
+        "label": "dragons",
+        "card_count": 301003,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "western",
+        "label": "western",
+        "card_count": 288853,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "space-4",
+        "label": "space 4",
+        "card_count": 264919,
+        "match_kind": "direct"
+      },
+      {
+        "slug": "ghosts-4",
+        "label": "Ghosts 4",
+        "card_count": 241566,
+        "match_kind": "direct"
+      }
+    ],
+    "page": 1,
+    "pages": 1,
+    "total": 10,
+    "next": "kF31B9spxuynb8URlex19kBT2NZZShWKVx_jXD1H5doG5ozvVK3Xo5VsANvKw9h9"
+  }
+}

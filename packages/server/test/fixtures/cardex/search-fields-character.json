@@ -1,0 +1,216 @@
+{
+  "name": "search-fields-character",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "fields": "character",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"75a7c63473be61ead53802894463edc716507abebc36850fa213bfeca3587b02\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "fields": [
+        "character"
+      ],
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "relevance",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "dune-mello-fjord-violet-sum-dunebu-gla-fjor-a-quillfr-d0b2aeba",
+        "path": "/c/dune-mello-fjord-violet-sum-dunebu-gla-fjor-a-quillfr-d0b2aeba",
+        "name": "Cricket elm heron creek bramble fjord hollow lotus oak",
+        "tagline": "Amber chime thyme marble yarrow plum birch atlas larch lotus boat quiet drift otter stone orchard winter fjord tulip bamboo mist banner autumn olive apple meadow nectar apple juniper lemon sorrel rain amber chime thyme marble yarrow plum bi",
+        "thumb_url": "/t/d630a9f3f5d44692b580c4007a0bf228e594704946da16e19bf8ee56f2cfe39f.512.webp?v=1",
+        "cover_w": 1200,
+        "cover_h": 1283,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          },
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "travel",
+            "label": "travel"
+          },
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "detective",
+            "label": "Detective"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "mystery",
+            "label": "mystery"
+          },
+          {
+            "slug": "western",
+            "label": "western"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "strategy-4",
+            "label": "Strategy 4"
+          },
+          {
+            "slug": "worldbuilding-4",
+            "label": "worldbuilding 4"
+          }
+        ],
+        "tag_count": 10,
+        "token_budget": 4014,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-06T21:54:11.132008Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "robinla",
+          "path": "/u/janitorai/2d7e15ab-4461-f0f9-b8be-62d0673b7a1d",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "dune-mello-fjord-violet-sum-dunebu-gla-fjor-a-quillfr-d0b2aeba",
+        "url": "/c/dune-mello-fjord-violet-sum-dunebu-gla-fjor-a-quillfr-d0b2aeba",
+        "name": "Cricket elm heron creek bramble fjord hollow lotus oak",
+        "creator": {
+          "name": "robinla",
+          "source": "janitorai",
+          "handle": "2d7e15ab-4461-f0f9-b8be-62d0673b7a1d",
+          "url": "/u/janitorai/2d7e15ab-4461-f0f9-b8be-62d0673b7a1d"
+        },
+        "tags": [
+          "western",
+          "teacher-3",
+          "strategy-4",
+          "village-2",
+          "fantasy",
+          "detective",
+          "baker-3",
+          "travel",
+          "village",
+          "worldbuilding-4"
+        ],
+        "tagline": "Amber chime thyme marble yarrow plum birch atlas larch lotus boat quiet drift otter stone orchard winter fjord tulip bamboo mist banner autumn olive apple meadow nectar apple juniper lemon sorrel rain amber chime thyme marble yarrow plum bi",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 4014,
+        "stats": {
+          "popularity": 2430,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/d630a9f3f5d44692b580c4007a0bf228e594704946da16e19bf8ee56f2cfe39f.512.webp?v=1",
+        "image_url": "/i/d630a9f3f5d44692b580c4007a0bf228e594704946da16e19bf8ee56f2cfe39f.webp",
+        "version": "d2568cf2fc1c0265f52f8aa93ee84ecdc7fbed6ee7fbf6c331585c325ab374eb",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-06T21:54:11.132008Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "bKpYJ2YR4rL7Vl5Ipwr9j3SjMR_VejtokEfTErXUjQEZCD5RUchXdk_Yb_BUVOIuhZRhYpNdo3wNGkPR16ff7o7IS07s7G3TUvpzoOFj2WioM_isl0QzDjVHM7MS2KGkYc66rE12lA_1y28DZ36B7KOO1Ck-wKtr6-.OFuxvbYT8xisUvc1br3pEZw4D-u5DSRQtBo0vSP7WO9",
+    "has_more": true
+  }
+}

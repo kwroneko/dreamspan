@@ -1,0 +1,189 @@
+{
+  "name": "character-versions",
+  "request": {
+    "path": "/api/v1/versions/botbooru/character%2F7735",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "id": "1906795",
+        "version": {
+          "slug": "appleh-82167127",
+          "content_hash": "4e28eb5e249b322db280dcb1fea08764e7afc13a1ee8b2d473d84b0bd15ae614",
+          "card_path": "/c/appleh-82167127",
+          "origin_path": "/botbooru/character/7735?v=15c4fcdd6828275b",
+          "active_from": "2026-11-06T18:03:37.883206Z",
+          "active_to": null,
+          "is_current": true,
+          "is_viewing": false,
+          "meta": {
+            "character_version": "lant",
+            "created": null,
+            "modified": null,
+            "sources": [],
+            "creator": null
+          }
+        },
+        "compare": {
+          "fields": {
+            "description": "b45984cf32bb9e3d",
+            "examples": "ab7d09fb6b5696a0",
+            "greetings": "dda1d32dbd2f5ff1",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "nickname": "8c59786027ce01fd",
+            "notes": "7ef6b0cf3d8c821c",
+            "other": "0afd00a51f6f8196",
+            "tagline": "c73638b96cb09f56",
+            "tags": "adventure-3"
+          },
+          "similarity": {
+            "appleh-78f28b3f": {
+              "json:mistdri": {
+                "equal": 0,
+                "total": 95,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 506,
+                "total": 622,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "tagline": {
+                "equal": 0,
+                "total": 93,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "tags": {
+                "equal": 124,
+                "total": 537,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1571,
+            "first_mes": 1321,
+            "notes": 369,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "58c2ca5d7b811ddd",
+          "depth_prompt_key": null,
+          "tokens": 1435
+        },
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "cover_key": "295201",
+        "cover_thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "nsfw": true,
+        "cover_listing_fallback": false,
+        "texts": {
+          "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+          "tags": "mystery-3"
+        },
+        "key_hashes": {
+          "alternate_greetings": "a9ef441bbc83afa2ae9c55a850633ad6",
+          "creator_notes": "dc9b88bde39b2b5c26121c35bcf4b4c3",
+          "description": "ec792065440fd1de055569918b899433",
+          "first_mes": "c8da4ab3fc034001945cca963d237e90",
+          "mes_example": "21f0fe3181ae1faa876556f1971239d8",
+          "name": "57222c246cde577026209318eae833ef",
+          "nickname": "768352aec884ac47281c4fd0560d6841",
+          "tagline": "4d8ee675e443e9eebf6139285cf32ee8"
+        },
+        "json_url": "/api/v1/download/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc?mode=json"
+      },
+      {
+        "id": "642377",
+        "version": {
+          "slug": "appleh-78f28b3f",
+          "content_hash": "1cc1a8ca9dd8f178b7484263c206256a396c17bac1b0a67a0c71daf86e82ac50",
+          "card_path": "/c/appleh-78f28b3f",
+          "origin_path": "/botbooru/character/7735?v=8c485b6efe37e88d",
+          "active_from": "2026-10-03T09:27:29.679272Z",
+          "active_to": "2026-11-06T18:03:37.883206Z",
+          "is_current": false,
+          "is_viewing": false,
+          "meta": {
+            "character_version": "lant",
+            "created": null,
+            "modified": null,
+            "sources": [],
+            "creator": null
+          }
+        },
+        "compare": {
+          "fields": {
+            "description": "b45984cf32bb9e3d",
+            "examples": "ab7d09fb6b5696a0",
+            "greetings": "dda1d32dbd2f5ff1",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "notes": "a3f6ee8d9843bd88",
+            "tags": "slice-of-life-3"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1571,
+            "first_mes": 1321,
+            "notes": 253,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "58c2ca5d7b811ddd",
+          "depth_prompt_key": null,
+          "tokens": 1435
+        },
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "cover_key": "295201",
+        "cover_thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "nsfw": true,
+        "cover_listing_fallback": false,
+        "texts": {
+          "tags": "comedy-3"
+        },
+        "key_hashes": {
+          "alternate_greetings": "a9ef441bbc83afa2ae9c55a850633ad6",
+          "creator_notes": "89e257d8bd87d899f88af67dfb417b72",
+          "description": "ec792065440fd1de055569918b899433",
+          "first_mes": "c8da4ab3fc034001945cca963d237e90",
+          "mes_example": "21f0fe3181ae1faa876556f1971239d8",
+          "name": "57222c246cde577026209318eae833ef"
+        },
+        "json_url": "/api/v1/download/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb?mode=json"
+      }
+    ],
+    "next": null
+  }
+}

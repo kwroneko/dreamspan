@@ -1,0 +1,311 @@
+{
+  "name": "search-kind-character",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "kind": "character",
+      "limit": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"f51e1ee8c72260de2ffdd174cba387c173becb3c3a77354f6c51b36aebc6a456\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "character",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "bellblo-jun8-oakpetali-1425959a",
+        "path": "/c/bellblo-jun8-oakpetali-1425959a",
+        "name": "Marbles-BER8-oakpetali",
+        "tagline": "Otter lark cricket crystal button ridge swan banner lantern pine petal birch pine heron rain petal drift bamboo beacon lemon plum maple valley canyon laurel clover pine mint hazel badge ridge berry otter lark cricket crystal button ridge",
+        "thumb_url": "/t/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.512.webp?v=1",
+        "cover_w": 624,
+        "cover_h": 390,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "travel",
+            "label": "travel",
+            "shortlist_display": "male"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "travel",
+            "label": "travel"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 317,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:12:10.962115Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "Crystalolivec",
+          "path": "/u/crushon/453f2f3a-605e-8c10-9953-5512648b0da0",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "anchor-dais-thym-cfa4c362",
+        "path": "/c/anchor-dais-thym-cfa4c362",
+        "name": "Crystal paper ba",
+        "tagline": "Lark lotus hill beacon paper bell pepper atlas kite copper breeze valley cotton lotus ridge ivy bell lemon banner sage pin.",
+        "thumb_url": "/t/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.512.webp?v=1",
+        "cover_w": 1280,
+        "cover_h": 1856,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "botbooru"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "explorer",
+            "label": "explorer"
+          },
+          {
+            "slug": "scholar",
+            "label": "Scholar"
+          },
+          {
+            "slug": "castle",
+            "label": "castle"
+          },
+          {
+            "slug": "calm",
+            "label": "calm"
+          },
+          {
+            "slug": "cheerful",
+            "label": "cheerful"
+          },
+          {
+            "slug": "curious",
+            "label": "curious"
+          },
+          {
+            "slug": "teacher",
+            "label": "TEACHER"
+          },
+          {
+            "slug": "wholesome",
+            "label": "wholesome"
+          },
+          {
+            "slug": "sailor",
+            "label": "sailor"
+          },
+          {
+            "slug": "winter",
+            "label": "Winter"
+          },
+          {
+            "slug": "festival",
+            "label": "festival"
+          },
+          {
+            "slug": "detective-7",
+            "label": "detective 7"
+          },
+          {
+            "slug": "magic-7",
+            "label": "Magic 7"
+          },
+          {
+            "slug": "space-7",
+            "label": "Space 7"
+          },
+          {
+            "slug": "school-7",
+            "label": "School 7"
+          }
+        ],
+        "tag_count": 17,
+        "token_budget": 1243,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:12:10.527174Z",
+        "group": null,
+        "creator": null
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "bellblo-jun8-oakpetali-1425959a",
+        "url": "/c/bellblo-jun8-oakpetali-1425959a",
+        "name": "Marbles-BER8-oakpetali",
+        "creator": {
+          "name": "Crystalolivec",
+          "source": "crushon",
+          "handle": "453f2f3a-605e-8c10-9953-5512648b0da0",
+          "url": "/u/crushon/453f2f3a-605e-8c10-9953-5512648b0da0"
+        },
+        "tags": [
+          "travel"
+        ],
+        "tagline": "Otter lark cricket crystal button ridge swan banner lantern pine petal birch pine heron rain petal drift bamboo beacon lemon plum maple valley canyon laurel clover pine mint hazel badge ridge berry otter lark cricket crystal button ridge",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 317,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.512.webp?v=1",
+        "image_url": "/i/3f8e1d53a460aa491dc1fa32da0e0474e141dc104964435f36239f13db1017fb.webp",
+        "version": "e424e33f41ebb8480f6867257b348f72ebc35f08a8a9087b37c6367a8ba329d1",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:12:10.962115Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "anchor-dais-thym-cfa4c362",
+        "url": "/c/anchor-dais-thym-cfa4c362",
+        "name": "Crystal paper ba",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "detective-7",
+          "magic-7",
+          "school-7",
+          "winter",
+          "festival",
+          "scholar",
+          "fantasy",
+          "space-7",
+          "castle",
+          "sailor",
+          "explorer",
+          "astronomer",
+          "teacher",
+          "cheerful",
+          "calm",
+          "curious",
+          "places-3",
+          "wholesome"
+        ],
+        "tagline": "Lark lotus hill beacon paper bell pepper atlas kite copper breeze valley cotton lotus ridge ivy bell lemon banner sage pin.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1243,
+        "stats": {
+          "popularity": 259,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.512.webp?v=1",
+        "image_url": "/i/b32438e85c3aded74538791032d55d86d3ba13ab6c8b800d3ccaa081f338413a.png",
+        "version": "94367e4eb552e3654543e906abb567a6faccc15a925a7a8fd0495ae3a2d78986",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:12:10.527174Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "Ps4XedXDEwVWj6NxHLG1L0T6TEum7sFXHHLD9mKI1w8HBNFNNx_xOSca0SuwAoZzKyX2Su2gAi_SMgQ9Trtog4wc6OVmhvfvVz2e2TYL4jwS1I6dYGOkhJ_ncHA-3HXek-pKetX4Om_0rDHSKbEUzBjD3TgxzPfz8jtnHMo1nO0swXQHRxE6y50sUWTEJ5shOP.0fJyRYm_b3scZvw7PDHQw2KPazz6326DpILuZlR09up",
+    "has_more": true
+  }
+}

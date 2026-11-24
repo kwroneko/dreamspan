@@ -159,7 +159,8 @@ for (const width of [1440, 390])
         await expect(page.getByText("On cardex. It isn't in your cards.", { exact: true })).toBeVisible()
         await expect(page.getByRole("heading", { name: "Description · 40 tokens", exact: true })).toBeVisible()
         await expect(
-          page.getByRole("link", { name: "Earlier listing on Synthetic site", exact: true })
+          // The site's name is cardex's own label for it.
+          page.getByRole("link", { name: /^Earlier listing on \S/ })
         ).toHaveAttribute("href", /\/o\//)
         await expect(page.getByRole("link", { name: "Start a chat", exact: true })).toBeVisible()
         await page.getByRole("button", { name: "Add to my cards", exact: true }).click()

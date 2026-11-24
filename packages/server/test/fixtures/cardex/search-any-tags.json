@@ -1,0 +1,227 @@
+{
+  "name": "search-any-tags",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "any_tags": "village-2|detective-3,painter-3|poet-3",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"6ea7e7a6e952a5cdc7eb8c54c5aaaa554ea549b41f9cb1d3e131be7bc95f48cb\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "any_tags": [
+        [
+          "painter-3",
+          "poet-3"
+        ],
+        [
+          "village-2",
+          "detective-3"
+        ]
+      ],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "fjordbree-ca-10-finchgl-622a5764",
+        "path": "/c/fjordbree-ca-10-finchgl-622a5764",
+        "name": "Cove cobble honey summe",
+        "tagline": "Lagoon silver blossom river candle violet cove linen jade anchor crane chalk juniper glen bell flint ember tulip quill tide garden breeze brook maple dawn ivy sorrel leaf sail saffron mint reed lagoon silver blossom river candle violet.",
+        "thumb_url": "/t/8e8ab7aa5b37bc8fb81fc6808d4ef334e151f2eadfbde11717835709e5fea143.512.webp?v=1",
+        "cover_w": 573,
+        "cover_h": 867,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "janitorai"
+        ],
+        "top_tags": [
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3",
+            "shortlist_display": "pov"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "teacher-3",
+            "label": "teacher 3"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "friendly-3",
+            "label": "FRIENDLY 3"
+          },
+          {
+            "slug": "painter-3",
+            "label": "painter 3"
+          },
+          {
+            "slug": "space-3",
+            "label": "space 3"
+          },
+          {
+            "slug": "cheerful-3",
+            "label": "Cheerful 3"
+          },
+          {
+            "slug": "calm-3",
+            "label": "calm 3"
+          },
+          {
+            "slug": "curious-3",
+            "label": "curious 3"
+          }
+        ],
+        "tag_count": 8,
+        "token_budget": 1044,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:05:02.127809Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "embercraneislan",
+          "path": "/u/janitorai/8057a227-c0ab-d1b4-b0f7-3497587e128d",
+          "source": "janitorai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "any_tags": [
+      [
+        {
+          "slug": "painter-3",
+          "label": "painter 3",
+          "card_count": 32439
+        },
+        {
+          "slug": "poet-3",
+          "label": "Poet 3",
+          "card_count": 7128
+        }
+      ],
+      [
+        {
+          "slug": "village-2",
+          "label": "village 2",
+          "card_count": 147164
+        },
+        {
+          "slug": "sports",
+          "label": "sports",
+          "card_count": 241289
+        }
+      ]
+    ],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "fjordbree-ca-10-finchgl-622a5764",
+        "url": "/c/fjordbree-ca-10-finchgl-622a5764",
+        "name": "Cove cobble honey summe",
+        "creator": {
+          "name": "embercraneislan",
+          "source": "janitorai",
+          "handle": "8057a227-c0ab-d1b4-b0f7-3497587e128d",
+          "url": "/u/janitorai/8057a227-c0ab-d1b4-b0f7-3497587e128d"
+        },
+        "tags": [
+          "painter-3",
+          "teacher-3",
+          "curious-3",
+          "village-2",
+          "wholesome-3",
+          "friendly-3",
+          "cheerful-3"
+        ],
+        "tagline": "Lagoon silver blossom river candle violet cove linen jade anchor crane chalk juniper glen bell flint ember tulip quill tide garden breeze brook maple dawn ivy sorrel leaf sail saffron mint reed lagoon silver blossom river candle violet.",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 1044,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/8e8ab7aa5b37bc8fb81fc6808d4ef334e151f2eadfbde11717835709e5fea143.512.webp?v=1",
+        "image_url": "/i/8e8ab7aa5b37bc8fb81fc6808d4ef334e151f2eadfbde11717835709e5fea143.webp",
+        "version": "7fab964121c852c2c4f0c0c1017acfab66598788ae08cea08ae0797a50add0fd",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:05:02.127809Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "gjZTgoCjjB23qfL_Af1ygwMbuE9QPWAjBncCRwLNzewDfRB_AO4k7ktBtS8lMv037McMxwPkoS1djQ2D8vPS-YcGCVbViCpfsh2XLIE-na7Nyubbsmrk_01BJWUIYKoGUJwAvwLX6TBgQJKZWFo90od2eU4vkR1gMT1RmZUhNX2sPDiNeJBKDtCLVgyCwNubG_.WVcVzpwfPXRd0IIuCeVM5e-ggE4yk5ZN7SfsC79c1sQ",
+    "has_more": true
+  }
+}

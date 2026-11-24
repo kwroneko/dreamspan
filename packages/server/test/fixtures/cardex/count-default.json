@@ -1,0 +1,23 @@
+{
+  "name": "count-default",
+  "request": {
+    "path": "/api/v1/search/count",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"cf113d71fb98d8e1a23feadd6d9f511b4fd7139ff38dc5df7f7cf8464e34b515\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "total": 100000,
+    "capped": true,
+    "cap": 100000,
+    "pages": 417,
+    "timed_out": false
+  }
+}

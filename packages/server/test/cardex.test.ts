@@ -1,10 +1,13 @@
 // The cardex adapter (spec/CARD-SOURCES.md §11 phase 4): how cardex's API v1 maps to card
-// sources, checked as pure mappings and against the fake archive, which serves v1's shapes.
+// sources, checked as pure mappings and against the fake cardex, which serves the shapes
+// captured from the live API (test/fixtures/cardex).
 // No request ever goes to cardex.zip: the adapter is pointed at the fake's origin, and the
 // pure checks make none.
 import { afterAll, assert, describe, it } from "@effect/vitest"
 import { emptySourceQuery, SourceFailed, type SourceSuggestions } from "@dreamspan/shared/cardSources.ts"
 import { Effect } from "effect"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import type { SourceHttp } from "../src/sources/adapter.ts"
 import {
   batchUrl,
@@ -23,9 +26,9 @@ import {
 } from "../src/sources/cardex.ts"
 import { makeSourceHttp } from "../src/sources/guard.ts"
 import { makeLimiter } from "../src/sources/limiter.ts"
-import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { fakeCardexAdapter, SITE_LABELS, startFakeCardex } from "./support/fakeCardex.ts"
 
-const archive = await startFakeArchive({ cards: 120 })
+const archive = await startFakeCardex({ cards: 120 })
 afterAll(() => archive.close())
 
 /** A refusal's `{"error": "<code>"}`, as the guard reads it. */
@@ -193,17 +196,24 @@ describe("v1 as card sources", () => {
         anyFilterId: "any_author",
         profiles: true
       })
-      const card = archive.cards.find((c) => c.creator !== "lumen")!
+      // A creator with an account on the site: cardex has a profile only for those.
+      const card = archive.cards.find((c) => c.creator !== "lumen" && c.creatorKind === "account")!
       const query = `${card.site}/${card.creator}`
       const profile = yield* adapter.creator!(direct(), query)
-      const theirs = archive.cards.filter((c) => c.site === card.site && c.creator === card.creator)
+      const theirs = archive.cards.filter(
+        (c) => c.site === card.site && c.creator === card.creator && c.creatorKind === "account"
+      )
       assert.strictEqual(profile.query, query)
       assert.strictEqual(profile.name, `${card.creator} (synthetic)`)
       assert.strictEqual(profile.cards, theirs.length)
-      assert.strictEqual(profile.lorebooks, theirs.filter((c) => c.hasLorebook).length)
-      assert.strictEqual(profile.site, `Synthetic ${card.site}`)
+      // cardex counts standalone lorebooks apart from cards, not cards with a lorebook in them.
+      assert.strictEqual(
+        profile.lorebooks,
+        archive.lorebooks.filter((l) => l.site === card.site && l.creator === card.creator).length
+      )
+      assert.strictEqual(profile.site, SITE_LABELS[card.site])
       assert.isString(profile.bio)
-      assert.match(profile.avatar!, /\/t\/[0-9a-f]{64}\.512\.webp$/)
+      assert.match(profile.avatar!, /\/t\/[0-9a-f]{64}\.512\.webp\?v=1$/)
       assert.strictEqual(profile.url, `${archive.origin}/u/${card.site}/${card.creator}`)
       assert.isAbove(profile.lastSeen!, profile.firstSeen! - 1)
       assert.isTrue(archive.paths().some((p) => p.startsWith(`/api/v1/authors/${card.site}/`)))
@@ -247,7 +257,7 @@ describe("v1 as card sources", () => {
 
   it.effect("origin-keyed updates skip a three-version chain and keep historical files unchanged", () =>
     Effect.gen(function* () {
-      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      const local = yield* Effect.promise(() => startFakeCardex({ cards: 6 }))
       try {
         const adapter = fakeCardexAdapter(local)
         const root = local.cards[0]!
@@ -288,7 +298,7 @@ describe("v1 as card sources", () => {
 
   it.effect("successor fallback has one bounded request budget, rejects cycles, and never follows a URL", () =>
     Effect.gen(function* () {
-      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      const local = yield* Effect.promise(() => startFakeCardex({ cards: 6 }))
       try {
         const adapter = fakeCardexAdapter(local)
         const root = local.cards[0]!
@@ -596,7 +606,7 @@ describe("v1 as card sources", () => {
 
   it.effect("a nullable search total is filled by the exact count endpoint; paging still follows next_cursor", () =>
     Effect.gen(function* () {
-      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true }))
+      const fake = yield* Effect.promise(() => startFakeCardex({ cards: 120 }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const first = yield* adapter.search(direct(), emptySourceQuery, null)
@@ -611,7 +621,7 @@ describe("v1 as card sources", () => {
 
   it.effect("Cover: Any includes characters hidden by the archive's default cover filter", () =>
     Effect.gen(function* () {
-      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 60, coverless: true }))
+      const fake = yield* Effect.promise(() => startFakeCardex({ cards: 60, coverless: true }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const covered = yield* adapter.search(direct(), emptySourceQuery, null)
@@ -722,7 +732,7 @@ describe("v1 as card sources", () => {
 
   it.live("503 and 429 Retry-After retry the requested order before considering a substitute", () =>
     Effect.gen(function* () {
-      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120 }))
+      const fake = yield* Effect.promise(() => startFakeCardex({ cards: 120 }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const seen: Array<string> = []
@@ -773,7 +783,7 @@ describe("v1 as card sources", () => {
 
   it.effect("counts share the search filters and distinguish a capped lower bound", () =>
     Effect.gen(function* () {
-      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true, countCap: 50 }))
+      const fake = yield* Effect.promise(() => startFakeCardex({ cards: 120, countCap: 50 }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const all = yield* adapter.search(direct(), emptySourceQuery, null)
@@ -820,7 +830,12 @@ describe("v1 as card sources", () => {
           seen.size,
           kind === "tags"
             ? new Set(archive.cards.flatMap((card) => card.tags)).size
-            : new Set(archive.cards.map((card) => `${card.site}/${card.creator}`)).size
+            : // cardex suggests creators with an account on their site, not names on a card
+              new Set(
+                archive.cards.flatMap((card) =>
+                  card.creatorKind === "account" ? [`${card.site}/${card.creator}`] : []
+                )
+              ).size
         )
         const expired = yield* adapter.suggestions!(direct(), kind, "", "expired")
         const first = yield* adapter.suggestions!(direct(), kind, "", null)
@@ -862,7 +877,7 @@ describe("v1 as card sources", () => {
       const card = yield* fakeCardexAdapter(archive).card(direct(), archive.cards[0]!.slug)
       assert.deepStrictEqual(card.summary.earlierOrigins, [
         {
-          label: "Earlier listing on Synthetic site",
+          label: `Earlier listing on ${SITE_LABELS[archive.cards[0]!.site]}`,
           url: `${archive.origin}/o/${archive.cards[0]!.site}/previous-${archive.cards[0]!.slug}`
         }
       ])
@@ -881,8 +896,16 @@ describe("v1 as card sources", () => {
 
   it("a summary's paths resolve against the archive; a URL elsewhere is dropped", () => {
     const sha = "a".repeat(64)
+    // A captured search item (test/fixtures/cardex), with these fields in place of its own.
+    const captured = (
+      JSON.parse(
+        readFileSync(fileURLToPath(new URL("./fixtures/cardex/search-default.json", import.meta.url)), "utf8")
+      ) as { body: { items: Array<Record<string, unknown>> } }
+    ).body.items[0]!
     const summary = summaryOf({
+      ...captured,
       slug: "amber-lantern-1",
+      url: "/c/amber-lantern-1",
       name: "Amber Lantern",
       creator: { name: "Someone", source: "chub", handle: "someone" },
       tags: ["fantasy", 3 as never],
@@ -988,7 +1011,7 @@ describe("the adapter against the fake archive", () => {
 
   it.effect("without download_modes (a cached answer), a card is the mirrored PNG, or its JSON when that 404s", () =>
     Effect.gen(function* () {
-      const cached = yield* Effect.promise(() => startFakeArchive({ cards: 60, omitDownloadModes: true }))
+      const cached = yield* Effect.promise(() => startFakeCardex({ cards: 60, omitDownloadModes: true }))
       yield* Effect.addFinalizer(() => Effect.promise(() => cached.close()))
       const old = fakeCardexAdapter(cached)
       const http = direct()
@@ -1012,7 +1035,7 @@ describe("the adapter against the fake archive", () => {
 
   it.effect("download_modes picks the mode with no 404 first; an empty list is a plain refusal, not tried", () =>
     Effect.gen(function* () {
-      const listing = yield* Effect.promise(() => startFakeArchive({ cards: 60 }))
+      const listing = yield* Effect.promise(() => startFakeCardex({ cards: 60 }))
       yield* Effect.addFinalizer(() => Effect.promise(() => listing.close()))
       const listed = fakeCardexAdapter(listing)
       const modes = (seen: ReadonlyArray<string>) =>

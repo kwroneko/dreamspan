@@ -1,0 +1,178 @@
+{
+  "name": "search-sort-created_asc",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "sort": "created_asc",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"26ed2b08dccec71150ab38bf6a809c7a06871376241a5aeb17e44b29cf29277a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "created_asc",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "quil-quillfr-mello-a8-cb7fdd21",
+        "path": "/c/quil-quillfr-mello-a8-cb7fdd21",
+        "name": "Kite sage glade crane",
+        "tagline": "Harbor kite tulip lagoon tide sorrel canyon petal island clover maple wren garden atlas marble cricket cabin robin winter laurel rain river arch timb.",
+        "thumb_url": "/t/527b6439caa31208b426219b08764409b79bcf1c996fe0160d7561fd1e418371.512.webp?v=1",
+        "cover_w": 400,
+        "cover_h": 600,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "booru",
+          "catbox"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "mythology-7",
+            "label": "mythology 7"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "baker",
+            "label": "baker"
+          },
+          {
+            "slug": "mythology-7",
+            "label": "mythology 7"
+          }
+        ],
+        "tag_count": 4,
+        "token_budget": 858,
+        "fork_count": 0,
+        "first_seen_at": "2024-04-20T23:55:18.702766Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "shellislandf",
+          "path": "/u/booru/shellislandf",
+          "source": "booru",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "quil-quillfr-mello-a8-cb7fdd21",
+        "url": "/c/quil-quillfr-mello-a8-cb7fdd21",
+        "name": "Kite sage glade crane",
+        "creator": {
+          "name": "shellislandf",
+          "source": "booru",
+          "handle": "shellislandf",
+          "url": "/u/booru/shellislandf"
+        },
+        "tags": [
+          "fantasy",
+          "baker",
+          "mythology-7",
+          "village"
+        ],
+        "tagline": "Harbor kite tulip lagoon tide sorrel canyon petal island clover maple wren garden atlas marble cricket cabin robin winter laurel rain river arch timb.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 858,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/527b6439caa31208b426219b08764409b79bcf1c996fe0160d7561fd1e418371.512.webp?v=1",
+        "image_url": "/i/527b6439caa31208b426219b08764409b79bcf1c996fe0160d7561fd1e418371.png",
+        "version": "527b6439caa31208b426219b08764409b79bcf1c996fe0160d7561fd1e418371",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-10T04:53:17.233613Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "a64smAvl0QvNXOlWdntL4vd2WEFL4EbjSN4IJq_yazw0YH6Ju6ggGsUQRh-Ljipf4djLBfi7Zx3UPRqvksT3z0lkXvdQJ8Ws3p7LovbbGnw53yCw-l11Bx_KaMEoHcVWMKVS9WRWRAHenad_1ey3vXSKYbGXgqr4mxRDW_-uHi2IZGbD8psZmUS.Vk1nwCNrGwXaSQMyO9O3xF3-ya9P2qM75xh-fkY1uJi",
+    "has_more": true
+  }
+}

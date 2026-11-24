@@ -1,0 +1,180 @@
+{
+  "name": "search-fields-description",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "fields": "description",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"b9637ce7c76553df43aea0e5f5cc19154587af491febd334d4148425f1c7227e\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "fields": [
+        "description"
+      ],
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "relevance",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "sta-badgeblos-breeze-1a48ba75",
+        "path": "/c/sta-badgeblos-breeze-1a48ba75",
+        "name": "Willow tulip winter.",
+        "tagline": "River copper basin frost petal fjord juniper cricket birch nectar banner hollow crystal mist daisy wind lagoon apple sail larch hollow clover finch otter pebble boat basin coral comet lark cricket cricket river copper basin frost peta",
+        "thumb_url": "/t/3c77144b7b0073af3e384e9048768da591186725564153c3d7aea9c86bbe8b5a.512.webp?v=1",
+        "cover_w": 1024,
+        "cover_h": 1024,
+        "nsfw": false,
+        "kind": "character",
+        "sources": [
+          "risuai"
+        ],
+        "top_tags": [
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "places-4",
+            "label": "places 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "village",
+            "label": "VILLAGE"
+          },
+          {
+            "slug": "dragons",
+            "label": "dragons"
+          },
+          {
+            "slug": "places-4",
+            "label": "places 4"
+          },
+          {
+            "slug": "factions-4",
+            "label": "factions 4"
+          },
+          {
+            "slug": "creatures-4",
+            "label": "Creatures 4"
+          }
+        ],
+        "tag_count": 5,
+        "token_budget": 34599,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-02T18:26:11.184557Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "birchla",
+          "path": "/u/risuai/birchla",
+          "source": "risuai",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "sta-badgeblos-breeze-1a48ba75",
+        "url": "/c/sta-badgeblos-breeze-1a48ba75",
+        "name": "Willow tulip winter.",
+        "creator": {
+          "name": "birchla",
+          "source": "risuai",
+          "handle": "birchla",
+          "url": "/u/risuai/birchla"
+        },
+        "tags": [
+          "english-4",
+          "creatures-4",
+          "original-4",
+          "village",
+          "multiple-greetings-4"
+        ],
+        "tagline": "River copper basin frost petal fjord juniper cricket birch nectar banner hollow crystal mist daisy wind lagoon apple sail larch hollow clover finch otter pebble boat basin coral comet lark cricket cricket river copper basin frost peta",
+        "nsfw": false,
+        "kind": "character",
+        "token_count": 34599,
+        "stats": {
+          "popularity": 15600,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/3c77144b7b0073af3e384e9048768da591186725564153c3d7aea9c86bbe8b5a.512.webp?v=1",
+        "image_url": "/i/3c77144b7b0073af3e384e9048768da591186725564153c3d7aea9c86bbe8b5a.png",
+        "version": "3c77144b7b0073af3e384e9048768da591186725564153c3d7aea9c86bbe8b5a",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-02T18:26:11.184557Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "tNiiWfuXqwDg8Lxn1k7YOnIa0EnqWGB-C0f7vITkaNgakKKbsX72LUaYsH5rxjwRmj6wlzCZkfzr_kXI-fHLGElFsG6GW_On24BOqKyK1QNQ7BZ-bjLOCIy_KR9Wdzg6o-snRhhHUpBRrk-y9BEmpd72cAzIsJtXCp97-vyn-oj0-nrzPK2sDGZ.I5nm2GMjy6OSpgyXiOPdoYxeN-y62bMBNwnKPeP4QQq",
+    "has_more": true
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "name": "forked-forks",
+  "request": {
+    "path": "/api/v1/forks/chub/Northcan%2Fvelvet-feea3cf4dddc",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "parent": null,
+    "children": [
+      {
+        "id": "196909",
+        "external_id": "Anchorbam/velvet-c4f2da84663b",
+        "source_url": "https://site4.example/characters/Anchorbam/velvet-c4f2da84663b",
+        "card": {
+          "slug": "velvet-9ef52be7",
+          "path": "/c/velvet-9ef52be7",
+          "name": "Mistam",
+          "is_this": false,
+          "nsfw": true,
+          "origins": [
+            {
+              "removal": null,
+              "source": "chub",
+              "external_id": "Anchorbam/velvet-c4f2da84663b",
+              "path": "/chub/characters/Anchorbam/velvet-c4f2da84663b",
+              "is_fork": true
+            },
+            {
+              "removal": null,
+              "source": "botbooru",
+              "external_id": "character/32124",
+              "path": "/botbooru/character/32124",
+              "is_fork": false
+            }
+          ],
+          "earliest_known": "2025-10-24T18:47:58Z",
+          "estimated_creation": {
+            "at": "2025-10-24T18:47:58Z",
+            "kind": "site_created",
+            "source": "chub",
+            "board": null
+          },
+          "has_lorebook": true,
+          "lorebook_entries": 7,
+          "lorebook_attached_by": "botbooru",
+          "differs_in": [],
+          "is_main": false,
+          "thumb_url": "/t/5d0fd43a43906041a2ac39e37917a2422a00b6e7ebf6820edc3dfecb814f5f35.512.webp?v=1",
+          "compare": {
+            "fields": {
+              "description": "63f6c51e04d96d15",
+              "greetings": "6d9c79605670c99c",
+              "lorebook": "ea195e7e5038f761",
+              "lorebook_text": "c9b1ebf94102df46",
+              "name": "fd60b805bf5889a8",
+              "notes": "bea85228b0638e1c"
+            },
+            "similarity": {
+              "velvet-7da32bbd": {
+                "description": {
+                  "equal": 4070,
+                  "total": 11552,
+                  "cosmetic": null,
+                  "one_sided": false
+                },
+                "greetings": {
+                  "equal": 4448,
+                  "total": 4502,
+                  "cosmetic": null,
+                  "one_sided": false
+                },
+                "notes": {
+                  "equal": 504,
+                  "total": 1181,
+                  "cosmetic": null,
+                  "one_sided": false
+                }
+              }
+            },
+            "lens": {
+              "depth_prompt": 0,
+              "examples": 0,
+              "first_mes": 631,
+              "notes": 929,
+              "personality": 0,
+              "post_history": 0,
+              "scenario": 0,
+              "system_prompt": 0
+            },
+            "greetings": 3,
+            "first_mes_key": "86f1e1db9f92eb49",
+            "depth_prompt_key": null,
+            "tokens": 2782
+          },
+          "creator": {
+            "kind": "account",
+            "name": "Anchorbam",
+            "path": "/u/chub/Anchorbam",
+            "source": "chub",
+            "avatar_url": "/t/cd2bc7bed2695ae573937b96c8ebf9ebb194e3333e7348f88f0d219d620b7e70.64.webp?v=1",
+            "avatar_nsfw": false,
+            "others": 0,
+            "others_list": []
+          }
+        }
+      }
+    ],
+    "next": null,
+    "viewed_slug": "velvet-7da32bbd",
+    "compared_with": {
+      "compare": {
+        "fields": {
+          "description": "1d32dc04f9126707",
+          "greetings": "6236f0ed4e1c59c1",
+          "lorebook": "ea195e7e5038f761",
+          "lorebook_text": "c9b1ebf94102df46",
+          "name": "fd60b805bf5889a8",
+          "notes": "657d0b8a1fefdd78"
+        },
+        "lens": {
+          "depth_prompt": 0,
+          "examples": 0,
+          "first_mes": 623,
+          "notes": 252,
+          "personality": 0,
+          "post_history": 0,
+          "scenario": 0,
+          "system_prompt": 0
+        },
+        "greetings": 3,
+        "first_mes_key": "a32539a36ded324c",
+        "depth_prompt_key": null,
+        "tokens": 3416
+      },
+      "lorebook_entries": 7,
+      "lorebook_attached_by": null
+    }
+  }
+}

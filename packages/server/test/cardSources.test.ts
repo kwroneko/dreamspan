@@ -21,10 +21,10 @@ import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
-import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { fakeCardexAdapter, startFakeCardex } from "./support/fakeCardex.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
-const archive = await startFakeArchive({ cards: 120 })
+const archive = await startFakeCardex({ cards: 120 })
 afterAll(() => archive.close())
 
 const alice = { "Remote-User": "src-alice" }
@@ -122,7 +122,8 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
           const result: { items: ReadonlyArray<{ remoteId: string }>; next: string | null; total?: number } =
             yield* api.SourceSearch({ sourceId: "cardex", query, page })
           for (const item of result.items) seen.add(item.remoteId)
-          total = result.total ?? 0
+          // The total comes with the first page; later text-search pages leave it out, as cardex does.
+          total = result.total ?? total
           page = result.next
         } while (page !== null)
         assert.strictEqual(total, archive.cards.length)

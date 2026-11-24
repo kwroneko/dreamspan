@@ -1,0 +1,75 @@
+{
+  "name": "batch-older-version",
+  "request": {
+    "path": "/api/v1/cards/batch",
+    "query": {
+      "ids": "appleh-78f28b3f"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"f4456a819cb5629d31045e674c184e5d5e5382d1b14d5a0d4fb04346065bebf8\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "slug": "appleh-78f28b3f",
+        "url": "/c/appleh-78f28b3f",
+        "name": "Candle",
+        "creator": {
+          "name": "trailberryelmlaurels",
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "winter",
+          "puzzle",
+          "inventor",
+          "scholar",
+          "fantasy",
+          "drama",
+          "bard",
+          "merchant",
+          "sailor",
+          "explorer",
+          "baker",
+          "poet",
+          "steampunk",
+          "forest",
+          "village",
+          "curious",
+          "wholesome",
+          "cozy"
+        ],
+        "tagline": "Sand ocean otter spruce mellow nectar lemon cabin mist elm otter winter meadow coral chime elm crystal bramble tide harbor coral heron banner pond yarrow rose banner linen birch delta willow trail sand ocean otter spruce mellow nectar l",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1435,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "image_url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "version": "6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-03T09:27:29.679272Z",
+        "superseded_by": "appleh-82167127",
+        "file_sha256": "6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb"
+      }
+    ],
+    "missing": []
+  }
+}

@@ -92,23 +92,35 @@ it("names the other import sites by host and lists unknown URLs and ids plainly"
 })
 
 it("links a cardex card from its URL, its cardex: id and extensions.cardex, with the sites it was found on", () => {
+  // extensions.cardex as cardex's JSON download writes it (the server's test/fixtures/cardex,
+  // download-json): `url` its page for the listing the file came from, `origins` each listing.
+  const id = "00000000-aaaa-bbbb-cccc-00000000c0de"
+  const listing = (source: string, url: string) => ({
+    created: "2026-01-02T03:04:05Z",
+    current: true,
+    first_seen: "2026-01-03T03:04:05Z",
+    id,
+    source,
+    url
+  })
   const doc = card({
     source: ["cardex:synthetic-lantern-2", "https://cardex.zip/c/synthetic-lantern-1"],
     extensions: {
       cardex: {
-        version: 1,
-        url: "https://cardex.zip/c/synthetic-lantern-1",
         origins: [
-          { source: "chub", id: "x", url: "https://chub.ai/characters/synthcreator/lantern" },
-          { source: "unlisted_site", url: "https://cards.example/lantern" },
-          { source: "generic", url: "not a url" }
-        ]
+          listing("chub", "https://chub.ai/characters/synthcreator/lantern"),
+          listing("unlisted_site", "https://cards.example/lantern"),
+          listing("generic", "not a url")
+        ],
+        url: `https://cardex.zip/chub/${id}`,
+        version: 1
       }
     }
   })
   expect(cardSources(doc)).toEqual([
-    { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-1", label: "synthetic-lantern-1" },
+    { kind: "link", site: "cardex", url: `https://cardex.zip/chub/${id}` },
     { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-2", label: "synthetic-lantern-2" },
+    { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-1", label: "synthetic-lantern-1" },
     { kind: "link", site: "Chub", url: "https://chub.ai/characters/synthcreator/lantern" },
     { kind: "link", site: "cards.example", url: "https://cards.example/lantern" }
   ])

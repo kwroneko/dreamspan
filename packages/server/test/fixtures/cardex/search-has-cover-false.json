@@ -1,0 +1,186 @@
+{
+  "name": "search-has-cover-false",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "has_cover": "false",
+      "limit": "1"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"9a8aefed2bfa88e72c4853987102ff105e9a4917c769cdc410661476449f8ae8\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": null,
+      "mode": "fts",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": false,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "newest",
+      "page": 1,
+      "limit": 1,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": false,
+        "slug": "fernval-5e98669c",
+        "path": "/c/fernval-5e98669c",
+        "name": "Trailsa",
+        "tagline": "Pond glade olive hazel garden berry reed rain drift paper echo ocean beac.",
+        "thumb_url": null,
+        "cover_w": null,
+        "cover_h": null,
+        "nsfw": true,
+        "kind": "character",
+        "sources": [
+          "crushon"
+        ],
+        "top_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy",
+            "shortlist_display": "female"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "school-4",
+            "label": "school 4"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "fantasy",
+            "label": "fantasy"
+          },
+          {
+            "slug": "places-3",
+            "label": "Places 3"
+          },
+          {
+            "slug": "village-2",
+            "label": "village 2"
+          },
+          {
+            "slug": "school-4",
+            "label": "school 4"
+          },
+          {
+            "slug": "fantasy-6",
+            "label": "fantasy 6"
+          },
+          {
+            "slug": "historical-7",
+            "label": "Historical 7"
+          }
+        ],
+        "tag_count": 6,
+        "token_budget": 1028,
+        "fork_count": 0,
+        "first_seen_at": "2026-11-06T18:12:42.941994Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "6Gl",
+          "path": "/u/crushon/7109c3b9-2d6c-b04d-64e9-0927e77440ab",
+          "source": "crushon",
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": null,
+    "total_capped": false,
+    "page": 1,
+    "pages": null,
+    "page_size": 1,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": null,
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": false,
+      "hidden": 1000,
+      "hidden_capped": true
+    },
+    "items": [
+      {
+        "slug": "fernval-5e98669c",
+        "url": "/c/fernval-5e98669c",
+        "name": "Trailsa",
+        "creator": {
+          "name": "6Gl",
+          "source": "crushon",
+          "handle": "7109c3b9-2d6c-b04d-64e9-0927e77440ab",
+          "url": "/u/crushon/7109c3b9-2d6c-b04d-64e9-0927e77440ab"
+        },
+        "tags": [
+          "historical-7",
+          "village-2",
+          "fantasy",
+          "school-4",
+          "places-3",
+          "fantasy-6"
+        ],
+        "tagline": "Pond glade olive hazel garden berry reed rain drift paper echo ocean beac.",
+        "nsfw": true,
+        "kind": "character",
+        "token_count": 1028,
+        "stats": {
+          "popularity": null,
+          "rating_avg": null,
+          "rating_count": null
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "830288f470e88c3bcb99e671e1953b27b5d4b05ef96d626ed2ab2f6e00d04e5f",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T18:12:42.941994Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": false,
+    "next_cursor": "f420o8zp8ylLXMhpcVkET2nkNG4rhGkd1xiUKYoOskUvhsuAwtN9LiWcdFfeO6ewr76XYl8eu7sA2XXesJc5_YbOxUpc5SzMtwuhF-rF1lan62lyvQaNPOHMdK8zquyKsyH0LVKIw0XhrUGizPsbtHHzA9kqrY5ZqeXbxLKkIGaYRCIe9vNyy_L3RdqXVsvrYo.tuGdkiyuTYouyh_BvUPgv4azhfOzcZ3KuhNqeAAKEfy",
+    "has_more": true
+  }
+}

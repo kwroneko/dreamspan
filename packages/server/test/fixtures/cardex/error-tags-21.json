@@ -1,0 +1,21 @@
+{
+  "name": "error-tags-21",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "tags": "ghosts-3,cooking-3,gardening-3,music-3,sports-3,travel-3,library-3,museum-3,village-3,castle-3,forest-3,ocean-3,desert-3,mountains-3,winter-3,summer-3,festival-3,puzzle-3,inventor-3,scholar-3,knight-3"
+    }
+  },
+  "status": 400,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "error": "bad_request",
+    "message": "tags: at most 20 tags"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "batch-lorebook",
+  "request": {
+    "path": "/api/v1/cards/batch",
+    "query": {
+      "ids": "trailrid-lorebook-c220230d"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"a5ae8b88601738f446c1b04c26b61e81c18fe70f58142042320cea56d25dac0f\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "items": [
+      {
+        "slug": "trailrid-lorebook-c220230d",
+        "url": "/c/trailrid-lorebook-c220230d",
+        "name": "Flintlar_Topazgro",
+        "creator": {
+          "name": "Buttondriftbut",
+          "source": "chub",
+          "handle": "Buttondriftbut",
+          "url": "/u/chub/Buttondriftbut"
+        },
+        "tags": [
+          "fantasy",
+          "castle",
+          "travel",
+          "forest",
+          "ocean",
+          "desert"
+        ],
+        "tagline": "Sage teal amber cider glen heron cabin plum berry glade banner garden spruce north maple orchard qu.",
+        "nsfw": true,
+        "kind": "lorebook",
+        "token_count": 1177,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "e6c1b1065929aecad38772a459205fc817891e892c3781f48faad96c99c15167",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-11-06T17:11:48.698899Z",
+        "superseded_by": null,
+        "file_sha256": "e6c1b1065929aecad38772a459205fc817891e892c3781f48faad96c99c15167"
+      }
+    ],
+    "missing": []
+  }
+}

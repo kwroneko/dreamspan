@@ -1,0 +1,1393 @@
+{
+  "name": "character-origin",
+  "request": {
+    "path": "/api/v1/origins/botbooru/character%2F7735",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"2ad2fb75a9c18f5ae81bcb3538457fa3151c4b75307223f88335cc9d7dbcfc94\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "card": {
+      "all_origins_removed": false,
+      "slug": "appleh-82167127",
+      "content_hash": "4e28eb5e249b322db280dcb1fea08764e7afc13a1ee8b2d473d84b0bd15ae614",
+      "kind": "character",
+      "path": "/c/appleh-82167127",
+      "hidden": false,
+      "nsfw": true,
+      "safety": {
+        "loli": false,
+        "loli_keyword": false
+      },
+      "license": null,
+      "content_warnings": [
+        "skyb"
+      ],
+      "token_counts": {
+        "fields": {
+          "creator_notes": 94,
+          "description": 687
+        },
+        "greetings": [
+          306,
+          305,
+          369
+        ],
+        "lorebook_triggered_max": 0,
+        "lorebook_triggered_total": 0,
+        "mes_example": 379,
+        "model": "o200k_base",
+        "permanent": 687,
+        "total_budget_estimate": 1435
+      },
+      "token_budget": 1435,
+      "fork_count": 0,
+      "first_seen_at": "2026-11-06T18:03:37.883206Z",
+      "tags": [
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "steampunk",
+          "label": "steampunk"
+        },
+        {
+          "slug": "teacher",
+          "label": "TEACHER"
+        },
+        {
+          "slug": "poet",
+          "label": "poet"
+        },
+        {
+          "slug": "sailor",
+          "label": "sailor"
+        },
+        {
+          "slug": "wholesome",
+          "label": "wholesome"
+        },
+        {
+          "slug": "explorer",
+          "label": "explorer"
+        },
+        {
+          "slug": "curious",
+          "label": "curious"
+        },
+        {
+          "slug": "merchant",
+          "label": "merchant"
+        },
+        {
+          "slug": "winter",
+          "label": "Winter"
+        },
+        {
+          "slug": "friendly",
+          "label": "friendly"
+        },
+        {
+          "slug": "baker",
+          "label": "baker"
+        },
+        {
+          "slug": "inventor",
+          "label": "inventor"
+        },
+        {
+          "slug": "mountains",
+          "label": "mountains"
+        },
+        {
+          "slug": "puzzle",
+          "label": "puzzle"
+        },
+        {
+          "slug": "summer",
+          "label": "Summer"
+        },
+        {
+          "slug": "scholar",
+          "label": "Scholar"
+        },
+        {
+          "slug": "calm",
+          "label": "calm"
+        },
+        {
+          "slug": "cheerful",
+          "label": "cheerful"
+        },
+        {
+          "slug": "cozy",
+          "label": "cozy"
+        },
+        {
+          "slug": "festival",
+          "label": "festival"
+        },
+        {
+          "slug": "bard",
+          "label": "bard"
+        },
+        {
+          "slug": "knight",
+          "label": "knight"
+        },
+        {
+          "slug": "painter",
+          "label": "painter"
+        },
+        {
+          "slug": "healer",
+          "label": "healer"
+        },
+        {
+          "slug": "slice-of-life-2",
+          "label": "slice of life 2"
+        },
+        {
+          "slug": "comedy-2",
+          "label": "Comedy 2"
+        }
+      ],
+      "unlisted": false
+    },
+    "estimated_creation": {
+      "at": "2026-03-19T00:04:38.545366Z",
+      "kind": "site_created",
+      "source": "botbooru",
+      "board": null
+    },
+    "view": {
+      "arrival": "origin",
+      "path": "/botbooru/character/7735",
+      "canonical_path": "/c/appleh-82167127",
+      "version": null,
+      "default_tab": "/botbooru/character/7735"
+    },
+    "top": {
+      "name": {
+        "value": "Candle",
+        "from": "botbooru"
+      },
+      "tagline": {
+        "value": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "from": "botbooru",
+        "origin_path": "/botbooru/character/7735"
+      },
+      "description": {
+        "value": "Finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove mist timber anchor petal grove grove anchor atlas kite marble bamboo breeze creek bamboo finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove .\n\nCrystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern s.\n\nAutumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pi.\nSand crystal frost stone delta saffron violet amber copper birch candle crane echo oak lark kite flint otter nectar saffron berry bamboo h.\n\nCricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autu.\n\nMint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow birch marble pebble rose echo breeze kite ocean dawn pine sorrel copper mellow mint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow b.",
+        "from": null,
+        "ai_summary": false
+      },
+      "creator": {
+        "value": "trailberryelmlaurels",
+        "from": null
+      },
+      "cover": {
+        "image": {
+          "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+          "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+          "width": 400,
+          "height": 600,
+          "animated": false
+        },
+        "from": "botbooru"
+      },
+      "tags": [
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "steampunk",
+          "label": "steampunk"
+        },
+        {
+          "slug": "teacher",
+          "label": "TEACHER"
+        },
+        {
+          "slug": "poet",
+          "label": "poet"
+        },
+        {
+          "slug": "sailor",
+          "label": "sailor"
+        },
+        {
+          "slug": "wholesome",
+          "label": "wholesome"
+        },
+        {
+          "slug": "explorer",
+          "label": "explorer"
+        },
+        {
+          "slug": "curious",
+          "label": "curious"
+        },
+        {
+          "slug": "merchant",
+          "label": "merchant"
+        },
+        {
+          "slug": "winter",
+          "label": "Winter"
+        },
+        {
+          "slug": "friendly",
+          "label": "friendly"
+        },
+        {
+          "slug": "baker",
+          "label": "baker"
+        },
+        {
+          "slug": "inventor",
+          "label": "inventor"
+        },
+        {
+          "slug": "mountains",
+          "label": "mountains"
+        },
+        {
+          "slug": "puzzle",
+          "label": "puzzle"
+        },
+        {
+          "slug": "summer",
+          "label": "Summer"
+        },
+        {
+          "slug": "scholar",
+          "label": "Scholar"
+        },
+        {
+          "slug": "calm",
+          "label": "calm"
+        },
+        {
+          "slug": "cheerful",
+          "label": "cheerful"
+        },
+        {
+          "slug": "cozy",
+          "label": "cozy"
+        },
+        {
+          "slug": "festival",
+          "label": "festival"
+        },
+        {
+          "slug": "bard",
+          "label": "bard"
+        },
+        {
+          "slug": "knight",
+          "label": "knight"
+        },
+        {
+          "slug": "painter",
+          "label": "painter"
+        },
+        {
+          "slug": "healer",
+          "label": "healer"
+        }
+      ]
+    },
+    "definition": {
+      "name": "Candle",
+      "nickname": "Fjord comet clover fie",
+      "description": "Finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove mist timber anchor petal grove grove anchor atlas kite marble bamboo breeze creek bamboo finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove .\n\nCrystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern s.\n\nAutumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pi.\nSand crystal frost stone delta saffron violet amber copper birch candle crane echo oak lark kite flint otter nectar saffron berry bamboo h.\n\nCricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autu.\n\nMint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow birch marble pebble rose echo breeze kite ocean dawn pine sorrel copper mellow mint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow b.",
+      "personality": null,
+      "scenario": null,
+      "first_mes": "Rose marble crystal jade elm island frost button lantern island lemon bramble dune bramble plum grove crane ocean kite cedar atlas sail reed canyon canyon cider cove elm silver shell paper quill rose marble crystal jade elm island frost button lantern island lemon bramble dune bramble plum grove crane ocean kite cedar atlas sail reed canyon canyon cider cove elm silver shell paper quill rose marble crystal*\n\nIvy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum grove cobble oak daisy garden rain poppy zephyr rain lagoon honey birch button cedar heron cedar ivy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum grove cobble oak daisy garden rain poppy zephyr rain lagoon honey birch button cedar heron cedar ivy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum*\n\nHarbor rain kite robin ridge sage maple berry apple plum badge rain mist daisy harbor ocean autumn saffron elm frost paper raven autumn fable fern frost anchor hollow moss coral north finch harbor rain kite robin ridge sage maple berry apple plum badge rain mist daisy harbor ocean autumn saffron elm frost paper raven autumn fable fern frost anchor hollow moss coral north finch harbor rain kite robin ridge sage maple berry apple plum*",
+      "alternate_greetings": [
+        "Banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail sorrel basin lark island meadow fable oak fjord grove banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail sorrel basin lark island meadow fable oak fjord grove banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail s*\n\nBasin river delta comet ember fjord cabin cedar sage blossom sail coral button chime ridge pond daisy lotus sand comet mint flint hill dawn slate fable larch coral daisy wind mint bamboo basin river delta comet ember fjord cabin cedar sage blossom sail coral button chime ridge pond daisy lotus sand comet mint flint hill dawn slate fable larch coral daisy wind mint bamboo basin river delta comet ember fjo*\n\nBanner berry bamboo fjord shell paper mint birch poppy shell robin banner cove hazel island brook reed laurel slate mellow sail orchard garden hill pine willow nectar frost saffron creek teal winter banner berry bamboo fjord shell paper mint birch poppy shell robin banner cove hazel island brook reed laurel slate mellow sail orchard garden hill pine willow nectar frost saffron creek teal winter banner b*",
+        "Crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember *\n\nBerry robin north cedar brook crane thistle drift pepper ember boat snow banner otter lagoon velvet birch cider cove blossom berry beacon sorrel olive kettle juniper berry plum daisy dawn nectar thyme berry robin north cedar brook crane thistle drift pepper ember boat snow banner otter lagoon velvet birch cider cove blossom berry beacon sorrel olive kettle juniper berry plum daisy dawn nectar thyme berry ro*\n\nWind harbor rain juniper atlas boat copper meadow fjord poppy candle heron garden plum sail cotton cedar drift ember clover otter amber chalk bell cobble arch linen sail topaz berry garden fern wind harbor rain juniper atlas boat copper meadow fjord poppy candle heron garden plum sail cotton cedar drift ember clover otter amber chalk bell cobble arch linen sail topaz berry garden fern wind harbor rain juniper atlas boat copper meadow fjord*"
+      ],
+      "group_only_greetings": [],
+      "mes_example": "Crystal\nBerry reed flint daisy sand teal paper reed quiet jade apple otter chalk poppy marble banner copper harbor plum glade spark cricket arch autumn trail finch ivy winter dune swan saffron cotton berry reed flint daisy sand teal paper reed quiet jade apple otter chalk poppy marble banner copper harbor plum glade spark cricket arch autumn trail finch ivy winter dune swan saffron cotton berry reed flint daisy sand teal paper reed quiet jade apple otter *\n\nWinter.\nBasin cider rain flint button shell crane marble moss grove creek kettle heron arch shell kite island pepper timber fern thyme hill sky blossom saffron zephyr petal grove boat delta pond orchard basin cider rain flint button*\n\nMist lo\nLantern pine poppy comet daisy hill lotus amber island maple honey garden swan nectar fable breeze crystal plum quiet reed juniper valley spark trail dawn button silver hollow crane anchor crystal finch lantern pine poppy comet daisy hill lotus amber island maple honey garden swan nectar fable breeze crystal plum quiet reed juniper valley spark trail dawn button silver hollow crane anchor crystal finch lantern pine poppy comet *\n\nChalk d\nJade flint north brook echo olive linen slate cider badge ridge cobble harbor nectar chime reed canyon trail slate trail finch glen flint hill olive shell brook beacon meadow brook fjord crane jade flint north brook echo olive linen slate cider badge ridge cobble harbor nectar chime reed canyon trail slate trail finch glen flint hill olive shell brook beacon meadow brook fjord crane jade flint north brook echo olive lin*",
+      "creator_notes": "Breeze maple petal chime pebble cider comet basin mellow bamboo fable creek sage copper pine honey thyme plum willow beacon frost marble wren cobble olive atlas nectar glade saffron arch spark crane breeze maple petal chime pebble cider comet basin mel.\n\nVel\n\nLotus linen pepper pond poppy birch cobble cedar poppy\n\nFjord juniper candle mellow lantern echo autumn linen",
+      "creator_notes_multilingual": {},
+      "system_prompt": null,
+      "post_history_instructions": null,
+      "depth_prompt": null,
+      "book": null,
+      "declared_asset_count": 0,
+      "extension_keys": []
+    },
+    "lorebook": {
+      "total": 0,
+      "offset": 0,
+      "limit": 50,
+      "entries": [],
+      "link_map": []
+    },
+    "assets": {
+      "total": 1,
+      "pending": 0,
+      "fetched": 1,
+      "failed": 0,
+      "dead": 0,
+      "expressions": 0
+    },
+    "image_map": [
+      {
+        "original_url": "https://site3.example/fros-gallery/33236/download.png",
+        "url": "/i/bc2e1b16413af3df9b3ca9bc1eb30dd8f56d66a038d65dbd302c573a80dce193.png",
+        "display_url": "/t/bc2e1b16413af3df9b3ca9bc1eb30dd8f56d66a038d65dbd302c573a80dce193.f6148.webp?v=1",
+        "width": 960,
+        "height": 1125
+      }
+    ],
+    "link_map": [
+      {
+        "url": "https://site3.example/character/7735",
+        "path": "/botbooru/character/7735",
+        "kind": "card"
+      }
+    ],
+    "files": [
+      {
+        "sha256": "b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc",
+        "ext": "json",
+        "mime": "application/json",
+        "kind": "other",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 10981,
+        "width": null,
+        "height": null,
+        "first_seen_at": "2026-11-06T18:03:37.883206Z",
+        "url": "/i/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc.json",
+        "thumb_url": null,
+        "downloads": {
+          "original": "/api/v1/download/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc?mode=original",
+          "json": "/api/v1/download/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc?mode=json&tags=sci-fi-2",
+          "mirrored": "/api/v1/download/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc?mode=mirrored&tags=sci-fi-2",
+          "self_contained": "/api/v1/download/b82da3ee17b3f301f095caf642dfde5f93f8e16c23b310385ec911cf466e42fc?mode=self-contained&tags=sci-fi-2"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 1368246,
+        "current": true,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      }
+    ],
+    "file_count": 1,
+    "origins": [
+      {
+        "removal": null,
+        "source": "botbooru",
+        "source_label": "Botbooru",
+        "external_id": "character/7735",
+        "path": "/botbooru/character/7735",
+        "api_path": "/api/v1/origins/botbooru/character/7735",
+        "source_url": "https://site3.example/character/7735",
+        "serves_card": true,
+        "card_slug": "appleh-82167127",
+        "author": {
+          "source": "botbooru",
+          "handle": "101",
+          "display_name": "Oceanhaze",
+          "avatar": null,
+          "path": "/u/botbooru/101"
+        },
+        "name": "Candle",
+        "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+        "description": null,
+        "tags": [
+          "fantasy",
+          "steampunk",
+          "teacher",
+          "historical-2",
+          "sailor",
+          "wholesome",
+          "explorer",
+          "detective-2",
+          "merchant",
+          "winter",
+          "friendly",
+          "magic-2",
+          "space-2",
+          "mountains",
+          "puzzle",
+          "summer",
+          "astronomer",
+          "scholar",
+          "school-2",
+          "steampunk-2",
+          "cozy",
+          "cyberpunk-2",
+          "bard",
+          "fairy-tale-2",
+          "painter",
+          "mythology-2"
+        ],
+        "content_warnings": [
+          "skyb"
+        ],
+        "nsfw_image_flag": null,
+        "cover": {
+          "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+          "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+          "width": 400,
+          "height": 600,
+          "animated": false
+        },
+        "stats": {
+          "rating_avg": null,
+          "rating_count": null,
+          "star_count": null,
+          "favorite_count": null,
+          "fork_count": 0,
+          "chat_count": null,
+          "message_count": null,
+          "view_count": 956,
+          "download_count": 182,
+          "token_count_source": null
+        },
+        "source_created_at": "2026-03-19T00:04:38.545366Z",
+        "source_updated_at": null,
+        "first_seen_at": "2026-10-03T09:27:29.679272Z",
+        "fork": {
+          "parent_known": false,
+          "is_fork": false,
+          "forked_from_external_id": null,
+          "forked_from": null,
+          "child_count": 0,
+          "children": []
+        },
+        "versions": [
+          {
+            "slug": "appleh-82167127",
+            "content_hash": "4e28eb5e249b322db280dcb1fea08764e7afc13a1ee8b2d473d84b0bd15ae614",
+            "card_path": "/c/appleh-82167127",
+            "origin_path": "/botbooru/character/7735",
+            "active_from": "2026-11-06T18:03:37.883206Z",
+            "active_to": null,
+            "is_current": true,
+            "is_viewing": true,
+            "meta": {
+              "character_version": "lant",
+              "created": null,
+              "modified": null,
+              "sources": [],
+              "creator": null
+            }
+          },
+          {
+            "slug": "appleh-78f28b3f",
+            "content_hash": "1cc1a8ca9dd8f178b7484263c206256a396c17bac1b0a67a0c71daf86e82ac50",
+            "card_path": "/c/appleh-78f28b3f",
+            "origin_path": "/botbooru/character/7735?v=8c485b6efe37e88d",
+            "active_from": "2026-10-03T09:27:29.679272Z",
+            "active_to": "2026-11-06T18:03:37.883206Z",
+            "is_current": false,
+            "is_viewing": false,
+            "meta": {
+              "character_version": "lant",
+              "created": null,
+              "modified": null,
+              "sources": [],
+              "creator": null
+            }
+          }
+        ],
+        "version_count": 2,
+        "has_dead_assets": false,
+        "fetch_status": "full",
+        "missing_fields": [],
+        "source_specific": {
+          "card_image_revision": 1,
+          "card_is_animated": false,
+          "character_name": "Candle",
+          "companion_lorebooks": [],
+          "creator_claim": null,
+          "creator_tag_reports": [],
+          "embedded_card_tags": [
+            "western-2",
+            "pirates-2",
+            "dragons-2",
+            "robots-2",
+            "bard",
+            "ghosts-2",
+            "cooking-2",
+            "cozy",
+            "historical-2",
+            "scholar",
+            "explorer",
+            "merchant",
+            "wholesome",
+            "winter",
+            "gardening-2",
+            "puzzle",
+            "space-2",
+            "steampunk"
+          ],
+          "file_from": "download_json",
+          "filename": "53a6f4f3ee62a4cdea9eca68e1f880db.png",
+          "fork_master": null,
+          "fork_posts": [],
+          "has_lorebook": false,
+          "id": 7735,
+          "image_link": null,
+          "is_oc": false,
+          "linked_lorebooks": [],
+          "linked_lorebooks_max": 3,
+          "meta_locked": false,
+          "meta_name": "Fjord comet clover fie",
+          "mini_gallery": {
+            "approved_count": 1,
+            "images": [
+              {
+                "created_at": "2026-10-23T08:24:20.208733",
+                "download_url": "/fros-gallery/33236/download.png",
+                "height": 1125,
+                "id": 33236,
+                "is_animated": false,
+                "main_view_url": "/fros-gallery/33236/hazelmi/6148?v=bcb2ab59",
+                "position": 0,
+                "preview_url": "/fros-gallery/33236/hazelmi/128?v=bcb2ab59",
+                "status": "approved",
+                "url": "/fros-gallery/33236?v=bcb2ab59",
+                "width": 960
+              }
+            ],
+            "max_images": 3,
+            "pending_count": 0
+          },
+          "name": "Candle",
+          "origin": "Chub",
+          "rating": "nsfw",
+          "revision_count": 1,
+          "sauce_import_locked": false,
+          "sibling_count": 0,
+          "sibling_posts": [],
+          "slop_score": 10.077595540380516,
+          "slug": null,
+          "status": "active",
+          "thumb_focus_x": null,
+          "thumb_focus_y": null,
+          "uploader_id": 101
+        },
+        "sightings": [],
+        "sighting_count": 0,
+        "last_checked_at": null,
+        "sourced_from_urls": [
+          "https://site4.example/characters/trailberryelmlaurels/appleh-dais-lanternb-b323ecf9"
+        ],
+        "related_lorebooks": []
+      }
+    ],
+    "earlier_origins": [],
+    "variants": [
+      {
+        "slug": "appleh-e606d336",
+        "path": "/c/appleh-e606d336",
+        "name": "Candle",
+        "is_this": false,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "file:790606a983e3f213",
+            "path": "/catbox/file/790606a983e3f213",
+            "is_fork": false
+          },
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "p8pe2b",
+            "path": "/catbox/p8pe2b",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2023-12-03T18:36:38Z",
+        "estimated_creation": {
+          "at": "2023-12-03T18:36:38Z",
+          "kind": "site_created",
+          "source": "catbox",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "description",
+          "nickname",
+          "greetings",
+          "examples",
+          "notes",
+          "other"
+        ],
+        "is_main": true,
+        "thumb_url": "/t/dedae098de076c16b3845695f0848c34ac0e8e74e96087dc578e87b3a108e191.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "ecd0f2aaabba0fc4",
+            "examples": "66f28135bf26bc11",
+            "greetings": "a5189fd3c3c45c2e",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "notes": "a3f6ee8d9843bd88"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "description": {
+                "equal": 5926,
+                "total": 5978,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "examples": {
+                "equal": 3074,
+                "total": 3162,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 2922,
+                "total": 2938,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 506,
+                "total": 622,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1591,
+            "first_mes": 1321,
+            "notes": 253,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "58c2ca5d7b811ddd",
+          "depth_prompt_key": null,
+          "tokens": 1431
+        },
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "appleh-c01706ac",
+        "path": "/c/appleh-c01706ac",
+        "name": "Candle",
+        "is_this": false,
+        "nsfw": true,
+        "origins": [
+          {
+            "removal": null,
+            "source": "chub",
+            "external_id": "trailberryelmlaurels/appleh-dais-lanternb-b323ecf9",
+            "path": "/chub/characters/trailberryelmlaurels/appleh-dais-lanternb-b323ecf9",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2023-12-07T13:21:03Z",
+        "estimated_creation": {
+          "at": "2023-12-07T13:21:03Z",
+          "kind": "site_created",
+          "source": "chub",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "nickname",
+          "notes",
+          "other"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/10b71422bf5654d2fab1fcb96ac74cefcae192cf0b32353c6d58afcd68d6c5fc.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "b45984cf32bb9e3d",
+            "examples": "ab7d09fb6b5696a0",
+            "greetings": "dda1d32dbd2f5ff1",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 0,
+                "total": 369,
+                "cosmetic": null,
+                "one_sided": true
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1571,
+            "first_mes": 1321,
+            "notes": 0,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "58c2ca5d7b811ddd",
+          "depth_prompt_key": null,
+          "tokens": 1435
+        },
+        "creator": {
+          "kind": "account",
+          "name": "trailberryelmlaurels",
+          "path": "/u/chub/trailberryelmlaurels",
+          "source": "chub",
+          "avatar_url": "/t/9d3febd98b08139237fafe0f1f276bcc2d304f7a5eb8f1e825de5570bc6eefaf.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "appleh-2f28baef",
+        "path": "/c/appleh-2f28baef",
+        "name": "Candle",
+        "is_this": false,
+        "nsfw": true,
+        "origins": [
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "file:35c0f6cc47780ae4",
+            "path": "/catbox/file/35c0f6cc47780ae4",
+            "is_fork": false
+          },
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "4c2bel",
+            "path": "/catbox/4c2bel",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2023-12-10T08:54:08Z",
+        "estimated_creation": {
+          "at": "2023-12-10T08:54:08Z",
+          "kind": "site_created",
+          "source": "catbox",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "description",
+          "nickname",
+          "greetings",
+          "examples",
+          "notes",
+          "other"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/f2b883641de54467c991a66bfcd572696aaec08ad63853dd1ff5524f72698846.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "4d5624d51c36b11f",
+            "examples": "5bd60ddad536d46a",
+            "greetings": "b125d032fed073f2",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "notes": "a3f6ee8d9843bd88"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "description": {
+                "equal": 5934,
+                "total": 6048,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "examples": {
+                "equal": 3066,
+                "total": 3208,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 8110,
+                "total": 8350,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 506,
+                "total": 622,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1637,
+            "first_mes": 1394,
+            "notes": 253,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "7f1930b781cd9d3d",
+          "depth_prompt_key": null,
+          "tokens": 1470
+        },
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "appleh-a261c7fc",
+        "path": "/c/appleh-a261c7fc",
+        "name": "Candle",
+        "is_this": false,
+        "nsfw": true,
+        "origins": [
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "file:19a45e55514fc2ec",
+            "path": "/catbox/file/19a45e55514fc2ec",
+            "is_fork": false
+          },
+          {
+            "removal": null,
+            "source": "catbox",
+            "external_id": "bamboo",
+            "path": "/catbox/bamboo",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2023-12-10T08:54:08Z",
+        "estimated_creation": {
+          "at": "2023-12-10T08:54:08Z",
+          "kind": "site_created",
+          "source": "catbox",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "description",
+          "nickname",
+          "greetings",
+          "examples",
+          "notes",
+          "other"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/c410fbb061cbb88e5b0f35ecb12bc8b810ac73ba305d481c29314e1c742e8fa8.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "429712aea64353d5",
+            "examples": "d5ac409e3b423d51",
+            "greetings": "fc4320abb41226fe",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "notes": "a3f6ee8d9843bd88"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "description": {
+                "equal": 5972,
+                "total": 6050,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "examples": {
+                "equal": 3134,
+                "total": 3188,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 8124,
+                "total": 8348,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 506,
+                "total": 622,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1617,
+            "first_mes": 1394,
+            "notes": 253,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "7f1930b781cd9d3d",
+          "depth_prompt_key": null,
+          "tokens": 1470
+        },
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "appleh-82167127",
+        "path": "/c/appleh-82167127",
+        "name": "Candle",
+        "is_this": true,
+        "nsfw": true,
+        "origins": [
+          {
+            "removal": null,
+            "source": "botbooru",
+            "external_id": "character/7735",
+            "path": "/botbooru/character/7735",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2026-03-19T00:04:38.545366Z",
+        "estimated_creation": {
+          "at": "2026-03-19T00:04:38.545366Z",
+          "kind": "site_created",
+          "source": "botbooru",
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [],
+        "is_main": false,
+        "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "b45984cf32bb9e3d",
+            "examples": "ab7d09fb6b5696a0",
+            "greetings": "dda1d32dbd2f5ff1",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "nickname": "8c59786027ce01fd",
+            "notes": "7ef6b0cf3d8c821c",
+            "other": "0afd00a51f6f8196"
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1571,
+            "first_mes": 1321,
+            "notes": 369,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "58c2ca5d7b811ddd",
+          "depth_prompt_key": null,
+          "tokens": 1435
+        },
+        "creator": {
+          "kind": "named",
+          "name": "trailberryelmlaurels",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      },
+      {
+        "slug": "appleh-3ec6e098",
+        "path": "/c/appleh-3ec6e098",
+        "name": "Candle",
+        "is_this": false,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "janitorai",
+            "external_id": "eebbef8e-fa6d-5f7c-fe9b-544fc4f93f5b",
+            "path": "/janitorai/eebbef8e-fa6d-5f7c-fe9b-544fc4f93f5b",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2026-10-11T14:20:28.535327Z",
+        "estimated_creation": {
+          "at": "2026-10-11T14:20:28.535327Z",
+          "kind": "first_seen",
+          "source": null,
+          "board": null
+        },
+        "has_lorebook": false,
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "differs_in": [
+          "nickname",
+          "greetings",
+          "notes",
+          "other"
+        ],
+        "is_main": false,
+        "thumb_url": "/t/21eaeccab7a6d4c134d7d61935648a5d45e711b6d04317dc8a032262f71ebf3b.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "b45984cf32bb9e3d",
+            "examples": "ab7d09fb6b5696a0",
+            "greetings": "f66d057502e47c01",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24",
+            "notes": "5d499b09a24b9a02",
+            "other": "e752272476cafc92"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "description": {
+                "equal": 5988,
+                "total": 5992,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "examples": {
+                "equal": 3136,
+                "total": 3139,
+                "cosmetic": "Only whitespace",
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 2650,
+                "total": 5442,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 4,
+                "total": 377,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1568,
+            "first_mes": 1319,
+            "notes": 8,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 1,
+          "first_mes_key": "0ba3f0fa288ffca8",
+          "depth_prompt_key": null,
+          "tokens": 1372
+        },
+        "creator": {
+          "kind": "named",
+          "name": "@Mossb",
+          "path": null,
+          "source": null,
+          "avatar_url": null,
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "gallery": [
+      {
+        "image": {
+          "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+          "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+          "width": 400,
+          "height": 600,
+          "animated": false
+        },
+        "is_cover": true,
+        "sources": [
+          "botbooru"
+        ],
+        "copies": 1,
+        "sharing": {
+          "count": 4,
+          "search_path": "/search?picture=6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb"
+        }
+      }
+    ],
+    "sharing": {
+      "count": 4,
+      "search_path": "/search?picture=6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb"
+    },
+    "related": [
+      {
+        "slug": "appleh-1dcfdefc",
+        "path": "/c/appleh-1dcfdefc",
+        "name": "Candle",
+        "nsfw": true,
+        "thumb_url": "/t/b9b5456e107d49918e1e580882717da8250e4ba47a479beaddfde30faa1b579d.512.webp?v=1",
+        "creator": {
+          "kind": "account",
+          "name": "trailberryelmlaurels",
+          "path": "/u/chub/trailberryelmlaurels",
+          "source": "chub",
+          "avatar_url": "/t/9d3febd98b08139237fafe0f1f276bcc2d304f7a5eb8f1e825de5570bc6eefaf.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        },
+        "compare": {
+          "fields": {
+            "description": "429712aea64353d5",
+            "examples": "d5ac409e3b423d51",
+            "greetings": "fc4320abb41226fe",
+            "lorebook_text": "c0ad86b8b27eeebe",
+            "name": "9d91aa54ea775f24"
+          },
+          "similarity": {
+            "appleh-82167127": {
+              "description": {
+                "equal": 5972,
+                "total": 6050,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "examples": {
+                "equal": 3134,
+                "total": 3188,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 8124,
+                "total": 8348,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "nickname": {
+                "equal": 0,
+                "total": 22,
+                "cosmetic": null,
+                "one_sided": true
+              },
+              "notes": {
+                "equal": 0,
+                "total": 369,
+                "cosmetic": null,
+                "one_sided": true
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 1617,
+            "first_mes": 1394,
+            "notes": 0,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "7f1930b781cd9d3d",
+          "depth_prompt_key": null,
+          "tokens": 1470
+        },
+        "lorebook_entries": 0,
+        "lorebook_attached_by": null,
+        "compared_with": {
+          "compare": {
+            "fields": {
+              "description": "b45984cf32bb9e3d",
+              "examples": "ab7d09fb6b5696a0",
+              "greetings": "dda1d32dbd2f5ff1",
+              "lorebook_text": "c0ad86b8b27eeebe",
+              "name": "9d91aa54ea775f24",
+              "nickname": "8c59786027ce01fd",
+              "notes": "7ef6b0cf3d8c821c",
+              "other": "0afd00a51f6f8196"
+            },
+            "lens": {
+              "depth_prompt": 0,
+              "examples": 1571,
+              "first_mes": 1321,
+              "notes": 369,
+              "personality": 0,
+              "post_history": 0,
+              "scenario": 0,
+              "system_prompt": 0
+            },
+            "greetings": 3,
+            "first_mes_key": "58c2ca5d7b811ddd",
+            "depth_prompt_key": null,
+            "tokens": 1435
+          },
+          "lorebook_entries": 0,
+          "lorebook_attached_by": null
+        },
+        "origins": [
+          {
+            "removal": null,
+            "source": "chub",
+            "external_id": "trailberryelmlaurels/appleh-cott-laurelh-081f693f",
+            "path": "/chub/characters/trailberryelmlaurels/appleh-cott-laurelh-081f693f",
+            "is_fork": true
+          }
+        ],
+        "earliest_known": "2023-12-10T11:49:10Z",
+        "first": "other",
+        "rule": "similar_description",
+        "jaccard": 0.91115314,
+        "this_version": {
+          "hash16": "8c485b6efe37e88d",
+          "is_current": false,
+          "origin": {
+            "removal": null,
+            "source": "botbooru",
+            "external_id": "character/7735",
+            "path": "/botbooru/character/7735",
+            "is_fork": false
+          },
+          "from": "2026-10-03T09:27:29.679272Z",
+          "to": "2026-11-06T18:03:37.883206Z"
+        },
+        "other_version": {
+          "hash16": "5f027d34e603a208",
+          "is_current": false,
+          "origin": {
+            "removal": null,
+            "source": "chub",
+            "external_id": "trailberryelmlaurels/appleh-cott-laurelh-081f693f",
+            "path": "/chub/characters/trailberryelmlaurels/appleh-cott-laurelh-081f693f",
+            "is_fork": false
+          },
+          "from": "2024-04-20T00:41:06.207353Z",
+          "to": "2026-10-03T22:51:52.322787Z"
+        }
+      }
+    ],
+    "og": {
+      "attribution": "Jade ember basin spruce creek heron",
+      "title": "Robin oak willow slate val",
+      "description": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+      "image_url": "https://archive.example/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+      "twitter_card": "summary_large_image",
+      "canonical_url": "https://archive.example/c/appleh-82167127"
+    },
+    "main_origin": {
+      "source": "botbooru",
+      "source_label": "Botbooru",
+      "path": "/botbooru/character/7735",
+      "uploader": "Oceanhaze"
+    },
+    "creator": {
+      "kind": "named",
+      "name": "trailberryelmlaurels",
+      "path": null,
+      "source": null,
+      "avatar_url": null,
+      "avatar_nsfw": false,
+      "others": 0,
+      "others_list": []
+    },
+    "credited_in_card": null
+  }
+}

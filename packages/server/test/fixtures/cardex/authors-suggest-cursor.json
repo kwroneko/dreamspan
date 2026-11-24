@@ -1,0 +1,87 @@
+{
+  "name": "authors-suggest-cursor",
+  "request": {
+    "path": "/api/v1/search/authors",
+    "query": {
+      "limit": "10",
+      "q": "a",
+      "cursor": "Tbi7rcxvaFo4ygFQDqKnfUFqr4WCUq3OW69b_MW1KQw3VcajFagP1RqZd-w0Sf48We8PCPiWO6u"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "authors": [
+      {
+        "source": "botbooru",
+        "handle": "75955",
+        "display_name": "Tulipca",
+        "card_count": 1087
+      },
+      {
+        "source": "chub",
+        "handle": "North_badge",
+        "display_name": "North_badge",
+        "card_count": 1039
+      },
+      {
+        "source": "janitorai",
+        "handle": "eadc2e11-f792-53ea-e426-01d6b3bf8614",
+        "display_name": "Pon714",
+        "card_count": 924
+      },
+      {
+        "source": "wyvern",
+        "handle": "Crane dawn ced",
+        "display_name": "Creek del",
+        "card_count": 900
+      },
+      {
+        "source": "janitorai",
+        "handle": "4c736b49-08c7-e201-56c0-03aa9d9a90f6",
+        "display_name": "Pinebadgecora",
+        "card_count": 898
+      },
+      {
+        "source": "botbooru",
+        "handle": "20708",
+        "display_name": "Peppertuli",
+        "card_count": 884
+      },
+      {
+        "source": "caveduck",
+        "handle": "67990508-a55d-7218-c191-d326e51fc626",
+        "display_name": "Tulipwre54",
+        "card_count": 852
+      },
+      {
+        "source": "chub",
+        "handle": "Pebbleboatc56",
+        "display_name": "Pebbleboatc56",
+        "card_count": 825
+      },
+      {
+        "source": "chub",
+        "handle": "cabinb_topaz_616",
+        "display_name": "cabinb_topaz_616",
+        "card_count": 816
+      },
+      {
+        "source": "janitorai",
+        "handle": "458d64c8-da1a-0ba2-706e-75999ec7046f",
+        "display_name": "Breezelagooncoppe",
+        "card_count": 790
+      }
+    ],
+    "next": "cpEhAzn0yeSS2cFE68qZ4Kpj2Cr8JKX5NjYaSv0MYXQyOsWJ4MlLTCa0KcAejv0Ls32pY1JuorNcQWzR4TIvgAet"
+  }
+}

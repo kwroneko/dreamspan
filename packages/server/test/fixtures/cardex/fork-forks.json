@@ -1,0 +1,141 @@
+{
+  "name": "fork-forks",
+  "request": {
+    "path": "/api/v1/forks/chub/Anchorbam%2Fvelvet-c4f2da84663b",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "ratelimit-limit": "60",
+    "ratelimit-remaining": "59",
+    "ratelimit-reset": "1",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "parent": {
+      "id": "65087",
+      "external_id": "Northcan/velvet-feea3cf4dddc",
+      "source_url": "https://site4.example/characters/Northcan/velvet-feea3cf4dddc",
+      "card": {
+        "slug": "velvet-7da32bbd",
+        "path": "/c/velvet-7da32bbd",
+        "name": "Mistam",
+        "is_this": false,
+        "nsfw": false,
+        "origins": [
+          {
+            "removal": null,
+            "source": "chub",
+            "external_id": "Northcan/velvet-feea3cf4dddc",
+            "path": "/chub/characters/Northcan/velvet-feea3cf4dddc",
+            "is_fork": false
+          }
+        ],
+        "earliest_known": "2024-06-05T08:24:03Z",
+        "estimated_creation": {
+          "at": "2024-06-05T08:24:03Z",
+          "kind": "site_created",
+          "source": "chub",
+          "board": null
+        },
+        "has_lorebook": true,
+        "lorebook_entries": 7,
+        "lorebook_attached_by": null,
+        "differs_in": [],
+        "is_main": false,
+        "thumb_url": "/t/6e65e020141fe07a81e97fe53f501bcc806a99d0828d4562499b1e9b11e5423f.512.webp?v=1",
+        "compare": {
+          "fields": {
+            "description": "1d32dc04f9126707",
+            "greetings": "6236f0ed4e1c59c1",
+            "lorebook": "ea195e7e5038f761",
+            "lorebook_text": "c9b1ebf94102df46",
+            "name": "fd60b805bf5889a8",
+            "notes": "657d0b8a1fefdd78"
+          },
+          "similarity": {
+            "velvet-9ef52be7": {
+              "description": {
+                "equal": 4078,
+                "total": 11552,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "greetings": {
+                "equal": 4448,
+                "total": 4502,
+                "cosmetic": null,
+                "one_sided": false
+              },
+              "notes": {
+                "equal": 504,
+                "total": 1181,
+                "cosmetic": null,
+                "one_sided": false
+              }
+            }
+          },
+          "lens": {
+            "depth_prompt": 0,
+            "examples": 0,
+            "first_mes": 623,
+            "notes": 252,
+            "personality": 0,
+            "post_history": 0,
+            "scenario": 0,
+            "system_prompt": 0
+          },
+          "greetings": 3,
+          "first_mes_key": "a32539a36ded324c",
+          "depth_prompt_key": null,
+          "tokens": 3416
+        },
+        "creator": {
+          "kind": "account",
+          "name": "Northcan",
+          "path": "/u/chub/Northcan",
+          "source": "chub",
+          "avatar_url": "/t/d969107cff68c27c2b644eea0e59d8694fa0ac629f7b47b4d55d0351791f4c6b.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    },
+    "children": [],
+    "next": null,
+    "viewed_slug": "velvet-9ef52be7",
+    "compared_with": {
+      "compare": {
+        "fields": {
+          "description": "63f6c51e04d96d15",
+          "greetings": "6d9c79605670c99c",
+          "lorebook": "ea195e7e5038f761",
+          "lorebook_text": "c9b1ebf94102df46",
+          "name": "fd60b805bf5889a8",
+          "notes": "bea85228b0638e1c"
+        },
+        "lens": {
+          "depth_prompt": 0,
+          "examples": 0,
+          "first_mes": 631,
+          "notes": 929,
+          "personality": 0,
+          "post_history": 0,
+          "scenario": 0,
+          "system_prompt": 0
+        },
+        "greetings": 3,
+        "first_mes_key": "86f1e1db9f92eb49",
+        "depth_prompt_key": null,
+        "tokens": 2782
+      },
+      "lorebook_entries": 7,
+      "lorebook_attached_by": "botbooru"
+    }
+  }
+}

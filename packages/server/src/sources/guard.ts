@@ -40,7 +40,7 @@ export interface GuardOptions {
   /** The admin's bypass entries: a host named there may resolve to a private address. */
   readonly bypassEntries: () => ReadonlyArray<string>
   readonly resolve?: (host: string) => Promise<ReadonlyArray<string>>
-  /** Hears every request that leaves, for tests (`fakeArchive`'s counts are the archive's view). */
+  /** Hears every request that leaves, for tests (`fakeCardex`'s counts are the archive's view). */
   readonly onRequest?: (sourceId: string, url: URL) => void
 }
 

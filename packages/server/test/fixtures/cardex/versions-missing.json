@@ -1,0 +1,19 @@
+{
+  "name": "versions-missing",
+  "request": {
+    "path": "/api/v1/versions/chub/lark-mi-pond-winter",
+    "query": {}
+  },
+  "status": 404,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "error": "not_found",
+    "message": "not found"
+  }
+}

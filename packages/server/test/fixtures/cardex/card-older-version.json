@@ -1,0 +1,654 @@
+{
+  "name": "card-older-version",
+  "request": {
+    "path": "/api/v1/cards/appleh-78f28b3f",
+    "query": {}
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=300",
+    "etag": "W/\"2d5f70f59f0b8cc4eda3db48437cac695f7cb60b231b8b8ff4a4b3548bbbaf7a\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "card": {
+      "all_origins_removed": false,
+      "slug": "appleh-78f28b3f",
+      "content_hash": "1cc1a8ca9dd8f178b7484263c206256a396c17bac1b0a67a0c71daf86e82ac50",
+      "kind": "character",
+      "path": "/c/appleh-78f28b3f",
+      "hidden": false,
+      "nsfw": true,
+      "safety": {
+        "loli": false,
+        "loli_keyword": false
+      },
+      "license": null,
+      "content_warnings": [],
+      "token_counts": {
+        "fields": {
+          "creator_notes": 62,
+          "description": 687
+        },
+        "greetings": [
+          306,
+          305,
+          369
+        ],
+        "lorebook_triggered_max": 0,
+        "lorebook_triggered_total": 0,
+        "mes_example": 379,
+        "model": "o200k_base",
+        "permanent": 687,
+        "total_budget_estimate": 1435
+      },
+      "token_budget": 1435,
+      "fork_count": 0,
+      "first_seen_at": "2026-10-03T09:27:29.679272Z",
+      "tags": [
+        {
+          "slug": "forest",
+          "label": "FOREST"
+        },
+        {
+          "slug": "village",
+          "label": "VILLAGE"
+        },
+        {
+          "slug": "drama",
+          "label": "Drama"
+        },
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "bard",
+          "label": "bard"
+        },
+        {
+          "slug": "baker",
+          "label": "baker"
+        },
+        {
+          "slug": "sailor",
+          "label": "sailor"
+        },
+        {
+          "slug": "cozy",
+          "label": "cozy"
+        },
+        {
+          "slug": "poet",
+          "label": "poet"
+        },
+        {
+          "slug": "scholar",
+          "label": "Scholar"
+        },
+        {
+          "slug": "explorer",
+          "label": "explorer"
+        },
+        {
+          "slug": "merchant",
+          "label": "merchant"
+        },
+        {
+          "slug": "wholesome",
+          "label": "wholesome"
+        },
+        {
+          "slug": "winter",
+          "label": "Winter"
+        },
+        {
+          "slug": "curious",
+          "label": "curious"
+        },
+        {
+          "slug": "puzzle",
+          "label": "puzzle"
+        },
+        {
+          "slug": "inventor",
+          "label": "inventor"
+        },
+        {
+          "slug": "steampunk",
+          "label": "steampunk"
+        }
+      ],
+      "unlisted": false
+    },
+    "estimated_creation": {
+      "at": "2026-03-19T00:04:38.545366Z",
+      "kind": "site_created",
+      "source": "botbooru",
+      "board": null
+    },
+    "view": {
+      "arrival": "canonical",
+      "path": "/c/appleh-78f28b3f",
+      "canonical_path": "/c/appleh-78f28b3f",
+      "version": null,
+      "default_tab": null
+    },
+    "top": {
+      "name": {
+        "value": "Candle",
+        "from": null
+      },
+      "tagline": null,
+      "description": {
+        "value": "Finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove mist timber anchor petal grove grove anchor atlas kite marble bamboo breeze creek bamboo finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove .\n\nCrystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern s.\n\nAutumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pi.\nSand crystal frost stone delta saffron violet amber copper birch candle crane echo oak lark kite flint otter nectar saffron berry bamboo h.\n\nCricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autu.\n\nMint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow birch marble pebble rose echo breeze kite ocean dawn pine sorrel copper mellow mint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow b.",
+        "from": null,
+        "ai_summary": false
+      },
+      "creator": {
+        "value": "trailberryelmlaurels",
+        "from": null
+      },
+      "cover": {
+        "image": {
+          "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+          "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+          "width": 400,
+          "height": 600,
+          "animated": false
+        },
+        "from": null
+      },
+      "tags": [
+        {
+          "slug": "forest",
+          "label": "FOREST"
+        },
+        {
+          "slug": "village",
+          "label": "VILLAGE"
+        },
+        {
+          "slug": "drama",
+          "label": "Drama"
+        },
+        {
+          "slug": "fantasy",
+          "label": "fantasy"
+        },
+        {
+          "slug": "bard",
+          "label": "bard"
+        },
+        {
+          "slug": "baker",
+          "label": "baker"
+        },
+        {
+          "slug": "sailor",
+          "label": "sailor"
+        },
+        {
+          "slug": "cozy",
+          "label": "cozy"
+        },
+        {
+          "slug": "poet",
+          "label": "poet"
+        },
+        {
+          "slug": "scholar",
+          "label": "Scholar"
+        },
+        {
+          "slug": "explorer",
+          "label": "explorer"
+        },
+        {
+          "slug": "merchant",
+          "label": "merchant"
+        },
+        {
+          "slug": "wholesome",
+          "label": "wholesome"
+        },
+        {
+          "slug": "winter",
+          "label": "Winter"
+        },
+        {
+          "slug": "curious",
+          "label": "curious"
+        },
+        {
+          "slug": "puzzle",
+          "label": "puzzle"
+        },
+        {
+          "slug": "inventor",
+          "label": "inventor"
+        },
+        {
+          "slug": "steampunk",
+          "label": "steampunk"
+        }
+      ]
+    },
+    "definition": {
+      "name": "Candle",
+      "nickname": null,
+      "description": "Finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove mist timber anchor petal grove grove anchor atlas kite marble bamboo breeze creek bamboo finch jade glen cobble marble heron lotus shell banner jade fable robin velvet harbor reed sage fern cove .\n\nCrystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern spark crystal jade copper lantern bramble lantern copper petal jade leaf bamboo daisy frost chalk oak quill mellow coral honey canyon north field delta orchard raven atlas cobble shell ridge wren lantern s.\n\nAutumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pine lotus bell sail hill badge anchor echo autumn quiet canyon olive garden glen fable candle bramble banner north robin ivy pine meadow button birch swan paper flint linen button wind river pi.\nSand crystal frost stone delta saffron violet amber copper birch candle crane echo oak lark kite flint otter nectar saffron berry bamboo h.\n\nCricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autumn leaf otter badge ember pond field maple pond mist comet cricket badge island north petal plum cotton zephyr daisy button nectar cider boat atlas brook marble glen echo nectar flint sail autu.\n\nMint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow birch marble pebble rose echo breeze kite ocean dawn pine sorrel copper mellow mint mellow linen rose slate echo daisy finch swan fjord arch pebble summer mist rose trail meadow candle willow b.",
+      "personality": null,
+      "scenario": null,
+      "first_mes": "Rose marble crystal jade elm island frost button lantern island lemon bramble dune bramble plum grove crane ocean kite cedar atlas sail reed canyon canyon cider cove elm silver shell paper quill rose marble crystal jade elm island frost button lantern island lemon bramble dune bramble plum grove crane ocean kite cedar atlas sail reed canyon canyon cider cove elm silver shell paper quill rose marble crystal*\n\nIvy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum grove cobble oak daisy garden rain poppy zephyr rain lagoon honey birch button cedar heron cedar ivy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum grove cobble oak daisy garden rain poppy zephyr rain lagoon honey birch button cedar heron cedar ivy apple mint petal garden cobble thyme cider boat kite spruce ridge glen cider delta plum*\n\nHarbor rain kite robin ridge sage maple berry apple plum badge rain mist daisy harbor ocean autumn saffron elm frost paper raven autumn fable fern frost anchor hollow moss coral north finch harbor rain kite robin ridge sage maple berry apple plum badge rain mist daisy harbor ocean autumn saffron elm frost paper raven autumn fable fern frost anchor hollow moss coral north finch harbor rain kite robin ridge sage maple berry apple plum*",
+      "alternate_greetings": [
+        "Banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail sorrel basin lark island meadow fable oak fjord grove banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail sorrel basin lark island meadow fable oak fjord grove banner island delta frost grove lagoon wren dawn honey larch oak rose bell cedar quill sage comet fern orchard moss moss dawn sail s*\n\nBasin river delta comet ember fjord cabin cedar sage blossom sail coral button chime ridge pond daisy lotus sand comet mint flint hill dawn slate fable larch coral daisy wind mint bamboo basin river delta comet ember fjord cabin cedar sage blossom sail coral button chime ridge pond daisy lotus sand comet mint flint hill dawn slate fable larch coral daisy wind mint bamboo basin river delta comet ember fjo*\n\nBanner berry bamboo fjord shell paper mint birch poppy shell robin banner cove hazel island brook reed laurel slate mellow sail orchard garden hill pine willow nectar frost saffron creek teal winter banner berry bamboo fjord shell paper mint birch poppy shell robin banner cove hazel island brook reed laurel slate mellow sail orchard garden hill pine willow nectar frost saffron creek teal winter banner b*",
+        "Crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember raven fern spark apple bell badge quill violet cider raven anchor sage quill coral beacon lantern pine elm chime amber petal daisy lark crane boat cabin cider clover arch ivy lark ember *\n\nBerry robin north cedar brook crane thistle drift pepper ember boat snow banner otter lagoon velvet birch cider cove blossom berry beacon sorrel olive kettle juniper berry plum daisy dawn nectar thyme berry robin north cedar brook crane thistle drift pepper ember boat snow banner otter lagoon velvet birch cider cove blossom berry beacon sorrel olive kettle juniper berry plum daisy dawn nectar thyme berry ro*\n\nWind harbor rain juniper atlas boat copper meadow fjord poppy candle heron garden plum sail cotton cedar drift ember clover otter amber chalk bell cobble arch linen sail topaz berry garden fern wind harbor rain juniper atlas boat copper meadow fjord poppy candle heron garden plum sail cotton cedar drift ember clover otter amber chalk bell cobble arch linen sail topaz berry garden fern wind harbor rain juniper atlas boat copper meadow fjord*"
+      ],
+      "group_only_greetings": [],
+      "mes_example": "Crystal\nBerry reed flint daisy sand teal paper reed quiet jade apple otter chalk poppy marble banner copper harbor plum glade spark cricket arch autumn trail finch ivy winter dune swan saffron cotton berry reed flint daisy sand teal paper reed quiet jade apple otter chalk poppy marble banner copper harbor plum glade spark cricket arch autumn trail finch ivy winter dune swan saffron cotton berry reed flint daisy sand teal paper reed quiet jade apple otter *\n\nWinter.\nBasin cider rain flint button shell crane marble moss grove creek kettle heron arch shell kite island pepper timber fern thyme hill sky blossom saffron zephyr petal grove boat delta pond orchard basin cider rain flint button*\n\nMist lo\nLantern pine poppy comet daisy hill lotus amber island maple honey garden swan nectar fable breeze crystal plum quiet reed juniper valley spark trail dawn button silver hollow crane anchor crystal finch lantern pine poppy comet daisy hill lotus amber island maple honey garden swan nectar fable breeze crystal plum quiet reed juniper valley spark trail dawn button silver hollow crane anchor crystal finch lantern pine poppy comet *\n\nChalk d\nJade flint north brook echo olive linen slate cider badge ridge cobble harbor nectar chime reed canyon trail slate trail finch glen flint hill olive shell brook beacon meadow brook fjord crane jade flint north brook echo olive linen slate cider badge ridge cobble harbor nectar chime reed canyon trail slate trail finch glen flint hill olive shell brook beacon meadow brook fjord crane jade flint north brook echo olive lin*",
+      "creator_notes": "Breeze maple petal chime pebble cider comet basin mellow bamboo fable creek sage copper pine honey thyme plum willow beacon frost marble wren cobble olive atlas nectar glade saffron arch spark crane breeze maple petal chime pebble cider comet basin mel.",
+      "creator_notes_multilingual": {},
+      "system_prompt": null,
+      "post_history_instructions": null,
+      "depth_prompt": null,
+      "book": null,
+      "declared_asset_count": 0,
+      "extension_keys": []
+    },
+    "lorebook": {
+      "total": 0,
+      "offset": 0,
+      "limit": 50,
+      "entries": [],
+      "link_map": []
+    },
+    "assets": {
+      "total": 2,
+      "pending": 0,
+      "fetched": 2,
+      "failed": 0,
+      "dead": 0,
+      "expressions": 0
+    },
+    "image_map": [
+      {
+        "original_url": "https://site7.example/gallery/7de79eec-g3p4-100e-a283-a7d676600442.webp",
+        "url": "/i/35ff5e3b15e3aee1c0bd104bf3215d7bd77fe38e9220149a8cb5dc3effe25be4.webp",
+        "display_url": null,
+        "width": 960,
+        "height": 1125
+      },
+      {
+        "original_url": "https://site3.example/fros-gallery/33236/download.png",
+        "url": "/i/bc2e1b16413af3df9b3ca9bc1eb30dd8f56d66a038d65dbd302c573a80dce193.png",
+        "display_url": "/t/bc2e1b16413af3df9b3ca9bc1eb30dd8f56d66a038d65dbd302c573a80dce193.f6148.webp?v=1",
+        "width": 960,
+        "height": 1125
+      }
+    ],
+    "link_map": [],
+    "files": [
+      {
+        "sha256": "6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb",
+        "ext": "png",
+        "mime": "image/png",
+        "kind": "png_card",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 348223,
+        "width": 400,
+        "height": 600,
+        "first_seen_at": "2026-10-03T09:27:29.679272Z",
+        "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+        "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+        "downloads": {
+          "original": "/api/v1/download/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb?mode=original",
+          "json": "/api/v1/download/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb?mode=json&tags=fantasy-3",
+          "mirrored": "/api/v1/download/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb?mode=mirrored&tags=fantasy-3",
+          "self_contained": "/api/v1/download/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb?mode=self-contained&tags=fantasy-3"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 2015004,
+        "current": false,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      },
+      {
+        "sha256": "acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d",
+        "ext": "png",
+        "mime": "image/png",
+        "kind": "png_card",
+        "spec_version": "2.0",
+        "is_original": true,
+        "provenance": "original",
+        "censored": false,
+        "hidden": false,
+        "bytes": 348179,
+        "width": 400,
+        "height": 600,
+        "first_seen_at": "2026-10-03T17:31:36.139588Z",
+        "url": "/i/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d.png",
+        "thumb_url": "/t/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d.512.webp?v=1",
+        "downloads": {
+          "original": "/api/v1/download/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d?mode=original",
+          "json": "/api/v1/download/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d?mode=json&tags=fantasy-3",
+          "mirrored": "/api/v1/download/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d?mode=mirrored&tags=fantasy-3",
+          "self_contained": "/api/v1/download/acc9ef518d987eced6688376111552bddee1fab71458514d2941faff3b15517d?mode=self-contained&tags=fantasy-3"
+        },
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "self_contained_bytes_estimate": 2014949,
+        "current": false,
+        "role": null,
+        "meta": {
+          "character_version": "lant",
+          "created": null,
+          "modified": null,
+          "sources": [],
+          "creator": null
+        }
+      }
+    ],
+    "file_count": 2,
+    "origins": [],
+    "earlier_origins": [
+      {
+        "listing": {
+          "removal": null,
+          "source": "botbooru",
+          "source_label": "Botbooru",
+          "external_id": "character/7735",
+          "path": "/botbooru/character/7735",
+          "api_path": "/api/v1/origins/botbooru/character/7735",
+          "source_url": "https://site3.example/character/7735",
+          "serves_card": false,
+          "card_slug": "appleh-82167127",
+          "author": {
+            "source": "botbooru",
+            "handle": "101",
+            "display_name": "Oceanhaze",
+            "avatar": null,
+            "path": "/u/botbooru/101"
+          },
+          "name": "Candle",
+          "tagline": "Quill pepper coral olive larch ocean cedar nectar saffron kettle hazel quiet canyon basin mi!",
+          "description": null,
+          "tags": [
+            "fantasy",
+            "steampunk",
+            "teacher",
+            "historical-2",
+            "sailor",
+            "wholesome",
+            "explorer",
+            "detective-2",
+            "merchant",
+            "winter",
+            "friendly",
+            "magic-2",
+            "space-2",
+            "mountains",
+            "puzzle",
+            "summer",
+            "astronomer",
+            "scholar",
+            "school-2",
+            "steampunk-2",
+            "cozy",
+            "cyberpunk-2",
+            "bard",
+            "fairy-tale-2",
+            "painter",
+            "mythology-2"
+          ],
+          "content_warnings": [
+            "skyb"
+          ],
+          "nsfw_image_flag": null,
+          "cover": {
+            "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+            "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+            "width": 400,
+            "height": 600,
+            "animated": false
+          },
+          "stats": {
+            "rating_avg": null,
+            "rating_count": null,
+            "star_count": null,
+            "favorite_count": null,
+            "fork_count": 0,
+            "chat_count": null,
+            "message_count": null,
+            "view_count": 956,
+            "download_count": 182,
+            "token_count_source": null
+          },
+          "source_created_at": "2026-03-19T00:04:38.545366Z",
+          "source_updated_at": null,
+          "first_seen_at": "2026-10-03T09:27:29.679272Z",
+          "fork": {
+            "parent_known": false,
+            "is_fork": false,
+            "forked_from_external_id": null,
+            "forked_from": null,
+            "child_count": 0,
+            "children": []
+          },
+          "versions": [
+            {
+              "slug": "appleh-82167127",
+              "content_hash": "4e28eb5e249b322db280dcb1fea08764e7afc13a1ee8b2d473d84b0bd15ae614",
+              "card_path": "/c/appleh-82167127",
+              "origin_path": "/botbooru/character/7735",
+              "active_from": "2026-11-06T18:03:37.883206Z",
+              "active_to": null,
+              "is_current": true,
+              "is_viewing": false,
+              "meta": {
+                "character_version": "lant",
+                "created": null,
+                "modified": null,
+                "sources": [],
+                "creator": null
+              }
+            },
+            {
+              "slug": "appleh-78f28b3f",
+              "content_hash": "1cc1a8ca9dd8f178b7484263c206256a396c17bac1b0a67a0c71daf86e82ac50",
+              "card_path": "/c/appleh-78f28b3f",
+              "origin_path": "/botbooru/character/7735?v=8c485b6efe37e88d",
+              "active_from": "2026-10-03T09:27:29.679272Z",
+              "active_to": "2026-11-06T18:03:37.883206Z",
+              "is_current": false,
+              "is_viewing": true,
+              "meta": {
+                "character_version": "lant",
+                "created": null,
+                "modified": null,
+                "sources": [],
+                "creator": null
+              }
+            }
+          ],
+          "version_count": 2,
+          "has_dead_assets": false,
+          "fetch_status": "full",
+          "missing_fields": [],
+          "source_specific": {
+            "card_image_revision": 1,
+            "card_is_animated": false,
+            "character_name": "Candle",
+            "companion_lorebooks": [],
+            "creator_claim": null,
+            "creator_tag_reports": [],
+            "embedded_card_tags": [
+              "western-2",
+              "pirates-2",
+              "dragons-2",
+              "robots-2",
+              "bard",
+              "ghosts-2",
+              "cooking-2",
+              "cozy",
+              "historical-2",
+              "scholar",
+              "explorer",
+              "merchant",
+              "wholesome",
+              "winter",
+              "gardening-2",
+              "puzzle",
+              "space-2",
+              "steampunk"
+            ],
+            "file_from": "download_json",
+            "filename": "53a6f4f3ee62a4cdea9eca68e1f880db.png",
+            "fork_master": null,
+            "fork_posts": [],
+            "has_lorebook": false,
+            "id": 7735,
+            "image_link": null,
+            "is_oc": false,
+            "linked_lorebooks": [],
+            "linked_lorebooks_max": 3,
+            "meta_locked": false,
+            "meta_name": "Fjord comet clover fie",
+            "mini_gallery": {
+              "approved_count": 1,
+              "images": [
+                {
+                  "created_at": "2026-10-23T08:24:20.208733",
+                  "download_url": "/fros-gallery/33236/download.png",
+                  "height": 1125,
+                  "id": 33236,
+                  "is_animated": false,
+                  "main_view_url": "/fros-gallery/33236/hazelmi/6148?v=bcb2ab59",
+                  "position": 0,
+                  "preview_url": "/fros-gallery/33236/hazelmi/128?v=bcb2ab59",
+                  "status": "approved",
+                  "url": "/fros-gallery/33236?v=bcb2ab59",
+                  "width": 960
+                }
+              ],
+              "max_images": 3,
+              "pending_count": 0
+            },
+            "name": "Candle",
+            "origin": "Chub",
+            "rating": "nsfw",
+            "revision_count": 1,
+            "sauce_import_locked": false,
+            "sibling_count": 0,
+            "sibling_posts": [],
+            "slop_score": 10.077595540380516,
+            "slug": null,
+            "status": "active",
+            "thumb_focus_x": null,
+            "thumb_focus_y": null,
+            "uploader_id": 101
+          },
+          "sightings": [],
+          "sighting_count": 0,
+          "last_checked_at": null,
+          "sourced_from_urls": [
+            "https://site4.example/characters/trailberryelmlaurels/appleh-dais-lanternb-b323ecf9"
+          ],
+          "related_lorebooks": []
+        },
+        "origin": {
+          "source": "botbooru",
+          "external_id": "character/7735",
+          "path": "/botbooru/character/7735",
+          "card_slug": "appleh-82167127"
+        },
+        "active_from": "2026-10-03T09:27:29.679272Z",
+        "active_to": "2026-11-06T18:03:37.883206Z"
+      }
+    ],
+    "variants": [],
+    "gallery": [
+      {
+        "image": {
+          "url": "/i/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.png",
+          "thumb_url": "/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+          "width": 400,
+          "height": 600,
+          "animated": false
+        },
+        "is_cover": true,
+        "sources": [
+          "chub",
+          "botbooru"
+        ],
+        "copies": 2,
+        "sharing": {
+          "count": 5,
+          "search_path": "/search?picture=6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb"
+        }
+      },
+      {
+        "image": {
+          "url": "/i/35ff5e3b15e3aee1c0bd104bf3215d7bd77fe38e9220149a8cb5dc3effe25be4.webp",
+          "thumb_url": "/t/35ff5e3b15e3aee1c0bd104bf3215d7bd77fe38e9220149a8cb5dc3effe25be4.512.webp?v=1",
+          "width": 960,
+          "height": 1125,
+          "animated": false
+        },
+        "is_cover": false,
+        "sources": [
+          "chub"
+        ],
+        "copies": 1,
+        "sharing": null
+      }
+    ],
+    "sharing": {
+      "count": 5,
+      "search_path": "/search?picture=6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb"
+    },
+    "related": [],
+    "og": {
+      "attribution": "Flint glen copper cove.",
+      "title": "Reed meadow gle",
+      "description": "Sand ocean otter spruce mellow nectar lemon cabin mist elm otter winter meadow coral chime elm crystal bramble tide harbor coral heron banner pond yarrow rose banner linen birch delta willow trail sand ocean otter spruce mellow nectar l",
+      "image_url": "https://archive.example/t/6e533ac473ff834a77ad97c0fe01cb4b308397bb02596fb188d96539745c6afb.512.webp?v=1",
+      "twitter_card": "summary_large_image",
+      "canonical_url": "https://archive.example/c/appleh-78f28b3f"
+    },
+    "main_origin": null,
+    "creator": {
+      "kind": "named",
+      "name": "trailberryelmlaurels",
+      "path": null,
+      "source": null,
+      "avatar_url": null,
+      "avatar_nsfw": false,
+      "others": 0,
+      "others_list": []
+    },
+    "credited_in_card": null
+  }
+}

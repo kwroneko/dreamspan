@@ -1,0 +1,208 @@
+{
+  "name": "search-semantic-page-2",
+  "request": {
+    "path": "/api/v1/search",
+    "query": {
+      "q": "northc",
+      "mode": "semantic",
+      "limit": "2",
+      "page": "2"
+    }
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "cache-control": "public, max-age=60",
+    "etag": "W/\"46c46f00a3fd120ce622c3f2faef4684cffad9ee03d5d6d03cbbb9fa165e4f89\"",
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After, Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "author": null,
+    "author_error": null,
+    "query": {
+      "author": null,
+      "deleted_from_source": false,
+      "q": "northc",
+      "mode": "semantic",
+      "tags": [],
+      "not_tags": [],
+      "source": [],
+      "not_source": [],
+      "nsfw": "include",
+      "kind": "both",
+      "min_tokens": null,
+      "max_tokens": null,
+      "has_cover": true,
+      "added_after": null,
+      "added_before": null,
+      "created_after": null,
+      "created_before": null,
+      "exclude_forks": false,
+      "chub_verified": false,
+      "chub_recommended": false,
+      "picture": null,
+      "sort": "relevance",
+      "page": 2,
+      "limit": 2,
+      "cursor": null
+    },
+    "results": [
+      {
+        "all_origins_removed": true,
+        "slug": "northc-a3fc5e91",
+        "path": "/c/northc-a3fc5e91",
+        "name": "Flintp",
+        "tagline": null,
+        "thumb_url": null,
+        "cover_w": null,
+        "cover_h": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [
+          {
+            "slug": "steampunk-7",
+            "label": "Steampunk 7"
+          }
+        ],
+        "search_tags": [
+          {
+            "slug": "steampunk-7",
+            "label": "Steampunk 7"
+          }
+        ],
+        "tag_count": 1,
+        "token_budget": 49,
+        "fork_count": 0,
+        "first_seen_at": "2024-05-30T20:47:22.141276Z",
+        "group": null,
+        "creator": null
+      },
+      {
+        "all_origins_removed": false,
+        "slug": "northc-mello-b02bf075",
+        "path": "/c/northc-mello-b02bf075",
+        "name": "Flintp_Ridge",
+        "tagline": null,
+        "thumb_url": "/t/14ed1a3f3b1cf4fa891f06960bf518f391f996481441e09e72bb084e5235ada4.512.webp?v=1",
+        "cover_w": 200,
+        "cover_h": 200,
+        "nsfw": false,
+        "kind": "lorebook",
+        "sources": [
+          "chub"
+        ],
+        "top_tags": [],
+        "search_tags": [],
+        "tag_count": 0,
+        "token_budget": 305,
+        "fork_count": 0,
+        "first_seen_at": "2026-10-08T05:03:43.744008Z",
+        "group": null,
+        "creator": {
+          "kind": "account",
+          "name": "fern_ravene_6905",
+          "path": "/u/chub/fern_ravene_6905",
+          "source": "chub",
+          "avatar_url": "/t/8e78bba3a400b904a2a41ad3e237b0997ce2d0e13962c3731c27d7c41c25457c.64.webp?v=1",
+          "avatar_nsfw": false,
+          "others": 0,
+          "others_list": []
+        }
+      }
+    ],
+    "total": 240,
+    "total_capped": true,
+    "page": 2,
+    "pages": 120,
+    "page_size": 2,
+    "tags": [],
+    "not_tags": [],
+    "unknown_tags": [],
+    "semantic": {
+      "embedded_cards": 3705578,
+      "search_cards": 3710543
+    },
+    "defaults": {
+      "min_tokens": 300,
+      "has_cover": true,
+      "hidden": null,
+      "hidden_capped": false
+    },
+    "items": [
+      {
+        "slug": "northc-a3fc5e91",
+        "url": "/c/northc-a3fc5e91",
+        "name": "Flintp",
+        "creator": {
+          "name": null,
+          "source": null,
+          "handle": null,
+          "url": null
+        },
+        "tags": [
+          "steampunk-7"
+        ],
+        "tagline": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "token_count": 49,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": null,
+        "image_url": null,
+        "version": "1e1651c8c96dd3234a95c294df11a19620863c4218c2d3178925bebef5ef8cd8",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2024-05-30T20:47:22.141276Z",
+        "superseded_by": null
+      },
+      {
+        "slug": "northc-mello-b02bf075",
+        "url": "/c/northc-mello-b02bf075",
+        "name": "Flintp_Ridge",
+        "creator": {
+          "name": "fern_ravene_6905",
+          "source": "chub",
+          "handle": "fern_ravene_6905",
+          "url": "/u/chub/fern_ravene_6905"
+        },
+        "tags": [],
+        "tagline": null,
+        "nsfw": false,
+        "kind": "lorebook",
+        "token_count": 305,
+        "stats": {
+          "popularity": 0,
+          "rating_avg": 0,
+          "rating_count": 0
+        },
+        "thumbnail_url": "/t/14ed1a3f3b1cf4fa891f06960bf518f391f996481441e09e72bb084e5235ada4.512.webp?v=1",
+        "image_url": "/i/14ed1a3f3b1cf4fa891f06960bf518f391f996481441e09e72bb084e5235ada4.webp",
+        "version": "23002c4e44217d7dd992a3a3797ad46e4b9c05106af62fa7940ba4e2d363e299",
+        "download_modes": [
+          "mirrored",
+          "self-contained",
+          "json",
+          "original"
+        ],
+        "updated_at": "2026-10-08T05:03:43.744008Z",
+        "superseded_by": null
+      }
+    ],
+    "total_is_estimate": true,
+    "next_cursor": null,
+    "has_more": true
+  }
+}
