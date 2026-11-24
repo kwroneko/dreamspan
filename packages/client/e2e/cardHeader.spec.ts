@@ -245,7 +245,7 @@ test("the picture's controls are over it, and reached by keyboard", async ({ pag
   await expect(view).toBeFocused()
   await view.hover()
   await expect.poll(() => opacity(picture)).toBe(1)
-  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
+  await expect(page.getByText("Opens this portrait at full size.", { exact: true })).toBeVisible()
   // It keeps its explanation.
   await picture.hover()
   await expect(

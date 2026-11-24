@@ -259,7 +259,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   const tab = page.getByRole("tabpanel", { name: "Tall" })
   const view = tab.getByRole("button", { name: "View Tall's picture" })
   await view.hover()
-  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
+  await expect(page.getByText("Opens this portrait at full size.", { exact: true })).toBeVisible()
   await shoot(page, "tab-portrait-desktop")
   const pictureButton = tab.getByRole("button", { name: "Picture", exact: true })
   await pictureButton.hover()

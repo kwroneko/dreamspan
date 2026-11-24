@@ -167,10 +167,12 @@ function ViewablePortrait({
   )
   if (mediaId === null || !togglePortrait) return avatar
   return (
-    <Tooltip label="View the whole picture">
+    // The same hover text as every other portrait that opens its image (Avatar's `preview`).
+    <Tooltip label="Opens this portrait at full size.">
       <button
         type="button"
         aria-label={`View ${name}'s picture`}
+        title={`View ${name}'s full portrait`}
         data-view-portrait
         onClick={() => togglePortrait({ id, name, mediaId, picture: crop?.picture })}
         // Dropped on a frame, the picture opens there as a tab (owner, 2026-11-07).

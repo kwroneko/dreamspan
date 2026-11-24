@@ -70,13 +70,16 @@ export function Avatar({
   className = "",
   preview = false,
   alt = "",
-  src
+  src,
+  full
 }: {
   id: string
   name: string
   mediaId?: string | null
   /** A picture that isn't a stored file (a card source's, through this server), at a width. */
   src?: ((width: number) => string) | undefined
+  /** With `src`, the whole picture's address: what `preview` opens. */
+  full?: string | undefined
   /** The avatar's chosen cutout (§14.5c): what the portrait shows. Absent or null: the default. */
   crop?: AvatarCrop | null | undefined
   size?: AvatarSize
@@ -129,7 +132,7 @@ export function Avatar({
         className={`${box} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
         onClick={(event) => {
           event.stopPropagation()
-          open({ id, name, mediaId, picture: crop?.picture })
+          open({ id, name, mediaId, picture: crop?.picture, ...(full === undefined ? {} : { src: full }) })
         }}
         onDragStart={(event) => {
           // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.

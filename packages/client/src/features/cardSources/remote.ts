@@ -76,6 +76,10 @@ export function useSourceCall() {
 export const remoteImageUrl = (sourceId: string, key: string) => (width: number) =>
   `/sources/${encodeURIComponent(sourceId)}/image?k=${encodeURIComponent(key)}&w=${width}`
 
+/** A remote card's whole picture through this server, at its own size. */
+export const remoteImageFullUrl = (sourceId: string, key: string) =>
+  `/sources/${encodeURIComponent(sourceId)}/image?k=${encodeURIComponent(key)}`
+
 /**
  * A source's optional presentation (§2.1): what a tile's muted line says, say. A source with no
  * entry still works, from what its capabilities describe; a plugin adds or replaces one by id.
