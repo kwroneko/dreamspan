@@ -1,4 +1,4 @@
-// 0014_pending_chats (draftchats1; DESIGN §2.1, owner 2026-11-23): the new-chat page is a real
+// 0018_pending_chats (draftchats1; DESIGN §2.1, owner 2026-11-23): the new-chat page is a real
 // chat, status 'pending', reachable only by its URL until its first turn commits it. `draft_for`
 // is the entry it was opened for (`card:<entity>`, `group:<chat>`, `empty`), so a reload reopens
 // it there; NULL on every committed chat (commit clears it). No row is pending before this, so

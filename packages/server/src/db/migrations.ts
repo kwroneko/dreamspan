@@ -58,8 +58,54 @@ export const migrationDefinitions = {
   "0012_reasoning_stats": { statements: reasoningStatsMigration },
   // ARCHITECTURE §15 "Reasoning sent back" (owner, 2026-11-23): a plain reply's reasoning as the provider sent it.
   "0013_native_reasoning": { statements: nativeReasoningMigration },
+  // Receipts say which session accepted a composer save, even after the draft moves on.
+  "0014_composer_save_session": {
+    statements: ["ALTER TABLE composer_save_receipts ADD COLUMN accepted_session INTEGER"]
+  },
+  "0015_composer_commits": {
+    statements: [
+      `CREATE TABLE composer_commits (
+        draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+        session INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        PRIMARY KEY (draft_id, session)
+      ) STRICT, WITHOUT ROWID`
+    ]
+  },
+  "0016_workshop_starts": {
+    statements: [
+      `CREATE TABLE workshop_starts (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        fork_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        speaker_id TEXT,
+        kind TEXT NOT NULL CHECK (kind IN ('Send', 'Generate')),
+        PRIMARY KEY (user_id, request_id)
+      ) STRICT, WITHOUT ROWID`
+    ]
+  },
+  // spec/WORKSHOP-CARDS.md §4.4: library items a workshop message carries, at the revision each
+  // was sent at, and the same list on a message waiting in the queue.
+  "0017_library_attachments": {
+    statements: [
+      `CREATE TABLE version_library (
+        version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('card', 'lorebook', 'preset')),
+        ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
+        revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        PRIMARY KEY (version_id, ordinal)
+      ) STRICT, WITHOUT ROWID`,
+      `CREATE INDEX version_library_ref ON version_library(ref_id)`,
+      `CREATE INDEX version_library_revision ON version_library(revision_id)`,
+      `ALTER TABLE queued_messages ADD COLUMN library_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(library_json))`
+    ]
+  },
   // DESIGN §2.1 (owner, 2026-11-23): the new-chat page's chat, pending until its first turn, and the entry it was opened for.
-  "0014_pending_chats": { statements: pendingChatsMigration }
+  "0018_pending_chats": { statements: pendingChatsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

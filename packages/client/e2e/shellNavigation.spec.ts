@@ -139,11 +139,13 @@ test("home tiles in a row are one height, their last lines aligned", async ({ pa
   expect(new Set(lasts.map((b) => Math.round(b!.y + b!.height))).size).toBe(1)
 })
 
-test("breadcrumbs say what the URL says: home none, a character its card, a chat its chat", async ({ page }) => {
+test("breadcrumbs say what the URL says: home All chats only, a character its card, a chat its chat", async ({
+  page
+}) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
-  await expect(crumbs(page)).toHaveCount(0)
+  await expect(crumbs(page)).toHaveText("All chats")
   await page.getByRole("main").getByRole("link", { name: "Open Wren", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${chatId}`))
   await expect(crumbs(page)).toContainText("Wren")
@@ -155,11 +157,11 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
     .getByRole("link", { name: "Home", exact: true })
     .click()
   await expect(page).toHaveURL(`${server().url}/`)
-  await expect(crumbs(page)).toHaveCount(0)
+  await expect(crumbs(page)).toHaveText("All chats")
   await page.goBack()
   await expect(crumbs(page)).toContainText("Wren")
   await page.goForward()
-  await expect(crumbs(page)).toHaveCount(0)
+  await expect(crumbs(page)).toHaveText("All chats")
   await page.goBack()
   await expect(crumbs(page)).toContainText("Wren")
   await page.reload()
@@ -174,7 +176,7 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
 
   // The root shows all chats; the chat in the middle stays.
   await crumbs(page).getByRole("button", { name: "All chats", exact: true }).click()
-  await expect(crumbs(page)).toHaveCount(0)
+  await expect(crumbs(page)).toHaveText("All chats")
   expect(path(page)).toBe(chatPath)
   await page.goBack()
   await expect(crumbs(page)).toContainText("Wren")
@@ -194,5 +196,5 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await page.reload()
   await expect(crumbs(page)).toContainText("Lamp story")
   await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Library" }).click()
-  await expect(crumbs(page)).toHaveCount(0)
+  await expect(crumbs(page)).toHaveText("All chats")
 })

@@ -194,7 +194,7 @@ export const StateEventData = Schema.Union([
    * Where the story stood when this workshop message's version was written (§2.2): its paired
    * branch's newest message then. Version-scoped; only the writer's version insert writes it.
    */
-  event("workshop.story_at", Schema.Struct({ leaf: StorySlotId })),
+  event("workshop.story_at", Schema.Struct({ leaf: Schema.NullOr(StorySlotId) })),
   /**
    * Where a workshop's commands start and its relative paths resolve, on this branch
    * (spec/FILES-AND-ENVIRONMENT.md §2.1): a path inside the sandbox (`/files/thesis`) and the

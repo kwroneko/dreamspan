@@ -285,6 +285,26 @@ it.live("bulk message and summary changes preserve their input proofs and restor
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
+it.live("continuing a preparation at capacity preserves the other tokens", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* setup
+    const prepare = (edit: number, token?: string) =>
+      f.writer.PrepareHistoryEdits({
+        userId: f.userId,
+        chatId: f.chat.id,
+        forkId: f.forkId,
+        total: 2,
+        summariesIncluded: false,
+        edits: [f.edits[edit]!],
+        ...(token === undefined ? {} : { token })
+      })
+    const tokens: string[] = []
+    for (let n = 0; n < 8; n++) tokens.push(yield* prepare(2 * n))
+    for (let n = 0; n < 8; n++) assert.strictEqual(yield* prepare(2 * n + 1, tokens[n]), tokens[n])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
 it.live("prepared rows stay invisible, bind exact input and owner, and publish only once", () => {
   const config = testConfig()
   return Effect.gen(function* () {

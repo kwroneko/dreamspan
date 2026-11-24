@@ -1,9 +1,9 @@
-// The Files quota in the file manager: the usage line, the room check before an upload, and a
+// The Files quota in the file manager: the usage line and a
 // batch the server refuses for lack of room. Synthetic files only.
 import { describe, expect, it } from "vitest"
 import { NoRoom } from "../src/features/files/source.ts"
 import { batchSize, uploadAll, type UploadItem } from "../src/features/files/upload.ts"
-import { freeBytes, roomProblem, usageLine } from "../src/features/files/usage.ts"
+import { freeBytes, noRoomMessage, usageLine } from "../src/features/files/usage.ts"
 
 const MB = 1024 ** 2
 const GB = 1024 ** 3
@@ -27,14 +27,13 @@ describe("files usage", () => {
     expect(usageLine(usage(512, MB, false, true)).text).toBe("More than 512 B of 1 MB used")
   })
 
-  it("lets a batch through only when it fits the room left", () => {
+  it("reports the room left after a refusal", () => {
     expect(freeBytes(usage(11 * GB, 10 * GB))).toBe(0)
     expect(freeBytes(usage(GB, 2 * GB, true))).toBe(0)
-    expect(roomProblem(GB, 2, usage(GB, 2 * GB))).toBeNull()
-    expect(roomProblem(2.1 * GB, 2, usage(10 * GB - 800 * MB, 10 * GB))).toBe(
+    expect(noRoomMessage(2.1 * GB, freeBytes(usage(10 * GB - 800 * MB, 10 * GB)), 2)).toBe(
       "These files need 2.1 GB; 800 MB is free."
     )
-    expect(roomProblem(2 * MB, 1, usage(MB, MB))).toBe("This file needs 2 MB; nothing is free.")
+    expect(noRoomMessage(2 * MB, freeBytes(usage(MB, MB)), 1)).toBe("This file needs 2 MB; nothing is free.")
   })
 
   it("sizes a batch by its files, not its empty folders", () => {

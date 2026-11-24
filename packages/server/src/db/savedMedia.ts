@@ -11,7 +11,6 @@ import {
   mediaKey,
   normalizeHost,
   type MediaApprovalHost,
-  type MediaChoice,
   type MediaKind,
   type SavedMediaStatus
 } from "@dreamspan/shared/savedMedia.ts"
@@ -48,9 +47,14 @@ const headsOf = (sql: SqlClient.SqlClient, userId: string, refIds: ReadonlyArray
 /** The user's addresses `heads` name (all the user's when null), with this state. */
 const scoped = (sql: SqlClient.SqlClient, userId: string, heads: ReadonlyArray<string> | null, state: string) =>
   heads === null
-    ? sql<{ id: number; host: string; kind: MediaKind }>`SELECT id, host, kind FROM saved_media
+    ? sql<{ id: number; host: string; kind: MediaKind; url: string }>`SELECT id, host, kind, url FROM saved_media
         WHERE owner_user_id = ${userId} AND state = ${state}`
-    : sql<{ id: number; host: string; kind: MediaKind }>`SELECT DISTINCT m.id, m.host, m.kind FROM saved_media m
+    : sql<{
+        id: number
+        host: string
+        kind: MediaKind
+        url: string
+      }>`SELECT DISTINCT m.id, m.host, m.kind, m.url FROM saved_media m
         JOIN revision_media rm ON rm.media = m.id
         WHERE rm.revision_id IN (SELECT value FROM json_each(${JSON.stringify(heads)}))
           AND m.owner_user_id = ${userId} AND m.state = ${state}`
@@ -190,17 +194,20 @@ export const makeSavedMediaReadHandlers = Effect.gen(function* () {
     ListMediaApproval: ({ userId, refIds }) =>
       Effect.gen(function* () {
         const rows = yield* scoped(sql, userId, yield* headsOf(sql, userId, refIds), "approval")
-        const hosts = new Map<string, Map<MediaKind, number>>()
+        const hosts = new Map<string, { kinds: Map<MediaKind, number>; urls: string[] }>()
         for (const row of rows) {
-          const kinds = hosts.get(row.host) ?? new Map<MediaKind, number>()
+          const group = hosts.get(row.host) ?? { kinds: new Map<MediaKind, number>(), urls: [] }
+          const { kinds, urls } = group
           kinds.set(row.kind, (kinds.get(row.kind) ?? 0) + 1)
-          hosts.set(row.host, kinds)
+          urls.push(row.url)
+          hosts.set(row.host, group)
         }
         return [...hosts]
-          .map(([host, kinds]): MediaApprovalHost => ({
+          .map(([host, { kinds, urls }]): MediaApprovalHost => ({
             host,
-            files: [...kinds.values()].reduce((a, b) => a + b, 0),
-            kinds: [...kinds].map(([kind, files]) => ({ kind, files }))
+            files: urls.length,
+            kinds: [...kinds].map(([kind, files]) => ({ kind, files })),
+            urls
           }))
           .sort((a, b) => b.files - a.files || a.host.localeCompare(b.host))
       }).pipe(query("ListMediaApproval")),
@@ -250,9 +257,10 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
         }
         return recorded
       }).pipe(transaction(sql, "RecordSavedMediaScans")),
-    RecordSavedMediaResult: ({ id, at, saved, failure }) =>
+    RecordSavedMediaResult: ({ id, ownerUserId, url, at, saved, failure }) =>
       Effect.gen(function* () {
-        const [row] = yield* sql<{ id: number }>`SELECT id FROM saved_media WHERE id = ${id} AND state = 'pending'`
+        const [row] = yield* sql<{ id: number }>`SELECT id FROM saved_media WHERE id = ${id}
+          AND owner_user_id = ${ownerUserId} AND url = ${url} AND state = 'pending'`
         if (!row) return false
         if (saved) {
           yield* sql`INSERT INTO media_assets ${sql.insert({
@@ -286,25 +294,18 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
             WHERE id IN (SELECT value FROM json_each(${JSON.stringify(retry)}))`
         return yield* statusOf(sql, userId, head)
       }).pipe(transaction(sql, "RetrySavedMedia")),
-    DecideMediaApproval: ({ userId, refIds, decisions, at }) =>
+    DecideMediaApproval: ({ userId, decisions, at }) =>
       Effect.gen(function* () {
         let hosts = yield* readMediaHosts(sql, userId)
-        const heads = yield* headsOf(sql, userId, refIds)
-        const rows = yield* scoped(sql, userId, heads, "approval")
-        const change = (host: string, choice: MediaChoice) => {
-          const ids = rows.filter((row) => row.host === host).map((row) => row.id)
-          if (ids.length === 0) return Effect.void
-          return sql`UPDATE saved_media SET state = ${choice === "decline" ? "declined" : "pending"},
+        for (const { host: rawHost, choice, urls } of decisions) {
+          const host = normalizeHost(rawHost)
+          if (choice === "approve" || choice === "approve-subdomains")
+            hosts = withHost(hosts, host, choice === "approve-subdomains")
+          else if (urls.length)
+            yield* sql`UPDATE saved_media SET state = ${choice === "decline" ? "declined" : "pending"},
               once = ${choice === "once" ? 1 : 0}, updated_at = ${at}
-            WHERE state = 'approval' AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`.pipe(
-            Effect.asVoid
-          )
-        }
-        for (const decision of decisions) {
-          const host = normalizeHost(decision.host)
-          if (decision.choice === "approve" || decision.choice === "approve-subdomains")
-            hosts = withHost(hosts, host, decision.choice === "approve-subdomains")
-          else yield* change(host, decision.choice)
+              WHERE owner_user_id = ${userId} AND host = ${host} AND state = 'approval'
+                AND url IN (SELECT value FROM json_each(${JSON.stringify(urls)}))`
         }
         if (decisions.some((decision) => decision.choice.startsWith("approve"))) {
           yield* putUserSetting(sql, userId, KEY, hosts)

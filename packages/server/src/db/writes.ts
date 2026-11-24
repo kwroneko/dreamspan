@@ -40,6 +40,7 @@ import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, rewriteColumns, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 import { recordStoryAt } from "./workshopPairing.ts"
+import { copyLibrary } from "./libraryAttachments.ts"
 
 /**
  * The columns a fork's copy of a version doesn't take from it: its identity, text and
@@ -189,7 +190,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           images
         })
         // An old new-chat page's first message (a browser's copy sent on, or a tab from before):
-        // nothing reads its draft any more, so its text goes to recovered texts (0014_pending_chats).
+        // nothing reads its draft any more, so its text goes to recovered texts (0018_pending_chats).
         if (key.targetKind === "user_field" && legacyPendingDraft(key.targetId, key.field)) {
           yield* fileLate(userId, key, content, "New chat")
           yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_kind = 'user_field'
@@ -231,10 +232,10 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (swept === undefined) return yield* new NotFound({ entity: "chat", id: chatId })
           const [done] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM swept_pending_saves
             WHERE chat_id = ${chatId} AND operation_id = ${operationId}`
-          if ((done?.n ?? 0) > 0) return { draft: null, recovered: true }
+          if ((done?.n ?? 0) > 0) return { draft: null, recovered: true, accepted: false }
           yield* sql`INSERT INTO swept_pending_saves (chat_id, operation_id) VALUES (${chatId}, ${operationId})`
           yield* fileLate(userId, composerKey(chatId, null), content, swept.label)
-          return { draft: null, recovered: content.trim() !== "" }
+          return { draft: null, recovered: content.trim() !== "", accepted: false }
         }
         return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next, operationId }, content)
       })
@@ -741,6 +742,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           else
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
               SELECT ${copy}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${versionId}`
+          yield* copyLibrary(sql, versionId, copy)
           // Shorter than what the fork showed, before the fork shows the copy.
           yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)
           yield* writeOverride(

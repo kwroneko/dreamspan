@@ -43,7 +43,7 @@ export type OutsideStep = string | TableRebuild
  * full-text indexes are carried, what it checks), so the fingerprint of every released migration
  * with a rebuild step changes too (db/releases.ts `fingerprint`).
  */
-export const TABLE_REBUILD_VERSION = 2
+export const TABLE_REBUILD_VERSION = 3
 
 /** SQLite's own words for a failed statement: the deepest cause under the client's error and its reason. */
 const reason = (error: unknown) => {
@@ -53,6 +53,33 @@ const reason = (error: unknown) => {
 }
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
+
+const unquote = (name: string) => {
+  const first = name[0]
+  if (first === "[") return name.slice(1, -1)
+  return first === '"' || first === "'" || first === "`" ? name.slice(1, -1).replaceAll(first + first, first) : name
+}
+
+/** SQLite folds only ASCII letters in identifiers. */
+const nameKey = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+/** FTS5 arguments, split at commas outside quoted names, option values and comments. */
+const ftsArguments = (create: string) => {
+  const tokens =
+    create
+      .match(
+        /"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\r\n]*|\/\*[\s\S]*?\*\/|[^\s(),="'`\[/\-]+|[(),=/-]/g
+      )
+      ?.filter((token) => !token.startsWith("--") && !token.startsWith("/*")) ?? []
+  const start = tokens.indexOf("(")
+  if (start < 2 || nameKey(tokens[start - 2]!) !== "using" || nameKey(unquote(tokens[start - 1]!)) !== "fts5") return []
+  const args: Array<Array<string>> = [[]]
+  for (const token of tokens.slice(start + 1, tokens.lastIndexOf(")"))) {
+    if (token === ",") args.push([])
+    else args.at(-1)!.push(token)
+  }
+  return args
+}
 
 interface Column {
   readonly name: string
@@ -109,18 +136,27 @@ export const rebuildTable = (rebuild: TableRebuild) =>
     })
 
     // Full-text indexes that read this table (external content): which of them the copy keeps valid.
-    const fts = yield* sql<{ name: string; sql: string }>`SELECT name, sql FROM sqlite_master
-      WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%USING fts5%'`
-    const readers = fts.flatMap((index) => {
-      const options = index.sql.slice(index.sql.indexOf("(") + 1, index.sql.lastIndexOf(")"))
-      const option = (key: string) => new RegExp(`\\b${key}\\s*=\\s*['"]?([A-Za-z0-9_]+)`, "i").exec(options)?.[1]
+    const virtual = yield* sql<{ name: string; sql: string }>`SELECT name, sql FROM sqlite_master
+      WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'`
+    const contentNames = new Map(before.map(({ name }) => [nameKey(name), name]))
+    const actualName = (name: string) => contentNames.get(nameKey(name)) ?? name
+    const readers = virtual.flatMap((index) => {
+      const options = new Map<string, string>()
+      const columns: Array<string> = []
+      for (const [name, next, value] of ftsArguments(index.sql)) {
+        if (name === undefined) continue
+        if (next === "=" && value !== undefined) options.set(nameKey(name), unquote(value))
+        else if (next === undefined || nameKey(unquote(next)) !== "unindexed") columns.push(unquote(name))
+      }
       // SQLite's names are case-insensitive, so `content=Version_Texts` reads version_texts.
-      if (option("content")?.toLowerCase() !== table.toLowerCase()) return []
-      const columns = options
-        .split(",")
-        .map((part) => part.trim())
-        .filter((part) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
-      return [{ name: index.name, rowid: option("content_rowid") ?? "rowid", columns }]
+      if (nameKey(options.get("content") ?? "") !== nameKey(table)) return []
+      return [
+        {
+          name: index.name,
+          rowid: actualName(options.get("content_rowid") ?? "rowid"),
+          columns: columns.map(actualName)
+        }
+      ]
     })
     const unchanged = (name: string) =>
       newNames.has(name) && oldNames.has(name) && (rebuild.columns?.[name] ?? quote(name)) === quote(name)
@@ -199,10 +235,31 @@ export const rebuildTable = (rebuild: TableRebuild) =>
   })
 
 /** The event a trigger fires on, from its statement. */
-const triggerEvent = (create: string) =>
-  /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|\S+)\s+(?:BEFORE\s+|AFTER\s+|INSTEAD\s+OF\s+)?(DELETE|INSERT|UPDATE)\b/i
-    .exec(create)?.[1]
-    ?.toUpperCase()
+const triggerEvent = (create: string) => {
+  // Read past the trigger name as one token, including SQLite's quoted identifier forms.
+  const tokens = create.matchAll(
+    /--[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]|[\w$\u0080-\uffff]+|\S/g
+  )
+  const next = () => {
+    for (const [token] of tokens) {
+      if (!token.startsWith("--") && !token.startsWith("/*")) return token.toUpperCase()
+    }
+    return undefined
+  }
+  if (next() !== "CREATE") return undefined
+  let token = next()
+  if (token === "TEMP" || token === "TEMPORARY") token = next()
+  if (token !== "TRIGGER") return undefined
+  if (next() === "IF" && (next() !== "NOT" || next() !== "EXISTS" || next() === undefined)) return undefined
+  token = next()
+  if (token === ".") {
+    next() // Schema-qualified trigger name.
+    token = next()
+  }
+  if (token === "INSTEAD" && next() !== "OF") return undefined
+  if (token === "BEFORE" || token === "AFTER" || token === "INSTEAD") token = next()
+  return token === "INSERT" || token === "UPDATE" || token === "DELETE" ? token : undefined
+}
 
 /**
  * Prepares, without running, the statements that fire each trigger (an insert, an update of every
@@ -218,10 +275,9 @@ const compileTriggers = (fail: (message: string) => Effect.Effect<never>) =>
     for (const trigger of triggers) {
       const events = owners.get(trigger.tbl_name) ?? new Map<string, Array<string>>()
       owners.set(trigger.tbl_name, events)
-      // An event not read from the statement: try all three (the owner is then a table).
-      const read = triggerEvent(trigger.sql)
-      for (const event of read === undefined ? ["INSERT", "UPDATE", "DELETE"] : [read])
-        events.set(event, [...(events.get(event) ?? []), trigger.name])
+      const event = triggerEvent(trigger.sql)
+      if (event === undefined) return yield* fail(`the trigger ${trigger.name}'s event could not be read`)
+      events.set(event, [...(events.get(event) ?? []), trigger.name])
     }
     for (const [owner, events] of owners) {
       const name = quote(owner)

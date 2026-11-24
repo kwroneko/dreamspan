@@ -119,7 +119,9 @@ const close = (
   if (delivered(NO_REPLY)) return { ending: "passed", failures: [] }
   // The answer to the cap's "write now" is the reply (§3.5): the app asked for text.
   const before = span[at - 1]?.m
-  if (calls.length === 0 && before?.role === "rpApp" && !isNudge(before)) return { ending: "written", failures: [] }
+  const text = textOf(ending)
+  if (calls.length === 0 && before?.role === "rpApp" && !isNudge(before) && text !== "")
+    return { ending: "written", failures: [] }
   // The run went on after other tools (or a call has no result yet): no ending here.
   const contractCalls = calls.filter((c) => c.name === SEND_MESSAGE || c.name === NO_REPLY)
   if (calls.length > 0 && (contractCalls.length === 0 || contractCalls.some((c) => !results.has(c.id))))
@@ -136,7 +138,6 @@ const close = (
     )
     .at(-1)
   if (lastContract !== undefined && results.get(lastContract) === true) failures.add("invalid_tool_call")
-  const text = textOf(ending)
   if (text !== "") {
     if (looksLikeTextualToolCall(text, options.toolNames ?? [])) failures.add("textual_tool_call")
     if (looksLikeContextMarkup(text, options.names ?? [])) failures.add("context_mimicry")

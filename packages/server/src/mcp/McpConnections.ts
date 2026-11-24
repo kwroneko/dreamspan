@@ -30,6 +30,7 @@ import { NotFound, type StaleWrite } from "@dreamspan/shared/errors.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   MCP_LISTING_BYTES_LIMIT,
+  MCP_LISTING_PAGES_LIMIT,
   MCP_OAUTH_CALLBACK,
   MCP_TIMEOUT_MAX_S,
   MCP_TIMEOUT_MIN_S,
@@ -397,15 +398,37 @@ const httpCode = (error: unknown): number | undefined => {
   return typeof code === "number" && code >= 100 && code < 600 ? code : undefined
 }
 
-/**
- * The server answered the request itself with "I don't know this session": a 404 on the
- * session, or a 400 saying it isn't initialized (spec/MCP.md §7.2). Both are HTTP statuses on
- * the response to the request's own POST, so the server refused it before processing it. A
- * transport error, a timeout or an error message alone never counts.
- */
-const isDeadSession = (error: unknown) =>
-  error instanceof StreamableHTTPError &&
-  (error.code === 404 || (error.code === 400 && /not initiali[sz]ed|session/i.test(error.message)))
+class DeadMcpSession extends StreamableHTTPError {}
+
+const initializationRefused = (body: string) => {
+  let message: unknown = body
+  try {
+    const response = JSON.parse(body) as { jsonrpc?: unknown; error?: { message?: unknown } } | null
+    if (response?.jsonrpc === "2.0") message = response.error?.message
+  } catch {
+    // Some servers send a plain-text refusal.
+  }
+  return (
+    typeof message === "string" &&
+    /^(?:bad request:\s*)?(?:mcp )?(?:server|session) (?:is )?not initiali[sz]ed\.?$/i.test(message.trim())
+  )
+}
+
+/** Only the response to a POST bearing a session ID can prove that session was refused. */
+const detectDeadSession =
+  (fetch: typeof globalThis.fetch): typeof globalThis.fetch =>
+  async (input, init) => {
+    const response = await fetch(input, init)
+    if (response.status !== 400 && response.status !== 404) return response
+    if (init?.method !== "POST" || !new Headers(init.headers).get("mcp-session-id")) return response
+    if (response.status === 404) {
+      void response.body?.cancel().catch(() => {})
+      throw new DeadMcpSession(404, "Session not found")
+    }
+    const body = await response.text().catch(() => null)
+    if (body !== null && initializationRefused(body)) throw new DeadMcpSession(400, "Session not initialized")
+    throw new StreamableHTTPError(400, `Error POSTing to endpoint: ${body}`)
+  }
 
 /** A failed request as the ledger records it and the user reads it, secrets scrubbed. */
 const failureOf = (
@@ -437,7 +460,7 @@ const failureOf = (
   if (code === 403 || /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(text))
     return new McpRequestFailed("failed", `${name} refused the request (${code ?? "unauthorized"}): ${text}`, true)
   if (error instanceof McpError) return new McpRequestFailed("error", `${name} answered with an error: ${text}`, false)
-  if (isDeadSession(error))
+  if (error instanceof DeadMcpSession)
     return new McpRequestFailed("failed", `${name} had lost the app's session (${code}).`, false, true)
   return new McpRequestFailed("failed", `Couldn't reach ${name}: ${text}`, false)
 }
@@ -861,6 +884,7 @@ export const layer = Layer.effect(
               ? new SSEClientTransport(url!, options)
               : new StreamableHTTPClientTransport(url!, {
                   ...options,
+                  fetch: detectDeadSession(fetch),
                   // A dropped stream isn't reopened behind the app's back: the call reports it.
                   reconnectionOptions: {
                     maxRetries: 0,
@@ -1091,19 +1115,17 @@ export const layer = Layer.effect(
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
-        // The owner's first connect of this process for the connection lists its tools again, after
-        // the call.
-        if (first._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
-          listedHere.add(connectionId)
-          const key = keyOf(connectionId, userId)
-          const entry = pool.get(key)
-          if (entry !== undefined) runFork(relist(userId, ready, key, entry))
-        }
         const settled =
           // The server refused it unprocessed: reconnect once and send it again (spec/MCP.md §7.2).
           first._tag === "Sent" && first.failure instanceof McpRequestFailed && first.failure.deadSession
             ? yield* attempt(attribution.attempt + 1, first.entry)
             : first
+        // The owner's first usable client in this process lists its tools again after the call.
+        if (settled._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
+          const key = keyOf(connectionId, userId)
+          const entry = pool.get(key)
+          if (entry !== undefined) runFork(relist(userId, ready, key, entry, true))
+        }
         if (settled._tag === "Done") return { _tag: "Result", result: settled.result, scrub: ready.scrub } as const
         const failure = settled.failure
         // Refused unprocessed both times, or never sent at all: nothing can have happened.
@@ -1132,6 +1154,7 @@ export const layer = Layer.effect(
     const listOn = (userId: UserId, prepared: McpPrepared, session: McpSession) =>
       Effect.gen(function* () {
         const tools: Array<unknown> = []
+        const cursors = new Set<string>()
         let bytes = 0
         let truncated = false
         let cursor: string | undefined
@@ -1157,6 +1180,12 @@ export const layer = Layer.effect(
             tools.push(tool)
           }
           cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
+          if (cursor !== undefined && !truncated) {
+            if (cursors.has(cursor))
+              return yield* Effect.fail(new McpRequestFailed("error", "The server repeated a tool-list cursor.", false))
+            cursors.add(cursor)
+            truncated = cursors.size >= MCP_LISTING_PAGES_LIMIT
+          }
         } while (cursor !== undefined && !truncated)
         const server = serverInfoOf(
           session.client.getServerVersion(),
@@ -1177,15 +1206,15 @@ export const layer = Layer.effect(
     // against an older `cache_revision` is dropped. One listing of a connection at a time.
     const listedHere = new Set<string>()
     const listLocks = keyedLocks()
-    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
+    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled, firstOnly = false) => {
       const connectionId = prepared.connection.id
       return listLocks
         .withLock(
           connectionId,
           Effect.gen(function* () {
-            if (entry.dead || entry.retired) return
+            if (entry.dead || entry.retired || (firstOnly && listedHere.has(connectionId))) return
             const before = yield* reader.GetMcpConnection({ userId, connectionId })
-            if (!before.owned || before.cacheRevision !== entry.revision) return
+            if (entry.dead || entry.retired || !before.owned || before.cacheRevision !== entry.revision) return
             entry.users += 1
             if (entry.timer !== null) clearTimeout(entry.timer)
             entry.timer = null
@@ -1201,6 +1230,7 @@ export const layer = Layer.effect(
               outcome: { server: listed.server, tools },
               at: Date.now()
             })
+            listedHere.add(connectionId)
           })
         )
         .pipe(
@@ -1476,21 +1506,25 @@ export const layer = Layer.effect(
         if (error !== null) return yield* refused(`${name} didn't sign you in: ${prepared.scrub(error).slice(0, 200)}`)
         if (code === null || code === "") return yield* refused(`${name} didn't sign you in.`)
         const url = prepared.url
+        const changed = () => refused(`${name}'s address changed while you were signing in. Start again.`)
         if (prepared.connection.cacheRevision !== entry.cacheRevision || url === null || url.origin !== entry.origin)
-          return yield* refused(`${name}'s address changed while you were signing in. Start again.`)
+          return yield* changed()
         const stored = yield* signInStep(userId, prepared, prepared.network, url, (fetchFn) =>
           finishFlow(fetchFn, url, entry.pending, code, Date.now())
         )
-        yield* writer.SetMcpOAuth({
-          userId,
-          connectionId: entry.connectionId,
-          oauth: {
-            enc: secrets.encrypt(JSON.stringify(stored), oauthBinding(entry.connectionId, userId)),
-            origin: entry.origin,
-            expiresAt: stored.expiresAt
-          },
-          at: Date.now()
-        })
+        yield* writer
+          .SetMcpOAuth({
+            userId,
+            connectionId: entry.connectionId,
+            oauth: {
+              enc: secrets.encrypt(JSON.stringify(stored), oauthBinding(entry.connectionId, userId)),
+              origin: entry.origin,
+              expiresAt: stored.expiresAt
+            },
+            expectedCacheRevision: entry.cacheRevision,
+            at: Date.now()
+          })
+          .pipe(Effect.catchTag("StaleWrite", changed))
         yield* closeKeptFor(entry.connectionId, userId)
         // A new sign-in is checked once, as a new address is (spec/MCP.md §2.5).
         yield* check(userId, entry.connectionId).pipe(Effect.ignore)

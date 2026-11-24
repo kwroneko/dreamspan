@@ -7,7 +7,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type Bin, toBinItem } from "./bin.ts"
-import { NotFound, WriteOps } from "./ops.ts"
+import { DeletedChatItem, NotFound, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
 export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinLimits) =>
@@ -22,6 +22,15 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
         return toBinItem(yield* bin.loadItem(userId, itemId))
       }).pipe(transaction(sql, operation))
 
+    const deletingChat = <E, R>(operation: string, userId: UserId, del: Effect.Effect<string, E, R>) =>
+      Effect.gen(function* () {
+        const itemId = yield* del
+        const workshops = yield* bin.deletedWorkshops(itemId)
+        yield* bin.evictDeleted(userId, itemId)
+        const item = toBinItem(yield* bin.loadItem(userId, itemId))
+        return new DeletedChatItem({ ...item, workshops })
+      }).pipe(transaction(sql, operation))
+
     const handlers = {
       ChangeBinLimit: ({ userId, key, value }) =>
         Effect.gen(function* () {
@@ -32,15 +41,14 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       // A pending chat (DESIGN §2.1) puts nothing in the bin: it is left, not deleted, and its
       // greetings are picked, not binned.
       DeleteChatGroup: ({ userId, chatId, forkId, expectedForkIds, title }) =>
-        deleting(
+        deletingChat(
           "DeleteChatGroup",
           userId,
           refusePending(sql, chatId).pipe(
             Effect.andThen(bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title))
           )
         ),
-      DeleteChat: ({ userId, chatId }) =>
-        deleting("DeleteChat", userId, refusePending(sql, chatId).pipe(Effect.andThen(bin.deleteChat(userId, chatId)))),
+      DeleteChat: ({ userId, chatId }) => deletingChat("DeleteChat", userId, refusePending(sql, chatId).pipe(Effect.andThen(bin.deleteChat(userId, chatId)))),
       DeleteMessage: ({ userId, slotId, forkId }) =>
         deleting(
           "DeleteMessage",
@@ -55,8 +63,7 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
           const rows = yield* bin.loadItems(userId, itemIds)
           return rows.map(toBinItem)
         }).pipe(transaction(sql, "DeleteMessages")),
-      DeleteFork: ({ userId, forkId }) =>
-        deleting(
+      DeleteFork: ({ userId, forkId }) => deletingChat(
           "DeleteFork",
           userId,
           refusePendingOf(sql, "branch", forkId).pipe(Effect.andThen(bin.deleteFork(userId, forkId)))

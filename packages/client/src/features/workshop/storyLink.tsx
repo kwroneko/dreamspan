@@ -2,28 +2,13 @@
 // from Workshop -> branch or chat it is connected to *at all*"): a link under the workshop's
 // header title, wherever it's shown as a chat, and the story's name beside its rows in the lists.
 import type { Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
-import type { WorkshopStory } from "@dreamspan/shared/workshopApi.ts"
-import { useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
-import { AsyncResult, Atom } from "effect/reactivity"
 import { useCallback, type MouseEvent } from "react"
-import { AppClient } from "../../rpc.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatView } from "../chat/session.ts"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
-import { SIDE_CHATS_KEY } from "./sideChat.ts"
-import { storyBranchName, useWorkshopBranches } from "./workshopBranches.tsx"
-
-const storyOf = Atom.family((chatId: ChatId) =>
-  AppClient.query("ListWorkshopStories", { chatIds: [chatId] }, { reactivityKeys: [SIDE_CHATS_KEY, "chats", chatId] })
-)
-
-/** The story a workshop is about: undefined while reading or for none, `title: null` once deleted. */
-const useWorkshopStory = (chatId: ChatId): WorkshopStory | undefined => {
-  const result = useAtomValue(storyOf(chatId))
-  return AsyncResult.isSuccess(result) ? result.value[0] : undefined
-}
+import { storyBranchName, useWorkshopBranches, useWorkshopStory } from "./workshopBranches.tsx"
 
 /**
  * Opens a chat beside this one: focused where it's open already, else in the neighbouring pane

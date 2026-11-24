@@ -7,9 +7,11 @@
 // not files, and the result's `loaded` names are what the wire layer serializes as the load point.
 import { createHash } from "node:crypto"
 import { Type } from "@earendil-works/pi-ai"
+import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { Effect } from "effect"
 import { LOAD_SKILL, loadedText, matchPatterns, searchTools, type Skill, TOOL_SEARCH } from "../toolLoading.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
+import { READ_RESULT } from "./mcp.ts"
 
 const MAX_RESULTS = 5
 
@@ -56,6 +58,10 @@ export const toolSearch: RolloutTool<{ readonly query: string; readonly max_resu
             .filter(Boolean)
         : searchTools(pending(context), trimmed, max_results ?? MAX_RESULTS)
       const { added, already } = load(context, requested)
+      if (chatKinds.get(context.offer.kind)?.purpose === "generation" && added.some((tool) => tool.mcp)) {
+        const pager = pending(context).find((tool) => tool.name === READ_RESULT)
+        if (pager && !added.includes(pager)) added.push(pager)
+      }
       const unknown = selecting ? requested.filter((n) => !context.offer!.tools.some((t) => t.name === n)) : []
       const warnings: Array<string> = []
       const parts = [

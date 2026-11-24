@@ -2,6 +2,7 @@ import { commitPendingChat, commitPendingChatOf } from "./pendingChats.ts"
 import { kindAllows } from "./chatKindPolicy.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
+import { attachLibrary as attachLibraryRows, copyLibrary } from "./libraryAttachments.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
 // inside the calling operation's transaction.
@@ -175,6 +176,14 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       } else if (version.sourceVersionId) {
         yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text, name, path)
           SELECT ${inserted.id}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id=${version.sourceVersionId}`
+      }
+      if (version.library !== undefined && version.library.length > 0) {
+        // By its fork: a new message's slot may not be written yet.
+        const [chat] = yield* sql<{ owner: string; kind: string }>`SELECT c.owner_user_id AS owner, c.kind
+          FROM forks f JOIN chats c ON c.id = f.chat_id WHERE f.id = ${authoringForkId}`
+        yield* attachLibraryRows(sql, chat?.owner ?? owner ?? "", chat?.kind ?? "", inserted.id, version.library)
+      } else if (version.library === undefined && version.sourceVersionId) {
+        yield* copyLibrary(sql, version.sourceVersionId, inserted.id)
       }
       if (version.images !== undefined || version.sourceVersionId) {
         const [attachments] = yield* sql<{

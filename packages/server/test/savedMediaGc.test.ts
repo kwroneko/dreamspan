@@ -29,12 +29,16 @@ it.effect("keeps a saved file while a new revision still needs scanning", () =>
     const first = yield* create()
     yield* scan
     const [pending] = yield* reader.NextSavedMediaDownloads({ skip: [], limit: 100 })
-    yield* writer.RecordSavedMediaResult({
+    const result = {
       id: pending!.id,
+      ownerUserId: pending!.ownerUserId,
+      url: pending!.url,
       at: 2,
       saved: { sha256: "1".repeat(64), mime: "image/png", byteSize: 100 },
       failure: null
-    })
+    }
+    assert.isFalse(yield* writer.RecordSavedMediaResult({ ...result, url: `${result.url}?other` }))
+    assert.isTrue(yield* writer.RecordSavedMediaResult(result))
     const [before] = yield* reader.LookupSavedMedia({ userId: user.id, urls: ["https://cards.test/pixel.png"] })
     const second = yield* create() // deliberately not scanned: no background task in this test
     const deleted = yield* writer.DeleteEntity({ userId: user.id, entityId: first.entityId })

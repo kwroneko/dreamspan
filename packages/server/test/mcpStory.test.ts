@@ -11,8 +11,8 @@ import type { Chat, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
 import type { McpConnectionId } from "@dreamspan/shared/mcp.ts"
-import { Reader } from "../src/db/Database.ts"
-import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { toolData, TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { fakeTool, type FakeMcpServer, startFakeMcpServer } from "./support/fakeMcpServer.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -320,6 +320,62 @@ describe("MCP servers in story chats", () => {
       assert.include(stored, "line 5999 of the archive")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
+
+  it.live("Resume keeps a long MCP receipt and pages its tail without sending the call again", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const call = "receipt-call"
+      const script = scripted([
+        { name: "mcp_big_dump", args: {}, id: call },
+        { name: "read_result", args: { call, offset: 29_999 }, id: "receipt-page" }
+      ])
+      const { api, chat, events, main, leaf, mock } = yield* story(script.handler)
+      const big = yield* fakeServer([fakeTool("dump")])
+      big.state.call = (_name, _args, signal) =>
+        new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled"))))
+      const connection = yield* addServer(api, big, "Big")
+      yield* api.SetMcpUse({ connectionId: connection.id, stories: true })
+      const { versionId, slotId } = yield* say(api, chat, main, leaf, "dump it")
+      yield* eventually(() => calls(big).length === 1)
+      yield* api.StopGeneration({ versionId })
+      yield* eventually(() => finished(events, versionId) !== undefined)
+
+      // Recreate the durable state at the receipt-before-transcript crash boundary.
+      const [rollouts] = yield* fixtureSql(
+        config.dataDir,
+        [{ sql: "SELECT rollout_id FROM versions WHERE id = ?", params: [versionId] }],
+        { readOnly: true }
+      )
+      const rolloutId = rollouts?.[0]?.rollout_id
+      if (typeof rolloutId !== "string") throw new Error("Expected a stopped rollout")
+      const me = yield* api.Whoami()
+      const tail = "the final <ledger> entry"
+      const frame = "<result_metadata>{&quot;tool&quot;:&quot;dump&quot;}</result_metadata>"
+      yield* (yield* Writer).RecordRolloutEffects({
+        userId: me.id,
+        rolloutId,
+        toolCallId: call,
+        result: toolData("the first <ledger> entry\n".padEnd(29_999, "x") + tail, frame),
+        isError: false
+      })
+      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
+      const resumed = yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+      assert.lengthOf(calls(big), 1)
+      const stored = JSON.stringify(yield* api.GetRunTranscript({ versionId: resumed.version.id }))
+      assert.include(stored, "the final &lt;ledger&gt; entry")
+      const results = toolMessages(mock.requests())
+      const first = String(results.find((m) => m.tool_call_id === call)!.content)
+      assert.isAtMost(first.length, 16_000)
+      assert.include(first, 'read_result with call "receipt-call"')
+      assert.include(first, frame)
+      assert.include(first, "the first &lt;ledger&gt; entry")
+      assert.notInclude(first, "&amp;lt;")
+      const page = String(results.find((m) => m.tool_call_id === "receipt-page")!.content)
+      assert.include(page, "the final &lt;ledger&gt; entry")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
   it.live("Resume asks before sending an interrupted call again; Don't run it holds, Run it again sends it", () => {
     const config = testConfig()

@@ -62,6 +62,7 @@ import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoi
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { reasoningReplayStage } from "./reasoningReplay.ts"
 import { attachmentLines } from "./attachments.ts"
+import { attachedElement, inlineLimit } from "../agent/libraryView.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
 import { cardFields, makeMacroEnvironment, type MacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
@@ -873,7 +874,9 @@ const resolveStage: AssemblerStage = {
           }
         }
         const piece = env.message(
-          entry.content || !entry.images?.length || entry.attachments?.length ? entry : { ...entry, content: "[Image]" },
+          entry.content || !entry.images?.length || entry.attachments?.length
+            ? entry
+            : { ...entry, content: "[Image]" },
           messages,
           at
         )
@@ -2796,8 +2799,12 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       const own = doc.prompts.find((p) => p.identifier === agentInstructionsPrompt.identifier) ?? null
       const sent =
         own === null || (triggersFor(own, need(assembly, "cast").type) && conditionHolds(assembly, conditionOf(own)))
-      const text = sent ? agentInstructionsText(assembly, own, own ? conditionOf(own) : "always") : null
-      if (text) parts.push(text)
+      const text = sent
+        ? withReplacement(assembly, `preset:${agentInstructionsPrompt.identifier}`, () =>
+            agentInstructionsText(assembly, own, own ? conditionOf(own) : "always")
+          )
+        : null
+      if (text?.text.trim()) parts.push(text)
     }
     if (parts.length === 0) return
     return {
@@ -2836,6 +2843,37 @@ const attachmentsStage = sync("attachments", (assembly) => {
     }
   })
   if (changed) assembly.scripted = scripted
+})
+
+/**
+ * Cards, lorebooks and presets a workshop message carries (spec/WORKSHOP-CARDS.md §4.3): an
+ * `<attached_…>` element each after its text, the item as it was at the revision the message
+ * recorded. Whole when it fits the inline limit (8,000 tokens, or a fifth of a smaller window, in
+ * the model's own tokens), otherwise a reference with its summary for the read tools to page.
+ */
+const libraryAttachmentsStage = sync("library-attachments", (assembly) => {
+  if (!assembly.resolved?.some(({ entry }) => entry.library?.length)) return
+  const env = need(assembly, "macros")
+  const scripted = new Map(need(assembly, "scripted"))
+  const count = assembly.countText ?? estimateTokens
+  const limit = inlineLimit(contextBudget(assembly) + need(assembly, "preset").doc.samplers.openai_max_tokens)
+  assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
+    if (!entry.library?.length) return { entry, piece }
+    const lines = entry.library.map((item) => attachedElement(item, count, limit)).join("\n")
+    const previous = scripted.get(entry.versionId)
+    if (previous)
+      scripted.set(entry.versionId, { ...previous, text: previous.text ? `${previous.text}\n${lines}` : lines })
+    const text = env.text(piece)
+    return {
+      entry,
+      piece: env.verbatim(
+        `library:${entry.versionId}`,
+        { kind: "message", slot: entry.slotId, version: entry.versionId },
+        text ? `${text}\n${lines}` : lines
+      )
+    }
+  })
+  assembly.scripted = scripted
 })
 
 /** Workshop text has its own registered stage and inspector piece, after end-of-request. */
@@ -3161,6 +3199,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
     assembly.scripted = scripted
   }),
   attachmentsStage,
+  libraryAttachmentsStage,
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,

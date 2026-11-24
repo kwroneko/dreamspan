@@ -18,7 +18,7 @@ import { PluginId, PluginPins, PluginData, PluginRejected } from "@dreamspan/sha
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
-  MediaChoice,
+  MediaApprovalDecision,
   MediaHost,
   MediaHosts,
   MediaKind,
@@ -54,8 +54,9 @@ import {
   ReplyEffects,
   UndoAllReport,
   WorkshopDefaults,
-  WorkshopGrantChoice,
-  WorkshopPresetChoice,
+  WorkshopCreationFields,
+  WorkshopStartFields,
+  WorkshopStarted,
   WorkshopBranch,
   WorkshopStory
 } from "@dreamspan/shared/workshopApi.ts"
@@ -128,6 +129,7 @@ import {
   Fork,
   ForkId,
   MessageImages,
+  MessageLibrary,
   NewVersion,
   PathEntry,
   SlotId,
@@ -183,7 +185,8 @@ import {
   ComposerImageKey,
   AttachmentComposer,
   SetComposerImageFields,
-  ComposerChoice
+  ComposerChoice,
+  ComposerSaveResult
 } from "@dreamspan/shared/composerApi.ts"
 import {
   AccountRejected,
@@ -259,6 +262,7 @@ import {
   SubagentPick,
   SubagentPicks,
   SubagentSettings,
+  SubagentSettingsRejected,
   SubagentTypes
 } from "@dreamspan/shared/subagents.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@dreamspan/shared/regexScripts.ts"
@@ -346,6 +350,11 @@ const MergeAndFlow = Schema.Struct({ outcome: MergeOutcome, change: RefChange })
 
 /** A chat's `card.binding` for one card where it's read (the state fold's), null for none. */
 const CardBinding = Schema.Struct({ ref: Schema.NullOr(Schema.String), revision: Schema.NullOr(Schema.String) })
+
+/** A chat or branch deletion also returns its workshop targets for live-session cleanup. */
+export class DeletedChatItem extends BinItem.extend<DeletedChatItem>("DeletedChatItem")({
+  workshops: Schema.Array(Schema.Struct({ chatId: ChatId, forkIds: Schema.NullOr(Schema.Array(ForkId)) }))
+}) {}
 /** Every card's binding at a position, by entity id. */
 const CardBindings = Schema.Record(Schema.String, CardBinding)
 
@@ -814,6 +823,8 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("RecordSavedMediaResult", {
     payload: {
       id: Schema.Int,
+      ownerUserId: UserId,
+      url: Schema.String,
       at: Schema.Int,
       saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
       failure: Schema.NullOr(Schema.String)
@@ -830,8 +841,7 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("DecideMediaApproval", {
     payload: {
       userId: UserId,
-      refIds: Schema.NullOr(Schema.Array(RefId)),
-      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      decisions: Schema.Array(MediaApprovalDecision),
       at: Schema.Int
     },
     success: MediaHosts,
@@ -1029,6 +1039,7 @@ const McpWriteOps = RpcGroup.make(
    * A user's own sign-in with a connection (spec/MCP.md §2.4), encrypted, bound to
    * "mcp:<connection>:<user>:oauth" and to the server's origin; null forgets it. `expectedEnc`
    * (a refresh): stored only while the sign-in is still the one refreshed, else StaleWrite.
+   * `expectedCacheRevision` guards the final write of a sign-in against changes to the connection.
    */
   Rpc.make("SetMcpOAuth", {
     payload: {
@@ -1038,6 +1049,7 @@ const McpWriteOps = RpcGroup.make(
         Schema.Struct({ enc: Schema.Uint8Array, origin: Schema.String, expiresAt: Schema.NullOr(Schema.Number) })
       ),
       expectedEnc: Schema.optionalKey(Schema.Uint8Array),
+      expectedCacheRevision: Schema.optionalKey(Schema.Int),
       at: Schema.Number
     },
     success: McpConnection,
@@ -1168,7 +1180,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedForkIds: Schema.Array(ForkId),
       title: Schema.String
     },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError, BinChanged])
   }),
   Rpc.make("SetSplitChat", {
@@ -1588,7 +1600,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SaveComposer", {
     payload: { userId: UserId, ...SaveComposerFields },
-    success: Schema.Struct({ draft: Schema.NullOr(Draft), recovered: Schema.Boolean }),
+    success: ComposerSaveResult,
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
   Rpc.make("RestoreComposer", {
@@ -1674,7 +1686,7 @@ const WriteOpsChatOwn = RpcGroup.make(
   }),
   Rpc.make("DeleteChat", {
     payload: { userId: UserId, chatId: ChatId },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -1703,7 +1715,7 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("DeleteFork", {
     payload: { userId: UserId, forkId: ForkId },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, CannotDeleteLastFork, StorageError])
   }),
   // --- Parallel threads (spec/THREADS.md §5; db/threadWrites.ts)
@@ -1722,7 +1734,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedRowVersion: Schema.Int,
       threads: ThreadStarts
     },
-    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat, continuingChoice: Schema.NullOr(ComposerChoice) }),
     error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
   }),
   /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */
@@ -2177,9 +2189,10 @@ const WriteOpsChatOwn = RpcGroup.make(
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
+      expectedRowVersion: Schema.Int,
       feeds: Schema.Array(Schema.Struct({ key: Schema.String, feed: Schema.NullOr(PriceFeed) }))
     },
-    success: Schema.Struct({ updated: Schema.Int }),
+    success: Schema.Struct({ updated: Schema.Int, stale: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetModelHidden", {
@@ -2209,6 +2222,12 @@ const WriteOpsChatOwn = RpcGroup.make(
   /** Instance-wide settings (admin). Callers check the role; storage doesn't know it. */
   Rpc.make("SetAppSetting", {
     payload: { key: Schema.String, value: Schema.Unknown },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** Changes one account's override in the instance quota setting. */
+  Rpc.make("SetAccountFilesQuota", {
+    payload: { userId: UserId, bytes: Schema.NullOr(Schema.Int) },
     success: Schema.Void,
     error: StorageError
   }),
@@ -2442,6 +2461,18 @@ const WriteOpsChatOwn = RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   })
 )
+
+const FileVersionWrite = Schema.Struct({
+  path: Schema.String.check(Schema.isMaxLength(4096)),
+  inode: Schema.NullOr(Schema.Number),
+  /** null: a recorded deletion or creation, with no content. */
+  sha256: Schema.NullOr(Sha256),
+  mime: Schema.String,
+  byteSize: Schema.Int,
+  origin: Schema.String,
+  rolloutId: Schema.optionalKey(Schema.String),
+  toolCallId: Schema.optionalKey(Schema.String)
+})
 
 export class WriteOpsChat extends mergeOps(WriteOpsChatOwn, McpWriteOps) {}
 
@@ -3008,23 +3039,22 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("RecordFileVersions", {
     payload: {
       userId: UserId,
-      versions: Schema.Array(
-        Schema.Struct({
-          path: Schema.String.check(Schema.isMaxLength(4096)),
-          inode: Schema.NullOr(Schema.Number),
-          /** null: a recorded deletion or creation, with no content. */
-          sha256: Schema.NullOr(Sha256),
-          mime: Schema.String,
-          byteSize: Schema.Int,
-          origin: Schema.String,
-          rolloutId: Schema.optionalKey(Schema.String),
-          toolCallId: Schema.optionalKey(Schema.String)
-        })
-      ),
+      versions: Schema.Array(FileVersionWrite),
       /** The account that acted, when not the owner (a command through a folder shared to edit). */
       actorUserId: Schema.optionalKey(UserId)
     },
     success: Schema.Array(Schema.String),
+    error: StorageError
+  }),
+  /** Keeps a replacement's earlier contents only if their new charge fits its reservation. */
+  Rpc.make("RecordReplacementVersion", {
+    payload: {
+      userId: UserId,
+      version: FileVersionWrite,
+      maxAddedBytes: Schema.Int,
+      actorUserId: Schema.optionalKey(UserId)
+    },
+    success: Schema.NullOr(Schema.Struct({ id: Schema.String, addedBytes: Schema.Int })),
     error: StorageError
   }),
   /**
@@ -3271,17 +3301,14 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("CreateWorkshop", {
     payload: {
       userId: UserId,
-      title: Schema.optionalKey(Schema.String),
-      attachTo: Schema.optionalKey(ChatId),
-      /** The story branch it starts beside (WORKSHOP-BRANCHES §2.1); absent: the story's current one. */
-      attachFork: Schema.optionalKey(ForkId),
-      card: Schema.optionalKey(Schema.String),
-      persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      preset: Schema.optionalKey(WorkshopPresetChoice),
-      /** Grants chosen before its first message, checked by the API against what it offers. */
-      grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice))
+      ...WorkshopCreationFields
     },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("StartWorkshop", {
+    payload: { userId: UserId, ...WorkshopStartFields, rewrite: Schema.optionalKey(StoredRewrite) },
+    success: Schema.Struct({ ...WorkshopStarted.fields, generate: Schema.optionalKey(VersionId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetWorkshopPersona", {
@@ -3349,6 +3376,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       images: Schema.optionalKey(MessageImages),
       imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      /** Library items a workshop message carries (spec/WORKSHOP-CARDS.md §4.4); refused elsewhere. */
+      library: Schema.optionalKey(MessageLibrary),
       userId: UserId,
       chatId: ChatId,
       /** The fork it's sent in, as AppendMessage takes it. */
@@ -4390,7 +4419,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       types: Schema.optionalKey(SubagentTypes)
     },
     success: Schema.Void,
-    error: StorageError
+    error: Schema.Union([SubagentSettingsRejected, StorageError])
   }),
   /**
    * A subagent carried on with its resumed reply (spec/SUBAGENTS.md §8), in one transaction: a
@@ -4977,6 +5006,12 @@ const ReadOpsOwn = RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A panel's path and state through its slot, within one live fork and one read snapshot. */
+  Rpc.make("PanelContext", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId), slotId: SlotId },
+    success: Schema.Struct({ entries: Schema.Array(PathEntry), events: Schema.Array(FoldableEvent) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Earlier saved text of an owned human-written version. */
   Rpc.make("VersionAmendments", {
     payload: { userId: UserId, versionId: VersionId },
@@ -5408,10 +5443,24 @@ const ReadOpsOwn = RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.NullOr(SlotId),
+      /** For export: pin the display end returned by Bottom, including trailing insertions. */
+      displayLeaf: Schema.optionalKey(Schema.Boolean),
       range: PathRange,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
     success: PathWindow,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The shown version of a visible message at a zero-based position on a fixed path. */
+  Rpc.make("ReadPathVersionAt", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      position: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+    },
+    success: Schema.NullOr(Schema.Struct({ id: VersionId, speakerEntityId: Schema.NullOr(EntityId) })),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** One of the user's live versions: not in the bin, nor its message or chat. */
@@ -6142,6 +6191,11 @@ const ReadOpsOwn = RpcGroup.make(
     success: WorkshopDefaults,
     error: StorageError
   }),
+  Rpc.make("GetWorkshopStart", {
+    payload: { userId: UserId, requestId: WorkshopStartFields.requestId },
+    success: Schema.NullOr(WorkshopStarted),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {
     payload: { userId: UserId, ...EffectList },
@@ -6740,6 +6794,19 @@ const ReadOpsOwn = RpcGroup.make(
       items: Schema.Array(Schema.Struct({ text: Schema.String, kind: Schema.Literals(["message", "reasoning"]) }))
     },
     success: Schema.Array(TextRewrite),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  Rpc.make("RewriteWorkshopStart", {
+    payload: {
+      userId: UserId,
+      attachTo: WorkshopStartFields.attachTo,
+      card: WorkshopStartFields.card,
+      persona: WorkshopStartFields.persona,
+      preset: WorkshopStartFields.preset,
+      speaker: WorkshopStartFields.speaker,
+      content: Schema.String
+    },
+    success: TextRewrite,
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */

@@ -145,7 +145,7 @@ const nonTextEnd = (pieces: ReadonlyArray<Piece>, i: number, sourceEnd: number) 
 const startsNonText = (piece: Piece) => piece.kind === "other" || (piece.kind === "start" && NON_TEXT.has(piece.name))
 
 /** `text` without HTML's tags: their text stays, line ends where blocks ended, references decoded. */
-const textOnly = (text: string) => {
+const textOnly = (text: string, beforeCode = false) => {
   const pieces = tokenize(text)
   if (!pieces.some(isMarkup)) return text
   let out = ""
@@ -170,15 +170,17 @@ const textOnly = (text: string) => {
   out += text.slice(at)
   return out
     .split("\n")
-    .map((line) => line.replace(/[ \t]+$/, ""))
+    .map((line, i, lines) => (beforeCode && i === lines.length - 1 ? line : line.replace(/[ \t]+$/, "")))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
 }
 
 /** Pair equal-length backtick runs once. The former backreference regex tried every
  * suffix of a long unmatched run, taking cubic time on a single adversarial message. */
-const inlineCode = (text: string) => {
+const inlineCode = (text: string, pieces?: ReadonlyArray<Piece>) => {
   const runs = [...text.matchAll(/`+/g)]
+  if (runs.length < 2) return []
+  const markup = (pieces ?? tokenize(text)).filter((piece) => piece.kind !== "text")
   const next = new Map<number, number>()
   const pairs: Array<number | undefined> = new Array(runs.length)
   for (let i = runs.length - 1; i >= 0; i--) {
@@ -187,10 +189,15 @@ const inlineCode = (text: string) => {
     next.set(length, i)
   }
   const spans: Array<{ readonly index: number; readonly 0: string }> = []
+  let token = 0
   for (let i = 0; i < runs.length; i++) {
+    const start = runs[i]!.index
+    while (token < markup.length && markup[token]!.end <= start) token++
+    // If HTML opened first, its attributes cannot open an inline code span. If a
+    // code span opened first, its closer may be inside literal tag-like text.
+    if (token < markup.length && markup[token]!.start <= start) continue
     const closing = pairs[i]
     if (closing === undefined) continue
-    const start = runs[i]!.index
     const end = runs[closing]!.index + runs[closing]![0].length
     spans.push({ index: start, 0: text.slice(start, end) })
     i = closing
@@ -234,14 +241,14 @@ const fencedBlocks = (text: string) => {
  * stay byte-for-byte. */
 const withoutNonText = (text: string) => {
   if (!/<(?:script|style|template|noscript|head)|<!/i.test(text)) return text
-  const spans = inlineCode(text)
+  const pieces = tokenize(text)
+  const spans = inlineCode(text, pieces)
   let spanIndex = 0
   const protectedAt = (at: number) => {
     while (spanIndex < spans.length && spans[spanIndex]!.index + spans[spanIndex]![0].length <= at) spanIndex++
     const span = spans[spanIndex]
     return span !== undefined && span.index <= at
   }
-  const pieces = tokenize(text)
   let out = ""
   let at = 0
   for (let i = 0; i < pieces.length; i++) {
@@ -259,7 +266,7 @@ const prose = (source: string) => {
   let out = ""
   let at = 0
   for (const match of inlineCode(text)) {
-    out += textOnly(text.slice(at, match.index))
+    out += textOnly(text.slice(at, match.index), true)
     out += match[0]
     at = match.index + match[0].length
   }

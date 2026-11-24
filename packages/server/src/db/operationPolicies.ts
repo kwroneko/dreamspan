@@ -254,6 +254,7 @@ const statePolicy = (id: string): OperationPolicy =>
           for (const id of new Set([...now.participants, ...old.participants]))
             push("participant.leave", { entity: id })
           for (const id of old.participants) push("participant.join", { entity: id })
+          for (const id of old.away) if (old.participants.includes(id)) push("away.set", { entity: id, away: true })
         }
         push("played_by_me.set", { entities: old.playedByMe })
         for (const id of old.participants) push("presence.set", { entity: id, present: !old.absent.includes(id) })

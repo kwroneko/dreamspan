@@ -22,6 +22,7 @@ test.beforeAll(async ({ browser }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const folder = writeRealisticStFolder(join(server().dataDir, "synthetic-st"))
   await page.goto(`${server().url}/import/st`)
+  await expect(page.getByRole("navigation", { name: "Folders", exact: true })).toBeVisible()
   await page.getByLabel("Folder path").fill(folder)
   await page.getByRole("button", { name: "Look in this folder" }).click()
   await page.getByRole("button", { name: "Import", exact: true }).click()
@@ -65,9 +66,10 @@ for (const width of [1440, 390]) {
       })
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${latest.chat.id}`))
-    const version = character.card.subtitle.trim()
-    const tabLabel = version ? `${character.card.name} · ${version}` : character.card.name
-    await expect(page.getByRole("tab", { name: tabLabel, exact: true })).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("tab", { name: character.card.name, exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     expect(new URL(page.url()).searchParams.get("slot")).toBe(
       latest.activity.find((a) => a.entityId === character.card.entityId)?.slot ?? null
     )
@@ -91,7 +93,7 @@ for (const width of [1440, 390]) {
     // The left panel's place is in the URL (owner, 2026-10-31); browsing it keeps the chat in the middle.
     const before = new URL(page.url()).pathname
     await crumbs.getByRole("button", { name: "All chats", exact: true }).click()
-    await expect(crumbs).toHaveCount(0)
+    await expect(crumbs).toHaveText("All chats")
     await expect.poll(() => new URL(page.url()).searchParams.get("character")).toBeNull()
     expect(new URL(page.url()).pathname).toBe(before)
     // Browsing the grid changes only the left panel until a character is picked.
@@ -286,7 +288,7 @@ for (const width of [1440, 390]) {
       else await page.getByRole("button", { name: "Hide panel", exact: true }).click()
       await shoot("new-chat")
       // The header's faces open the card's tab; a phone's header leaves them out, as in any chat.
-      if (width === 390) await openPanel(page, unused.card.label)
+      if (width === 390) await openPanel(page, unused.card.name)
       else await page.getByRole("button", { name: `Show ${unusedChoice}'s card`, exact: true }).click()
       await expect(fullEditor).toBeVisible()
       await page.goto(`${server().url}/cards/${card}`)

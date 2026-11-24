@@ -34,7 +34,7 @@ import type {
   SourceFilter,
   SourceQuery
 } from "@dreamspan/shared/cardSources.ts"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse, SourceVersion } from "./adapter.ts"
 
 export const CARDEX_ORIGIN = "https://cardex.zip"
@@ -1113,11 +1113,11 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         if (!semantic && (token === null || restarted)) {
           const params = searchParams(query, null)
           for (const name of ["sort", "limit", "page", "cursor"]) params.delete(name)
-          const count = yield* getJson(http, api("/search/count", params))
-          if (!isRecord(count) || typeof count.total !== "number" || !Number.isFinite(count.total) || count.total < 0)
-            return yield* bad()
-          total = count.total
-          totalCapped = count.capped === true || count.timed_out === true
+          const count = Option.getOrUndefined(yield* Effect.option(getJson(http, api("/search/count", params))))
+          if (isRecord(count) && typeof count.total === "number" && Number.isFinite(count.total) && count.total >= 0) {
+            total = count.total
+            totalCapped = count.capped === true || count.timed_out === true
+          }
         }
         const current = page && "page" in page ? page.page : 1
         const next = semantic

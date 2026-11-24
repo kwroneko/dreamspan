@@ -7,6 +7,7 @@ import { refusePending } from "./chatKindPolicy.ts"
 // shows after S, in F and branches made from it later only. Rename and Undo (a bin item).
 import type { EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { cleanName } from "@dreamspan/shared/chatName.ts"
+import type { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
 import { composerKey } from "@dreamspan/shared/drafts.ts"
 import { type FoldableEvent, foldState } from "@dreamspan/shared/state.ts"
 import { ThreadsRefused } from "@dreamspan/shared/threads.ts"
@@ -112,11 +113,12 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
             no_replies: number
           }>`SELECT speaker_entity_id, reply_from_entity_id, guidance, no_replies FROM drafts
             WHERE user_id = ${userId} AND target_kind = 'composer' AND target_id = ${chatId} AND field = ${fork.id}`
+          let continuingChoice: ComposerChoice | null = null
           for (const [ordinal, member] of forks.entries()) {
             const writesAs = threads[ordinal]!.writesAs
             if (ordinal === 0 && writesAs === null) continue
             const composer = yield* bin.drafts.openComposer(userId, composerKey(chatId, member.id), null)
-            yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, {
+            const choice = yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, {
               ...(ordinal === 0 || from === undefined
                 ? {}
                 : {
@@ -126,6 +128,7 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
                   }),
               speakerEntityId: (writesAs ?? from?.speaker_entity_id ?? null) as EntityId | null
             })
+            if (ordinal === 0) continuingChoice = choice
           }
 
           // 4. In each thread at S: the cast of the others away, its own back if away. Written
@@ -171,7 +174,7 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
           // The user stays where they were: F stays current, and the shell lists the new forks.
           const [chat] =
             yield* sql<ChatRow>`UPDATE chats SET row_version = row_version + 1 WHERE id = ${chatId} RETURNING *`
-          return { splitId: split.id, forkIds: forks.map((f) => f.id as ForkId), chat: toChat(chat!) }
+          return { splitId: split.id, forkIds: forks.map((f) => f.id as ForkId), chat: toChat(chat!), continuingChoice }
         }).pipe(transaction(sql, "StartThreads")),
 
       RenameThread: ({ userId, chatId, splitId, ordinal, name, rowVersion }) =>

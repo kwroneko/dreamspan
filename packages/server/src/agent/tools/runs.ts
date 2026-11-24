@@ -6,7 +6,7 @@ import { toolDataBody, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
 import { Type } from "@earendil-works/pi-ai"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { isDeepStrictEqual } from "node:util"
-import type { PathEntry, SlotId, StoryAt } from "@dreamspan/shared/chat.ts"
+import type { StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
 import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Effect } from "effect"
 import { activeRunSummaries } from "../compaction.ts"
@@ -18,43 +18,10 @@ import { historyTools, safely } from "./history.ts"
 
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
-/** The path before the generating message, oldest first, by message number (from 1). */
-const pathEntries = (context: ToolContext) =>
-  Effect.suspend(() => {
-    const key = "run-path"
-    if (context.cache.has(key)) return Effect.succeed(context.cache.get(key) as ReadonlyMap<number, PathEntry>)
-    return Effect.gen(function* () {
-      const byNumber = new Map<number, PathEntry>()
-      if (context.leafSlotId === null) return byNumber
-      const entries: Array<PathEntry> = []
-      let older: SlotId | null = null
-      let first = true
-      while (first || older !== null) {
-        const window: { readonly entries: ReadonlyArray<PathEntry>; readonly older: SlotId | null } =
-          yield* context.reader.ReadPath({
-            userId: context.userId,
-            chatId: context.chatId,
-            forkId: context.forkId,
-            leafSlotId: context.leafSlotId,
-            range: first ? { _tag: "Bottom" } : { _tag: "Older", from: older! },
-            limit: 500
-          })
-        entries.unshift(...window.entries)
-        older = window.older
-        first = false
-      }
-      for (const entry of entries) byNumber.set((entry.position ?? entry.depth) + 1, entry)
-      context.cache.set(key, byNumber)
-      return byNumber as ReadonlyMap<number, PathEntry>
-    })
-  })
-
 /** One message's tool steps, numbered from 1, with their results, from its stored run. */
-const messageSteps = (context: ToolContext, entry: PathEntry) =>
+const messageSteps = (context: ToolContext, versionId: VersionId) =>
   Effect.gen(function* () {
-    const material = yield* context.reader
-      .RolloutMaterial({ userId: context.userId, versionId: entry.version.id })
-      .pipe(Effect.option)
+    const material = yield* context.reader.RolloutMaterial({ userId: context.userId, versionId }).pipe(Effect.option)
     if (material._tag === "None" || !material.value.transcript) return null
     const frozen = JSON.parse(material.value.snapshot) as {
       agent?: { tools: ReadonlyArray<FrozenTool> }
@@ -65,7 +32,7 @@ const messageSteps = (context: ToolContext, entry: PathEntry) =>
     return {
       storyAt: frozen.storyAt,
       storyStamp: frozen.storyStamp,
-      steps: placedSteps(transcript, frozen.agent?.tools ?? [], material.value.status !== "running", entry.version.id)
+      steps: placedSteps(transcript, frozen.agent?.tools ?? [], material.value.status !== "running", versionId)
         .flatMap(({ step }) => (step.kind === "tool" ? [step] : []))
         .map((step, at) => ({ ...step, n: at + 1 }))
     }
@@ -120,18 +87,27 @@ const readRun: RolloutTool<{
     safely(
       "read_run",
       Effect.gen(function* () {
-        const entry = message === 0 ? undefined : (yield* pathEntries(context)).get(message)
-        if (message !== 0 && (!entry || entry.contextExcluded))
+        const version =
+          message > 0 && Number.isSafeInteger(message) && context.leafSlotId !== null
+            ? yield* context.reader.ReadPathVersionAt({
+                userId: context.userId,
+                chatId: context.chatId,
+                forkId: context.forkId,
+                leafSlotId: context.leafSlotId,
+                position: message - 1
+              })
+            : null
+        if (message !== 0 && version === null)
           return { text: `Message ${message} isn't one of the earlier messages.`, isError: true }
         // A separate context's character reads only its own runs (spec/CHARACTER-CONTEXT.md §9.2). A
         // stretch view (spec/THREADS.md §7.3: the whole path with a character speaking) isn't one:
         // it filters only a separate join's stretch, and the workshops this tool is offered in have
         // no joins, as the history tools read a stretch view whole where no separate join is on it.
         if (
-          entry &&
+          version &&
           context.viewers !== null &&
           !context.viewers.includes(STRETCH_VIEW) &&
-          !context.viewers.includes(entry.version.speakerEntityId ?? "")
+          !context.viewers.includes(version.speakerEntityId ?? "")
         )
           return { text: `Message ${message}'s steps aren't yours to read.`, isError: true }
         const run =
@@ -145,8 +121,8 @@ const readRun: RolloutTool<{
                   .flatMap(({ step }) => (step.kind === "tool" ? [step] : []))
                   .map((step, at) => ({ ...step, n: at + 1 }))
               }
-            : entry
-              ? yield* messageSteps(context, entry)
+            : version
+              ? yield* messageSteps(context, version.id)
               : null
         if (run === null || run.steps.length === 0)
           return { text: `Message ${message} was written without tool calls.` }
@@ -190,80 +166,95 @@ const readRun: RolloutTool<{
         // without changing any tool declaration in an existing chat's provider prefix.
         const cursor = steps.some((s) => s.id === call)
           ? undefined
-          : call?.match(/^page:v1:(\d+):(\d+):([a-f0-9]{24})$/)
+          : call?.match(/^page:(v[12]):(\d+):(\d+):([a-f0-9]{24})$/)
+        const offset = Number(cursor?.[3] ?? 0)
         // Provider call ids and plugin tool names are source text too, not app metadata. A stored
         // quoted result is paged from its original, so the page quotes it once, by its offsets.
-        const payload = (s: (typeof steps)[number]) =>
-          `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${s.result === undefined || s.result === null ? "(no result)" : toolDataBody(s.result)}`
-        const fingerprint = (s: (typeof steps)[number]) =>
+        const payload = (s: (typeof steps)[number], legacy: boolean) => {
+          const result = s.result ?? "(no result)"
+          return `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${legacy ? result : toolDataBody(result)}`
+        }
+        const fingerprint = (s: (typeof steps)[number], content: string) =>
           createHash("sha256")
             .update(
               JSON.stringify([
                 context.userId,
                 context.chatId,
                 context.forkId,
-                entry?.version.id ?? context.rolloutId,
+                version?.id ?? context.rolloutId,
                 s.n,
                 s.id,
                 s.tool,
-                payload(s)
+                content
               ])
             )
             .digest("hex")
             .slice(0, 24)
+        const cursorStep = cursor && steps.find((s) => s.n === Number(cursor[2]))
+        // For a time v1 was also emitted for decoded bodies. The digest identifies which was paged.
+        const legacy =
+          cursor?.[1] === "v1" && !!cursorStep && fingerprint(cursorStep, payload(cursorStep, true)) === cursor[4]
+        const pageVersion = legacy ? "v1" : "v2"
         const chosen = steps.filter(
           (s) =>
             s.n >= from_step &&
-            (cursor ? s.n === Number(cursor[1]) : call === undefined || s.id === call) &&
-            words.every((w) => payload(s).toLowerCase().includes(w))
+            (cursor ? s.n === Number(cursor[2]) : call === undefined || s.id === call) &&
+            words.every((w) => payload(s, legacy).toLowerCase().includes(w))
         )
         if (chosen.length === 0)
           return { text: `No step of message ${message} matches (it has ${steps.length}).`, isError: true }
-        const first = chosen[0]!
-        if (
-          cursor &&
-          (fingerprint(first) !== cursor[3] ||
-            !Number.isSafeInteger(Number(cursor[2])) ||
-            Number(cursor[2]) >= payload(first).length)
-        )
-          return {
-            text: "That result page is unavailable. Read the step again without its page cursor.",
-            isError: true
-          }
+        if (cursor) {
+          const first = chosen[0]!
+          const content = payload(first, legacy)
+          if (fingerprint(first, content) !== cursor[4] || !Number.isSafeInteger(offset) || offset >= content.length)
+            return {
+              text: "That result page is unavailable. Read the step again without its page cursor.",
+              isError: true
+            }
+        }
         // Identities, counts, offsets and recovery directions are app-owned framing. A
         // response can hold several complete steps, then a page within one large step.
         const limit = Math.min(TOOL_RESULT_CHARS, max_tokens * 4)
-        const shown: Array<string> = []
-        let used = 0
-        for (const step of chosen) {
-          const stamp = fingerprint(step)
-          const content = payload(step)
-          const offset = cursor ? Number(cursor[2]) : 0
-          const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
-          const next = chosen.find((s) => s.n > step.n)?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
-          const following =
-            next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
-          const page = toolDataPage(content, {
-            offset,
-            limit: limit - used - following.length,
-            frame,
-            notice: shown.length === 0,
-            more: (end) =>
-              `[Result continues: read_run with message ${message} and call "page:v1:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
-          })
-          if (!page.text) {
-            shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)
-            break
+        const prepared = new Map<number, { content: string; stamp: string }>()
+        const renderPage = (budget: number) => {
+          const shown: Array<string> = []
+          let used = 0
+          for (const [i, step] of chosen.entries()) {
+            let original = prepared.get(step.n)
+            if (original === undefined) {
+              const content = payload(step, legacy)
+              original = { content, stamp: fingerprint(step, content) }
+              prepared.set(step.n, original)
+            }
+            const { content, stamp } = original
+            const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
+            const next = chosen[i + 1]?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
+            const following =
+              next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
+            const page = toolDataPage(content, {
+              offset,
+              limit: Math.min(limit, budget) - used - following.length,
+              frame,
+              notice: i === 0,
+              minimumProgress: i === 0,
+              more: (end) =>
+                `[Result continues: read_run with message ${message} and call "page:${pageVersion}:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
+            })
+            if (!page.text || page.end === offset) {
+              shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)
+              break
+            }
+            shown.push(page.text)
+            used += page.text.length + 1
+            if (page.end < content.length) {
+              if (following) shown.push(following.trimStart())
+              break
+            }
+            if (cursor && following) shown.push(following.trimStart())
           }
-          shown.push(page.text)
-          used += page.text.length + 1
-          if (page.end < content.length) {
-            if (following) shown.push(following.trimStart())
-            break
-          }
-          if (cursor && following) shown.push(following.trimStart())
+          return shown.join("\n")
         }
-        return { text: shown.join("\n"), dataOnly: true as const }
+        return { text: renderPage(limit), dataOnly: true as const, renderPage }
       })
     )
 }

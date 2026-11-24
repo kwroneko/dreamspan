@@ -6,15 +6,45 @@ import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
-import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
-import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
+import type { UserId } from "@dreamspan/shared/domain.ts"
+import { attachedStory, pairedWorkshopTree, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
-import { onDisplayPath, pathPieces } from "./displayPath.ts"
+import { displaySlots, pathPieces, positionOf } from "./displayPath.ts"
+import { slotDeletedIn } from "./forkState.ts"
+
+export const getWorkshopStart = (sql: SqlClient.SqlClient, userId: UserId, requestId: string) =>
+  Effect.gen(function* () {
+    const [row] = yield* sql<
+      ChatRow & {
+        start_chat_id: ChatId
+        start_fork_id: ForkId
+        start_slot_id: SlotId
+        speaker_id: EntityId | null
+        start_kind: "Send" | "Generate"
+      }
+    >`SELECT c.*, s.chat_id AS start_chat_id, s.fork_id AS start_fork_id,
+      s.slot_id AS start_slot_id, s.speaker_id, s.kind AS start_kind
+      FROM workshop_starts s LEFT JOIN chats c
+        ON c.id = s.chat_id AND c.owner_user_id = s.user_id AND c.deleted_at IS NULL
+      WHERE s.user_id = ${userId} AND s.request_id = ${requestId}`
+    if (!row) return null
+    if (!row.id) return yield* new NotFound({ entity: "chat", id: row.start_chat_id })
+    return {
+      chat: toChat(row),
+      forkId: row.start_fork_id,
+      slotId: row.start_slot_id,
+      speaker: row.speaker_id,
+      kind: row.start_kind
+    }
+  })
 
 export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    GetWorkshopStart: ({ userId, requestId }) =>
+      getWorkshopStart(sql, userId, requestId).pipe(query("GetWorkshopStart")),
     StoryReadStamp: ({ userId, chatId }) =>
       Effect.gen(function* () {
         // Only metadata leaves this worker. Include current speaker/library heads because
@@ -34,22 +64,22 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         const [story] = yield* sql<{ id: string }>`SELECT id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (!story) return yield* new NotFound({ entity: "chat", id: chatId })
+        if (forkId !== undefined) {
+          // Beside one story branch, limit the paired workshops after ordering by activity.
+          const paired = yield* sql<ChatRow>`${pairedWorkshopTree(sql, chatId, forkId)}
+            SELECT c.* FROM w JOIN forks f ON f.id = w.id JOIN chats c ON c.id = f.chat_id
+            WHERE f.deleted_at IS NULL AND f.purged_at IS NULL AND c.owner_user_id = ${userId} AND c.status = 'active'
+            GROUP BY c.id ORDER BY coalesce(max(f.last_chatted_at), max(f.created_at)) DESC,
+              c.created_at DESC, c.id DESC LIMIT 200`
+          return paired.map(toChat)
+        }
         // Only the owner's own live workshops: the event's writer checked the story is theirs too.
         const rows = yield* sql<ChatRow>`SELECT c.* FROM state_events e JOIN chats c ON c.id = e.chat_id
           WHERE json_extract(e.value_json, '$.chat') = ${chatId} AND e.key = 'workshop.attached'
             AND e.slot_id IS NULL AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
             AND c.kind = 'workshop' AND c.status = 'active'
           GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC LIMIT 200`
-        if (forkId === undefined) return rows.map(toChat)
-        // Beside one story branch: those with a live branch going with it (WORKSHOP-BRANCHES §8.1).
-        // The one chatted in last first: each workshop's newest paired branch (listed first per chat).
-        const recency = new Map<string, number>()
-        for (const fork of yield* pairedWorkshopForks(sql, chatId, forkId))
-          if (!recency.has(fork.chat_id)) recency.set(fork.chat_id, fork.last_chatted_at ?? fork.created_at)
-        return rows
-          .filter((row) => recency.has(row.id))
-          .sort((a, b) => recency.get(b.id)! - recency.get(a.id)!)
-          .map(toChat)
+        return rows.map(toChat)
       }).pipe(query("AttachedWorkshops")),
     WorkshopBranches: ({ userId, chatId }) =>
       Effect.gen(function* () {
@@ -96,25 +126,32 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         const [recorded] =
           versionId === undefined
             ? []
-            : yield* sql<{ leaf: string; fork_id: string }>`SELECT json_extract(e.value_json, '$.leaf') AS leaf,
+            : yield* sql<{ leaf: string | null; fork_id: string }>`SELECT json_extract(e.value_json, '$.leaf') AS leaf,
                 e.fork_id FROM state_events e JOIN versions v ON v.id = ${versionId}
               WHERE e.chat_id = ${chatId} AND e.key = 'workshop.story_at'
                 AND (e.version_id = v.id OR e.version_id = v.source_version_id)
               ORDER BY e.version_id = v.id DESC LIMIT 1`
         const now = yield* storyPositionOf(sql, userId, chatId, forkId ?? recorded?.fork_id ?? null)
         if (now === null || !recorded) return now
+        if (recorded.leaf === null) return { ...now, leafSlotId: null }
         // A position the paired branch doesn't show (a message copied with "As it is now", recorded
         // on the original branch past the fork point) falls back to the branch's end now.
         const [fork] = yield* sql<{
           tip_slot_id: string | null
         }>`SELECT tip_slot_id FROM forks WHERE id = ${now.forkId}`
-        const [place] = yield* sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots
+        const [place] = yield* sql<{ chain_id: string; depth: number; deleted: number }>`
+          SELECT chain_id, depth, ${slotDeletedIn(sql, now.forkId, "s")} AS deleted FROM slots s
           WHERE id = ${recorded.leaf} AND chat_id = ${now.chatId}`
         if (!fork || !place) return now
         const pieces = yield* pathPieces(sql, now.chatId, now.forkId, fork.tip_slot_id)
-        return onDisplayPath(pieces, { id: recorded.leaf, chainId: place.chain_id, depth: place.depth })
-          ? { ...now, leafSlotId: recorded.leaf as SlotId }
-          : now
+        const position = positionOf(pieces, { id: recorded.leaf, chainId: place.chain_id, depth: place.depth })
+        if (position === null) return now
+        if (place.deleted === 0) return { ...now, leafSlotId: recorded.leaf as SlotId }
+        // A deleted slot can still be on the path. Stay within the recorded boundary.
+        const [previous] = yield* sql<{ id: SlotId }>`${displaySlots(sql, pieces, 0, position - 1)}
+          SELECT d.id FROM display_slots d JOIN slots s ON s.id = d.id
+          WHERE NOT ${slotDeletedIn(sql, now.forkId, "s")} ORDER BY d.position DESC LIMIT 1`
+        return { ...now, leafSlotId: previous?.id ?? null }
       }).pipe(query("WorkshopStoryPosition")),
     WorkshopStories: ({ userId, chatIds }) =>
       Effect.gen(function* () {

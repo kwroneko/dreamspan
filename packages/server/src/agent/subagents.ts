@@ -1230,7 +1230,10 @@ const carryOn = (
     if (prior.status === "completed") {
       const body = (prior.partial ?? "").slice(0, REPORT_CHARS)
       const unread = undelivered(ctx.transcript?.() ?? [], prior.handle, saved())
-      const notes = [body === "" ? "It wrote no report." : "", unread.length > 0 ? unreadNote(unread) : ""]
+      const notes = [
+        body === "" ? "It wrote no report." : "",
+        unread.length > 0 ? unreadNote(unread.map((message) => message.text)) : ""
+      ]
       return yield* answer("done", body, notes.filter((n) => n !== "").join(" "), false)
     }
     // Started by this very run (it can't be carried on into itself): never run twice.
@@ -1580,7 +1583,8 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
             // A model with no known price is held to its token limit alone.
             s.unpriced === 0 && caps.cost > 0 ? s.cost / caps.cost : 0,
             clock.elapsed() / limitMs,
-            s.runUnpriced === 0 && runCost > 0 ? s.runCost / runCost : 0
+            // Known charges still count toward the combined limit.
+            runCost > 0 ? s.runCost / runCost : 0
           ]
           if (shares.some((share) => share >= 1)) {
             stopAtLimit()
@@ -1766,10 +1770,8 @@ export const agentTool: RolloutTool<AgentArgs> = {
   effect: "read",
   // Never a story reply's tool (§9: no story use until the owner accepts one).
   replyTool: false,
-  // Like tool_search and load_skill, it reads no story facts itself: its child reads them only
-  // through the reply's own offered tools, at the reply's position (`storyAt`), each under its
-  // own declaration.
-  storyRead: "conversation",
+  // A child's report may include positioned story reads from the parent's offered tools.
+  storyRead: "positioned",
   titleField: "task",
   description: description(),
   parameters: parametersFor(),
@@ -2004,15 +2006,25 @@ interface MessageArgs {
 
 const FROM_PARENT = "Message from the assistant that started you:\n"
 
+interface ParentMessage {
+  readonly text: string
+  readonly call?: { readonly id: string; readonly turn: number }
+}
+
 /** The message as the subagent reads it: its parent's, not data (§4). */
-const fromParent = (message: string): AgentMessage => ({
+const fromParent = ({ text, call }: ParentMessage): AgentMessage => ({
   role: "rpApp",
-  content: `${FROM_PARENT}${message}`,
+  content: `${FROM_PARENT}${text}`,
   fromParent: true,
+  ...(call ? { parentCall: call } : {}),
   timestamp: Date.now()
 })
 
-const isFromParent = (m: AgentMessage) => m.role === "rpApp" && (m as { fromParent?: unknown }).fromParent === true
+const isFromParent = (m: AgentMessage): m is Extract<AgentMessage, { role: "rpApp" }> & { fromParent: true } =>
+  m.role === "rpApp" && m.fromParent === true
+
+const sameParentCall = (a: ParentMessage["call"], b: ParentMessage["call"]) =>
+  a !== undefined && b !== undefined && a.id === b.id && a.turn === b.turn
 
 /** A parent's message as it wrote it. */
 const parentText = (m: AgentMessage) => {
@@ -2022,10 +2034,10 @@ const parentText = (m: AgentMessage) => {
 }
 
 /** Whether a subagent's saved run already holds this message of its parent's. */
-const readBy = (transcript: string | null, message: string) => {
+const readBy = (transcript: string | null, call: ParentMessage["call"]) => {
   try {
     return (JSON.parse(transcript ?? "[]") as ReadonlyArray<AgentMessage>).some(
-      (m) => isFromParent(m) && parentText(m) === message
+      (m) => isFromParent(m) && sameParentCall(m.parentCall, call)
     )
   } catch {
     return false
@@ -2044,34 +2056,31 @@ const undelivered = (
   parent: ReadonlyArray<AgentMessage>,
   handle: string,
   child: ReadonlyArray<AgentMessage>
-): ReadonlyArray<string> => {
-  const read = child.filter(isFromParent).map(parentText)
-  const delivered = new Set(
-    parent.flatMap((m) =>
-      m.role === "toolResult" &&
-      m.toolName === "message_agent" &&
-      !m.isError &&
+): ReadonlyArray<ParentMessage> => {
+  const sent: Array<ParentMessage> = []
+  let turn: Extract<AgentMessage, { role: "assistant" }> | undefined
+  for (const m of parent) {
+    if (m.role === "assistant") turn = m
+    if (
+      turn === undefined ||
+      m.role !== "toolResult" ||
+      m.toolName !== "message_agent" ||
+      m.isError ||
       // As the tool said it, inside the run's data envelope where it has one.
-      m.content.some((p) => p.type === "text" && p.text.includes(`Delivered to ${handle}.`))
-        ? [m.toolCallId]
-        : []
+      !m.content.some((p) => p.type === "text" && p.text.includes(`Delivered to ${handle}.`))
     )
-  )
-  const sent = parent.flatMap((m) =>
-    m.role === "assistant"
-      ? m.content.flatMap((p) =>
-          p.type === "toolCall" && delivered.has(p.id) && typeof p.arguments["message"] === "string"
-            ? [(p.arguments["message"] as string).trim()]
-            : []
-        )
-      : []
-  )
-  // Each read one accounts for one sent with the same words, in order.
-  const left = [...read]
-  return sent.filter((text) => {
-    const at = left.indexOf(text)
-    if (at < 0) return true
-    left.splice(at, 1)
+      continue
+    const part = turn.content.find((p) => p.type === "toolCall" && p.id === m.toolCallId)
+    if (part?.type === "toolCall" && typeof part.arguments["message"] === "string")
+      sent.push({ text: part.arguments["message"].trim(), call: { id: part.id, turn: turn.timestamp } })
+  }
+  // Older saved inboxes have only text. Each such entry accounts for one completed delivery.
+  const left = child.filter(isFromParent)
+  return sent.filter(({ text, call }) => {
+    const at = left.findIndex((m) => sameParentCall(m.parentCall, call))
+    const seen = at >= 0 ? at : left.findIndex((m) => m.parentCall === undefined && parentText(m) === text)
+    if (seen < 0) return true
+    left.splice(seen, 1)
     return false
   })
 }
@@ -2097,9 +2106,18 @@ const messageSubagent = (ctx: ToolContext, args: MessageArgs): Effect.Effect<Too
     const before = yield* already(ctx, host, background)
     if (before !== null) return before
     const name = typeof args.agent === "string" ? args.agent.trim() : ""
-    const message = typeof args.message === "string" ? args.message.trim() : ""
+    const text = typeof args.message === "string" ? args.message.trim() : ""
     if (name === "") return refuse("Say in `agent` which subagent: its handle (research-2) or its name.")
-    if (message === "") return refuse("Say in `message` what to tell it.")
+    if (text === "") return refuse("Say in `message` what to tell it.")
+    const turn = ctx
+      .transcript?.()
+      .findLast(
+        (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === ctx.toolCallId)
+      )
+    const message: ParentMessage = {
+      text,
+      ...(turn?.role === "assistant" ? { call: { id: ctx.toolCallId, turn: turn.timestamp } } : {})
+    }
     const find = reader
       .FindSubagentByHandle({
         userId,
@@ -2121,7 +2139,7 @@ const messageSubagent = (ctx: ToolContext, args: MessageArgs): Effect.Effect<Too
         return refuse("The app couldn't look the subagent up. Try again.")
     }
     // A call carried on from before a stop may already have been delivered: it never is twice.
-    if (carried(host, ctx.toolCallId) && readBy(found.value.transcript, message))
+    if (carried(host, ctx.toolCallId) && readBy(found.value.transcript, message.call))
       return { text: `Delivered to ${found.value.handle}.` }
     // Running here: the message reaches it at its next request (§4).
     const live = running.get(found.value.rolloutId)
@@ -2141,7 +2159,7 @@ const continueChild = (
   ctx: ToolContext,
   host: Host,
   prior: Prior,
-  message: string,
+  message: ParentMessage,
   background: boolean
 ): Effect.Effect<ToolOutput, never, Scope.Scope> =>
   Effect.gen(function* () {
@@ -2286,7 +2304,7 @@ export const messageAgentTool: RolloutTool<MessageArgs> = {
   capability: "subagents",
   effect: "read",
   replyTool: false,
-  storyRead: "conversation",
+  storyRead: "positioned",
   titleField: "agent",
   description: messageDescription(false),
   parameters: messageParameters(false),

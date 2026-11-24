@@ -36,7 +36,7 @@ test.beforeAll(async () => {
             ? `Version 2. ${" ".repeat(20000)}`
             : n === 12
               ? "Version 12, short."
-              : `Version ${n}. ${filler}${n === 30 || n === 41 ? " Then a zeppelin drifts over the harbour. <img src=x onerror=alert(1)>" : ""}`
+              : `Version ${n}. ${filler}${n === 30 || n === 41 ? " Then İ saw a zeppelin drift over the harbour. <img src=x onerror=alert(1)>" : ""}`
         const entry = yield* api.WriteVersion({ slotId, content, expectedRowVersion: rowVersion })
         rowVersion = entry.rowVersion
       }

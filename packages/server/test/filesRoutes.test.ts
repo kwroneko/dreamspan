@@ -3,12 +3,19 @@
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { encodeText, type FolderListing, type TextFile } from "@dreamspan/shared/files.ts"
-import { Effect } from "effect"
+import {
+  encodeText,
+  type FolderListing,
+  type TextFile,
+  type UploadOutcome,
+  type UploadUndoEntry
+} from "@dreamspan/shared/files.ts"
+import { Effect, Fiber } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { eventually } from "./support/generation.ts"
 
 const call = (path: string, init?: RequestInit) =>
   Effect.gen(function* () {
@@ -42,6 +49,75 @@ const body = (response: Response) => Effect.promise(() => response.text())
 const accountOf = (filesDir: string) => readdirSync(filesDir).find((name) => name !== ".bin")!
 
 describe("file routes", () => {
+  it.live("Keep both checks numbered names past the listing limit", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/report.txt", "original")
+      yield* upload("/files/report (2).txt", "first copy")
+      const files = join(config.dataDir, "files")
+      const root = join(files, accountOf(files))
+      for (let n = 0; n < 5_000; n++) writeFileSync(join(root, `earlier-${n}`), "")
+      const listing = yield* list("/files")
+      assert.strictEqual(listing.entries.length, 5_000)
+      assert.isFalse(listing.entries.some(({ name }) => name === "report (2).txt"))
+      const uploaded = yield* upload("/files/report.txt", "second copy", "keep")
+      assert.strictEqual(uploaded.status, 200)
+      assert.deepInclude((yield* Effect.promise(() => uploaded.json())) as object, { path: "/files/report (3).txt" })
+      assert.strictEqual(yield* body(yield* call("/files/raw?path=/files/report%20(2).txt")), "first copy")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("upload Undo removes only the created entries while they still match", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/existing/keep.txt", "prior content")
+      const added = yield* upload("/files/existing/new/nested/added.txt", "uploaded content")
+      const receipt = ((yield* Effect.promise(() => added.json())) as UploadOutcome).created!
+      assert.deepStrictEqual(
+        receipt.map(({ path, kind }) => [path, kind]),
+        [
+          ["/files/existing/new", "folder"],
+          ["/files/existing/new/nested", "folder"],
+          ["/files/existing/new/nested/added.txt", "file"]
+        ]
+      )
+      const edited = yield* upload("/files/existing/new/edited.txt", "uploaded content")
+      const editedReceipt = ((yield* Effect.promise(() => edited.json())) as UploadOutcome).created![0]!
+      yield* upload(editedReceipt.path, "changed content", "replace")
+      const undo = (entry: UploadUndoEntry) => json("/files/delete", { path: entry.path, upload: entry })
+      assert.strictEqual((yield* undo(editedReceipt)).status, 200)
+      for (const entry of receipt.toReversed()) assert.strictEqual((yield* undo(entry)).status, 200)
+      assert.deepStrictEqual(
+        (yield* list("/files/existing")).entries.map(({ name }) => name),
+        ["keep.txt", "new"]
+      )
+      assert.deepStrictEqual(
+        (yield* list("/files/existing/new")).entries.map(({ name }) => name),
+        ["edited.txt"]
+      )
+
+      const empty = yield* json("/files/folder", { path: "/files/existing/empty/nested", upload: true })
+      const emptyReceipt = (yield* Effect.promise(() => empty.json())) as { created: Array<UploadUndoEntry> }
+      assert.deepStrictEqual(
+        emptyReceipt.created.map(({ path }) => path),
+        ["/files/existing/empty", "/files/existing/empty/nested"]
+      )
+      for (const entry of emptyReceipt.created.toReversed()) assert.strictEqual((yield* undo(entry)).status, 200)
+      assert.deepStrictEqual(
+        (yield* list("/files/existing")).entries.map(({ name }) => name),
+        ["keep.txt", "new"]
+      )
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      yield* api.SetFilesQuota({ userId: me.id, quotaBytes: 1 })
+      assert.strictEqual((yield* upload("/files/refused/empty/upload.txt", "refused")).status, 507)
+      assert.deepStrictEqual(
+        (yield* list("/files")).entries.map(({ name }) => name),
+        ["existing"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
   it.live("upload, list, read, rename, make folders and delete", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -193,6 +269,7 @@ describe("file routes", () => {
       yield* upload("/files/out/Left out of this zip.txt", "My file.")
       const filesDir = join(config.dataDir, "files")
       const out = join(filesDir, accountOf(filesDir), "out")
+      mkdirSync(join(out, "empty"))
       // Names a command (or a prompt-injected assistant) can make: a backslash path, a folder of one.
       writeFileSync(join(out, "..\\..\\AppData\\x.bat"), "Synthetic.")
       mkdirSync(join(out, "a\\b"))
@@ -205,11 +282,15 @@ describe("file routes", () => {
       const names: Array<string> = []
       for (let at = bytes.indexOf(CENTRAL); at !== -1; at = bytes.indexOf(CENTRAL, at + 4)) {
         const length = bytes.readUInt16LE(at + 28)
-        names.push(bytes.subarray(at + 46, at + 46 + length).toString("utf8"))
+        const name = bytes.subarray(at + 46, at + 46 + length).toString("utf8")
+        names.push(name)
+        if (name.endsWith("/")) assert.strictEqual(bytes.readUInt32LE(at + 38) & 0x10, 0x10)
       }
       assert.deepStrictEqual(names.sort(), [
+        "out/",
         "out/Left out of this zip (2).txt",
         "out/Left out of this zip.txt",
+        "out/empty/",
         "out/keep.txt"
       ])
       for (const name of names) assert.notInclude(name, "\\")
@@ -479,9 +560,35 @@ describe("file routes", () => {
         raw.some((name) => name.endsWith(".rp-tmp")),
         raw.join(", ")
       )
-      // Replacing a file counts only what it adds.
-      const replaced = yield* upload("/files/a.bin", bytes(700_000), "replace")
+      // The old content stays charged as a version, so 700 KB of new data will not fit.
+      const tooLarge = yield* upload("/files/a.bin", bytes(700_000), "replace")
+      assert.strictEqual(tooLarge.status, 507, yield* body(tooLarge))
+      const replaced = yield* upload("/files/a.bin", bytes(350_000), "replace")
       assert.strictEqual(replaced.status, 200, yield* body(replaced))
+      const api = yield* client()
+      const usage = yield* api.GetFilesUsage({ fresh: true })
+      assert.strictEqual(usage.versionsBytes, 600_000)
+      assert.isFalse(usage.over)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("replacement reuses an already charged version", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    return Effect.gen(function* () {
+      const original = "a".repeat(400_000)
+      yield* upload("/files/first.bin", original)
+      yield* upload("/files/second.bin", original)
+      assert.strictEqual((yield* upload("/files/first.bin", "changed", "replace")).status, 200)
+      const api = yield* client()
+      const before = yield* api.GetFilesUsage({ fresh: true })
+      assert.strictEqual(before.versionsBytes, original.length)
+      const replace = yield* upload("/files/second.bin", "b".repeat(300_000), "replace")
+      assert.strictEqual(replace.status, 200, yield* body(replace))
+      const cached = yield* api.GetFilesUsage({})
+      const measured = yield* api.GetFilesUsage({ fresh: true })
+      assert.strictEqual(measured.versionsBytes, original.length)
+      assert.strictEqual(cached.usedBytes, measured.usedBytes)
+      assert.isFalse(measured.over)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 
@@ -575,6 +682,89 @@ describe("file routes", () => {
       const beforeRefused = yield* cached
       assert.strictEqual(yield* streamed("/files/c.bin", 1_500_000), 507)
       assert.strictEqual((yield* cached).usedBytes, beforeRefused.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("concurrent replacements credit only the files they actually replace", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const file = "/files/race.bin"
+      assert.strictEqual((yield* upload(file, "x".repeat(100_000))).status, 200)
+      yield* api.GetFilesUsage({ fresh: true })
+      const root = join(config.dataDir, "files", (yield* api.Whoami()).id)
+      const start = (byte: number) => {
+        const stream = new TransformStream<Uint8Array>()
+        const writer = stream.writable.getWriter()
+        const send = call(`/files/upload?${new URLSearchParams({ path: file, conflict: "replace" })}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: stream.readable,
+          duplex: "half"
+        } as RequestInit)
+        return { send, writer, chunk: new Uint8Array(20_000).fill(byte) }
+      }
+      const a = start(65)
+      const b = start(66)
+      const first = yield* Effect.forkChild(a.send)
+      const second = yield* Effect.forkChild(b.send)
+      yield* Effect.promise(() => Promise.all([a.writer.write(a.chunk), b.writer.write(b.chunk)]))
+      // Both requests have already checked the original file when both staging files exist.
+      yield* eventually(() => readdirSync(root).filter((name) => name.endsWith(".rp-tmp")).length === 2)
+      yield* Effect.promise(() => a.writer.close())
+      assert.strictEqual((yield* Fiber.join(first)).status, 200)
+      yield* Effect.promise(() => b.writer.close())
+      assert.strictEqual((yield* Fiber.join(second)).status, 200)
+      const cached = yield* api.GetFilesUsage({})
+      const measured = yield* api.GetFilesUsage({ fresh: true })
+      assert.strictEqual(cached.usedBytes, measured.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("a quota walk counts a staged upload only until the request is abandoned", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      assert.strictEqual((yield* upload("/files/warm.bin", "warm")).status, 200)
+      const root = join(config.dataDir, "files", (yield* api.Whoami()).id)
+      writeFileSync(join(root, ".ordinary.rp-tmp"), Buffer.alloc(10_000))
+      const baseline = yield* api.GetFilesUsage({ fresh: true })
+      assert.isAtLeast(baseline.filesBytes, 10_004)
+
+      const stop = new AbortController()
+      yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()))
+      const stream = new TransformStream<Uint8Array>()
+      const writer = stream.writable.getWriter()
+      const request = yield* Effect.forkChild(
+        Effect.exit(
+          call("/files/upload?path=/files/stalled.bin", {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: stream.readable,
+            duplex: "half",
+            signal: stop.signal
+          } as RequestInit)
+        )
+      )
+      const staged = () => readdirSync(root).find((name) => name.startsWith(".stalled.bin."))
+      const bytes = 600_000
+      yield* Effect.promise(() => writer.write(new Uint8Array(bytes)))
+      yield* eventually(() => {
+        const name = staged()
+        return name !== undefined && statSync(join(root, name)).size === bytes
+      })
+
+      const walked = yield* api.GetFilesUsage({ fresh: true })
+      assert.isBelow(walked.filesBytes, baseline.filesBytes + 4096)
+      const during = yield* api.GetFilesUsage({})
+      assert.strictEqual(during.usedBytes, walked.usedBytes + bytes)
+      stop.abort()
+      yield* Fiber.join(request)
+      yield* eventually(() => staged() === undefined)
+      const after = yield* api.GetFilesUsage({})
+      assert.strictEqual(after.usedBytes, during.usedBytes - bytes)
+      assert.strictEqual(after.measuredAt, during.measuredAt)
+      assert.strictEqual((yield* upload("/files/next.bin", "x".repeat(500_000))).status, 200)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 

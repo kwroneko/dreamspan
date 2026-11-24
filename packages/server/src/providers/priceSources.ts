@@ -32,13 +32,25 @@ export const priceSources = (
   // The endpoint's price counts only while the user has it on (turning it off restores the rest
   // without a refresh, PRICES §3.1); a rate it leaves unknown comes from the next source (§4.3).
   const feed = context.priceEndpoint === true ? upstream.priceFeed : undefined
-  const next = list?.price ?? builtin
-  const filled = (price: Price): Price => ({
-    ...(next?.cacheRead === undefined ? {} : { cacheRead: next.cacheRead }),
-    ...(next?.cacheWrite === undefined ? {} : { cacheWrite: next.cacheWrite }),
-    ...(next?.cacheWriteLong === undefined ? {} : { cacheWriteLong: next.cacheWriteLong }),
-    ...price
-  })
+  const filled = (price: Price): Price => {
+    const currency = price.currency ?? "USD"
+    const [preferred, secondary] = [list?.price, builtin].map((candidate) =>
+      (candidate?.currency ?? "USD") === currency ? candidate : null
+    )
+    const read = preferred?.cacheRead ?? secondary?.cacheRead
+    const write = preferred?.cacheWrite ?? secondary?.cacheWrite
+    const long = preferred?.cacheWriteLong ?? secondary?.cacheWriteLong
+    const base = {
+      ...(read === undefined ? {} : { cacheRead: read }),
+      ...(write === undefined ? {} : { cacheWrite: write }),
+      ...(long === undefined ? {} : { cacheWriteLong: long })
+    }
+    return {
+      ...base,
+      ...price,
+      ...(price.tiers === undefined ? {} : { tiers: price.tiers.map((tier) => ({ ...base, ...tier })) })
+    }
+  }
   const routes = (feed?.routes ?? []).flatMap((route) =>
     route.price === null
       ? []
@@ -64,3 +76,24 @@ export const priceSources = (
 /** The first known price, for formulas that take one rate table. */
 export const firstPrice = (sources: PriceSources) =>
   sources.endpoint?.price ?? sources.list?.price ?? sources.builtin?.price ?? null
+
+/** The most a request could cost across rate tables, cache splits and output splits. */
+export const priceBound = (prices: ReadonlyArray<Price>, inputTokens: number, outputTokens: number) => {
+  const bounds = prices.map((price) => {
+    const rates = [price, ...(price.tiers ?? [])]
+    const input = Math.max(
+      ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
+    )
+    const output = Math.max(...rates.flatMap((r) => [r.output, r.reasoning ?? 0]))
+    const fee = (price.tiers ?? []).reduce(
+      (highest, tier) => (inputTokens > tier.inputTokensAbove ? Math.max(highest, tier.perRequest ?? 0) : highest),
+      price.perRequest ?? 0
+    )
+    return {
+      amount: (inputTokens * input + outputTokens * output) / 1e6 + fee,
+      currency: price.currency ?? "USD"
+    }
+  })
+  if (new Set(bounds.map((b) => b.currency)).size !== 1) return null
+  return bounds.reduce((a, b) => (b.amount > a.amount ? b : a))
+}

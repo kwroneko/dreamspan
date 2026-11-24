@@ -70,13 +70,16 @@ export function Avatar({
   className = "",
   preview = false,
   alt = "",
-  src
+  src,
+  full
 }: {
   id: string
   name: string
   mediaId?: string | null
   /** A picture that isn't a stored file (a card source's, through this server), at a width. */
   src?: ((width: number) => string) | undefined
+  /** With `src`, the whole picture's address: what `preview` opens. */
+  full?: string | undefined
   /** The avatar's chosen cutout (§14.5c): what the portrait shows. Absent or null: the default. */
   crop?: AvatarCrop | null | undefined
   size?: AvatarSize
@@ -129,7 +132,7 @@ export function Avatar({
         className={`${box} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
         onClick={(event) => {
           event.stopPropagation()
-          open({ id, name, mediaId, picture: crop?.picture })
+          open({ id, name, mediaId, picture: crop?.picture, ...(full === undefined ? {} : { src: full }) })
         }}
         onDragStart={(event) => {
           // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.
@@ -154,23 +157,36 @@ interface Face {
   readonly crop?: AvatarCrop | null | undefined
 }
 
-/** The header's overflow tile, scaled to match its adjacent portraits. */
+/**
+ * The header's overflow tile, scaled to match its adjacent portraits. `fixedWidth`: one width
+ * for every count, the width of "+99" in tabular numerals, and above 99 "99+" in it, so a
+ * count arriving or changing moves nothing beside the tile.
+ */
 export function PortraitOverflow({
   remaining,
   size = "md",
+  fixedWidth = false,
   className = "",
   ...props
-}: { remaining: number; size?: AvatarSize } & Omit<ComponentProps<"span">, "children">) {
-  return remaining > 0 ? (
+}: { remaining: number; size?: AvatarSize; fixedWidth?: boolean } & Omit<ComponentProps<"span">, "children">) {
+  if (remaining <= 0) return null
+  return (
     <span
       data-portrait-overflow
       aria-hidden={props["aria-label"] ? undefined : true}
       {...props}
       className={`inline-flex shrink-0 items-center justify-center rounded-sm border border-border bg-surface-raised text-muted ${AVATAR_SIZES[size]} ${className}`}
     >
-      <span>+{remaining}</span>
+      {fixedWidth ? (
+        // "+99", unseen and not part of the text, sizes the one cell the count is centred in.
+        <span className="grid justify-items-center tabular-nums before:invisible before:col-start-1 before:row-start-1 before:content-['+99']">
+          <span className="col-start-1 row-start-1">{remaining > 99 ? "99+" : `+${remaining}`}</span>
+        </span>
+      ) : (
+        <span>+{remaining}</span>
+      )}
     </span>
-  ) : null
+  )
 }
 
 /** A chat's cast as a compact row of consistently shaped portraits. */

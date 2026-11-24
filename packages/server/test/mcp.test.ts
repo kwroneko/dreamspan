@@ -287,6 +287,23 @@ describe("MCP connections", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("an empty first listing still requires review of later tools", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const server = yield* fake()
+      const created = yield* api.CreateMcpConnection({ settings: settings(server.streamableUrl) })
+      assert.isTrue(created.check.ok)
+      assert.strictEqual(created.check.toolCount, 0)
+      yield* api.SetMcpUse({ connectionId: created.connection.id, workshops: true })
+
+      server.state.tools = [fakeTool("read")]
+      const { connection } = yield* api.CheckMcpConnection({ connectionId: created.connection.id })
+      assert.strictEqual(connection.catalogRevision, 1)
+      assert.isTrue(mcpToolIsNew(connection.tools[0]!, connection.use))
+      assert.isFalse(mcpToolAllowed(connection.tools[0]!, connection.use))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("a server that doesn't answer times out, and the ledger says so", () =>
     Effect.gen(function* () {
       const api = yield* client()

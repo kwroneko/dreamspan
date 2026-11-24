@@ -7,7 +7,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, EntityId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { showActions } from "./support/message.ts"
+import { messageMenu, showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { nextReply } from "./support/strip.ts"
@@ -19,7 +19,7 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
  * Ash (the user's) with Mira "At the Lantern" and Wren "At the docks", threads from #3; Tobin, the
  * user's other voice, is in neither, so each thread's reply is its one character's.
  */
-const seed = (suffix: string) =>
+const seed = (suffix: string, three = false) =>
   admin((api) =>
     Effect.gen(function* () {
       if (process.env.READING_THREAD_DENSITY === "compact")
@@ -64,10 +64,16 @@ const seed = (suffix: string) =>
         expectedRowVersion: rowVersion,
         threads: [
           { name: "At the Lantern", cast: [mira.entityId as EntityId], writesAs: null },
-          { name: "At the docks", cast: [wren.entityId as EntityId], writesAs: null }
+          { name: "At the docks", cast: [wren.entityId as EntityId], writesAs: null },
+          ...(three ? [{ name: "In the square", cast: [tobin.entityId as EntityId], writesAs: null }] : [])
         ]
       })
-      return { chatId: chat.id as ChatId, lantern: started.forkIds[0]!, docks: started.forkIds[1]! }
+      return {
+        chatId: chat.id as ChatId,
+        lantern: started.forkIds[0]!,
+        docks: started.forkIds[1]!,
+        forkIds: started.forkIds
+      }
     })
   )
 
@@ -171,6 +177,48 @@ test("one send posts a copy and a reply in each thread ticked, linked, saved and
   await page.getByRole("button", { name: "Delete the copy in “At the Lantern” too", exact: true }).click()
   await expect.poll(async () => (await texts(chatId, lantern)).includes("The bells ring three times.")).toBe(false)
   expect(await texts(chatId, docks)).not.toContain("The bells ring three times.")
+})
+
+test("one Undo restores deleted selection copies in separate requests for each thread", async ({ page }) => {
+  const { chatId, forkIds } = await seed("grouped copy undo", true)
+  const content = "A note for all three threads."
+  const sent = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId })
+      return yield* api.SendToThreads({
+        chatId,
+        content,
+        targets: forkIds.map((forkId) => ({
+          forkId,
+          parentSlotId: chat.activeLeafSlotId,
+          speakerEntityId: null,
+          reply: false,
+          replySpeakerEntityId: null
+        }))
+      })
+    })
+  )
+  expect(sent.copies.map((copy) => copy._tag)).toEqual(["Posted", "Posted", "Posted"])
+  const restored: number[] = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const frame =
+        typeof data === "string" ? (JSON.parse(data) as { tag?: string; payload?: { itemIds: string[] } }) : null
+      if (frame?.tag === "RestoreBinItems") restored.push(frame.payload!.itemIds.length)
+      upstream.send(data)
+    })
+  })
+  await open(page, `/chats/${chatId}`, 1280, "light")
+  await messageMenu(messages(page).filter({ hasText: content }), "Select messages")
+  await page.getByRole("region", { name: "Selected messages" }).getByRole("button", { name: "Delete…" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete message", exact: true }).click()
+  await page.getByRole("button", { name: "Delete the 2 copies too", exact: true }).click()
+  const toast = page.locator("[data-toast]").filter({ hasText: "2 messages moved to the bin." })
+  await toast.getByRole("button", { name: "Undo", exact: true }).click()
+  await expect.poll(() => restored).toEqual([1, 1])
+  for (const forkId of forkIds.slice(1)) await expect.poll(() => texts(chatId, forkId)).toContain(content)
+  expect(await texts(chatId, forkIds[0]!)).not.toContain(content)
 })
 
 // Reading-mode review: the same join/return and linked-message flows in Compact,

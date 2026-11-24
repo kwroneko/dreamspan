@@ -3,13 +3,14 @@
 import type { Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import type { ConnectionSettings, ModelId } from "@dreamspan/shared/providers.ts"
-import { Effect, Layer, Stream } from "effect"
+import { type ConnectionSettings, type ModelId, Price } from "@dreamspan/shared/providers.ts"
+import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { nextPriceFetch, parsePriceList, priceListUrl } from "../src/providers/priceEndpoint.ts"
-import { builtinCostFormulas, costOf, emptyCapture } from "../src/providers/usage.ts"
+import { priceBound } from "../src/providers/priceSources.ts"
+import { builtinCostFormulas, costOf, emptyCapture, priceCost } from "../src/providers/usage.ts"
 import { unknownCounts } from "@dreamspan/shared/usage.ts"
 import * as Providers from "../src/providers/Providers.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
@@ -90,6 +91,27 @@ describe("the price list format", () => {
       cacheWriteLong: 1.5,
       currency: "EUR"
     })
+  })
+
+  it("applies the selected tier's flat fee and reserves the largest applicable fee", () => {
+    const list = parsePriceList({
+      object: "list",
+      unit: "USD per 1M tokens",
+      data: [
+        {
+          id: "m",
+          input: 0,
+          output: 0,
+          per_request: 0.01,
+          tiers: [{ input_above: 1000, per_request: 1 }, { input_above: 2000 }, { input_above: 3000, per_request: 0 }]
+        }
+      ]
+    })!
+    const price = Schema.decodeUnknownSync(Price)(list.models.get("m")!.price)
+    const cost = (inputUncached: number) => priceCost({ ...unknownCounts, inputUncached, output: 0 }, price)
+    assert.deepStrictEqual([cost(1000), cost(1001), cost(2001), cost(3001)], [0.01, 1, 0.01, 0])
+    assert.strictEqual(priceBound([price], 1000, 0)?.amount, 0.01)
+    assert.strictEqual(priceBound([price], 3001, 0)?.amount, 1)
   })
 
   it("reads a separate reasoning rate for a model, a tier and a route; absent leaves it unset", () => {
@@ -270,6 +292,9 @@ const connectWith = (baseUrl: string, priceEndpoint: boolean | undefined) =>
     const models_ = () => reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
     const feedOf = (key: string) => Effect.map(models_(), (all) => all.find((m) => m.key === key)!.upstream.priceFeed)
     return {
+      connection,
+      settings,
+      userId,
       byKey,
       reply,
       feedOf,
@@ -308,6 +333,45 @@ describe("asking a connection's server for its prices", () => {
       assert.match(cost.formula, /^endpoint:\d+$/)
       assert.closeTo(cost.amount, (1000 * 2 + 100 * 10) / 1e6, 1e-12)
     }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("changing the address clears cached prices and discards an old response that arrives last", () =>
+    Effect.gen(function* () {
+      const first = yield* gateway()
+      const next = yield* gateway()
+      const { connection, settings, userId, feedOf, refresh, state } = yield* connectWith(first.url, true)
+      assert.strictEqual((yield* feedOf("m"))?.price?.input, 2)
+
+      const asked = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      first.setHandler(async ({ path }, res) => {
+        if (path !== PRICES) return json(res, 200, { data: [{ id: "m" }] })
+        asked.resolve()
+        await release.promise
+        json(res, 200, { object: "list", unit: "USD per 1M tokens", data: [{ id: "m", input: 50, output: 10 }] })
+      })
+      const old = yield* Effect.forkChild(refresh)
+      yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+      yield* Effect.promise(() => asked.promise)
+
+      const writer = yield* Database.Writer
+      const moved = yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        expectedRowVersion: connection.rowVersion,
+        settings: { ...settings, baseUrl: next.url }
+      })
+      assert.isUndefined(yield* feedOf("m"))
+      const providers = yield* Providers.Providers
+      yield* providers.setKey(userId, connection.id, "sk-gw-0002", moved.rowVersion)
+      yield* refresh
+      const current = yield* feedOf("m")
+      assert.strictEqual(current?.price?.input, 2)
+      release.resolve()
+      yield* Fiber.join(old)
+      assert.deepStrictEqual(yield* feedOf("m"), current)
+      assert.strictEqual((yield* state)?.state, "supported")
+    }).pipe(Effect.scoped, Effect.provide(layer({ endpointsTimeoutMs: 10_000 })))
   )
 })
 
@@ -490,6 +554,43 @@ describe("when prices are asked again (PRICES §4.5, §4.6)", () => {
       yield* refresh
       assert.strictEqual(asked(), 2)
     }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("polls the new server after an unsupported connection changes address", () => {
+    const time = clock()
+    return Effect.gen(function* () {
+      const old = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, { data: [{ id: "m" }] })
+          : request.path === PRICES
+            ? json(res, 404, { error: "not found" })
+            : sse(res, completionChunks(["Hi."], {}))
+      )
+      const fresh = yield* gateway()
+      const { connection, settings, userId, reply, state, timer, feedOf } = yield* connectWith(old.url, true)
+      yield* reply("m")
+      yield* timer
+      assert.lengthOf(
+        old.requests().filter((r) => r.path === PRICES),
+        1
+      )
+      assert.strictEqual((yield* state)?.state, "unsupported")
+
+      const writer = yield* Database.Writer
+      yield* writer.UpdateConnection({
+        userId,
+        connectionId: connection.id,
+        settings: { ...settings, baseUrl: fresh.url },
+        expectedRowVersion: connection.rowVersion
+      })
+      yield* timer
+      assert.lengthOf(
+        fresh.requests().filter((r) => r.path === PRICES),
+        1
+      )
+      assert.strictEqual((yield* state)?.state, "supported")
+      assert.deepStrictEqual((yield* feedOf("m"))?.price, { input: 2, output: 10 })
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now, bindKeysToOrigins: false })))
   })
 
   it.live("asks again when due, with the ETag; a 304 only moves fetchedAt", () => {

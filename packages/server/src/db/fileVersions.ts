@@ -9,6 +9,7 @@ import { composerImages } from "./composerImages.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
+import type { Writer } from "./Database.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 
 /** The Files quota counts each media row once, including when several paths hold it. */
@@ -19,47 +20,59 @@ const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string)
 
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  type Input = Parameters<Writer["Service"]["RecordFileVersions"]>[0]
+  const record = Effect.fnUntraced(function* (
+    userId: Input["userId"],
+    version: Input["versions"][number],
+    actorUserId: Input["actorUserId"],
+    now: number
+  ) {
+    let mediaId: string | null = null
+    if (version.sha256 !== null) {
+      yield* sql`INSERT INTO media_assets ${sql.insert({
+        id: uuidv7(),
+        sha256: version.sha256,
+        mime: version.mime,
+        width: null,
+        height: null,
+        byte_size: version.byteSize,
+        path: mediaPath(version.sha256),
+        created_at: now
+      })} ON CONFLICT (sha256) DO NOTHING`
+      const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${version.sha256}`
+      // No media_refs row: a version is reached through its own row, and a reference
+      // would keep the bytes after retention removed the version.
+      mediaId = row!.id
+    }
+    const id = uuidv7()
+    yield* sql`INSERT INTO file_versions ${sql.insert({
+      id,
+      owner_user_id: userId,
+      path: version.path,
+      inode: version.inode,
+      media_id: mediaId,
+      byte_size: version.byteSize,
+      origin: version.origin,
+      actor_user_id: actorUserId ?? userId,
+      rollout_id: version.rolloutId ?? null,
+      tool_call_id: version.rolloutId ? (version.toolCallId ?? null) : null,
+      created_at: now
+    })}`
+    return id
+  })
   return {
     RecordFileVersions: ({ userId, versions, actorUserId }) =>
-      Effect.gen(function* () {
-        const ids: Array<string> = []
+      Effect.suspend(() => {
         const now = Date.now()
-        for (const version of versions) {
-          let mediaId: string | null = null
-          if (version.sha256 !== null) {
-            yield* sql`INSERT INTO media_assets ${sql.insert({
-              id: uuidv7(),
-              sha256: version.sha256,
-              mime: version.mime,
-              width: null,
-              height: null,
-              byte_size: version.byteSize,
-              path: mediaPath(version.sha256),
-              created_at: now
-            })} ON CONFLICT (sha256) DO NOTHING`
-            const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${version.sha256}`
-            // No media_refs row: a version is reached through its own row, and a reference
-            // would keep the bytes after retention removed the version.
-            mediaId = row!.id
-          }
-          const id = uuidv7()
-          yield* sql`INSERT INTO file_versions ${sql.insert({
-            id,
-            owner_user_id: userId,
-            path: version.path,
-            inode: version.inode,
-            media_id: mediaId,
-            byte_size: version.byteSize,
-            origin: version.origin,
-            actor_user_id: actorUserId ?? userId,
-            rollout_id: version.rolloutId ?? null,
-            tool_call_id: version.rolloutId ? (version.toolCallId ?? null) : null,
-            created_at: now
-          })}`
-          ids.push(id)
-        }
-        return ids
+        return Effect.forEach(versions, (version) => record(userId, version, actorUserId, now))
       }).pipe(transaction(sql, "RecordFileVersions")),
+    RecordReplacementVersion: ({ userId, version, maxAddedBytes, actorUserId }) =>
+      Effect.gen(function* () {
+        const addedBytes =
+          version.sha256 !== null && (yield* versionBytes(sql, userId, version.sha256)) === 0 ? version.byteSize : 0
+        if (addedBytes > maxAddedBytes) return null
+        return { id: yield* record(userId, version, actorUserId, Date.now()), addedBytes }
+      }).pipe(transaction(sql, "RecordReplacementVersion")),
     RecordAttachmentCopy: ({ userId, path, inode, media, composer, maxAddedBytes }) =>
       Effect.gen(function* () {
         const addedBytes = (yield* versionBytes(sql, userId, media.sha256)) > 0 ? 0 : media.byteSize

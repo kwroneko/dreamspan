@@ -115,7 +115,7 @@ for (const width of [1440, 390]) {
     await foot.getByRole("button", { name: "Open branch Original", exact: true }).click()
     await expect(page.getByRole("main").getByText("Group: the main line goes on.")).toBeVisible()
     await openLeft()
-    await expect(panel().getByRole("navigation", { name: "Chat breadcrumbs" })).toHaveCount(0)
+    await expect(panel().getByRole("navigation", { name: "Chat breadcrumbs" })).toHaveText("All chats")
     const toggle = panel()
       .getByRole("region", { name: "Branches of the open chat" })
       .getByRole("button", { name: /^Branches of Mika and Kuro/ })

@@ -7,10 +7,13 @@
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
 import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
+import { isUtf8 } from "node:buffer"
+import type { Stats } from "node:fs"
 import { lstat, readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
-import { Effect, Semaphore } from "effect"
+import { Effect, Exit, Scope, Semaphore } from "effect"
+import { lockFileTrees, withFileTree } from "../../files/treeLocks.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { ATTACHMENT_COPY_ROOT } from "@dreamspan/shared/files.ts"
 import type { RolloutEffect, RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
@@ -272,13 +275,6 @@ export const makeFileTools = (deps: FileToolDeps) => {
   const accountPermits = (userId: string) => {
     let semaphore = accounts.get(userId)
     if (!semaphore) accounts.set(userId, (semaphore = Semaphore.makeUnsafe(limits.perAccount)))
-    return semaphore
-  }
-  // App-side writes and Undo of one account run one at a time, so a hash check holds until the write.
-  const writeLocks = new Map<string, Semaphore.Semaphore>()
-  const writeLock = (userId: string) => {
-    let semaphore = writeLocks.get(userId)
-    if (!semaphore) writeLocks.set(userId, (semaphore = Semaphore.makeUnsafe(1)))
     return semaphore
   }
 
@@ -802,13 +798,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
         }
         // Without ripgrep: a bounded literal search in the app.
         const needle = args.case === false ? pattern.toLowerCase() : pattern
+        const glob = typeof args.glob === "string" ? args.glob.replace(/^!/, "") : null
+        const exclude = typeof args.glob === "string" && args.glob.startsWith("!")
+        const matchesGlob = (below: ReadonlyArray<string>, name: string) =>
+          glob === null ||
+          posix.matchesGlob(glob.includes("/") ? [...below, name].join("/") : name, glob.replace(/^\//, "")) !== exclude
         const matches: Array<string> = []
         const visit = async (below: ReadonlyArray<string>, budget: { files: number }): Promise<void> => {
           const listed = await listFolder(root.hostRoot, [...segments, ...below], 2000).catch(() => null)
           for (const entry of listed?.entries ?? []) {
             if (matches.length >= 30 || budget.files <= 0) return
             if (entry.kind === "folder") await visit([...below, entry.name], budget)
-            else if (entry.kind === "file" && entry.size <= 2 ** 20) {
+            else if (entry.kind === "file" && entry.size <= 2 ** 20 && matchesGlob(below, entry.name)) {
               budget.files--
               const read = await readRegularFile(root.hostRoot, [...segments, ...below, entry.name], 2 ** 20).catch(
                 () => null
@@ -855,30 +856,101 @@ export const makeFileTools = (deps: FileToolDeps) => {
     next: (before: Buffer | null) => Buffer,
     kind: "write" | "edit"
   ) =>
-    Semaphore.withPermit(writeLock(env.userId))(
+    withFileTree(
+      env.userId,
       Effect.gen(function* () {
         // A host folder (§3.7) has no quota; its changes are still versioned.
         const counted = root.host !== true
         const top = root.hostRoot
         const info = yield* attempt(() => statPath(top, segments))
         if (info && !info.isFile()) throw new FilePathRefused(`${full} isn't a regular file.`)
-        let before: { bytes: Buffer; inode: number } | null = null
+        let before: { bytes: Buffer; info: Stats; sha256: string; byteSize: number } | null = null
         if (info) {
           const read = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1))
           if (read.truncated) throw new FilePathRefused(`${full} is too large to change with the file tools. Use bash.`)
           const seen = ctx.cache.get(readKey(full))
           if (seen === undefined) throw new FilePathRefused(`Read ${full} with read_file before changing it.`)
-          if (seen !== sha256(read.bytes))
+          const hash = sha256(read.bytes)
+          if (seen !== hash)
             throw new FilePathRefused(`${full} changed since you read it. Read it again before changing it.`)
-          before = { bytes: read.bytes, inode: read.info.ino }
+          before = { bytes: read.bytes, info: read.info, sha256: hash, byteSize: read.bytes.byteLength }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
-        // The new content and the kept version both count against the quota.
-        const adding = content.byteLength + (before?.bytes.byteLength ?? 0)
-        if (deps.quota && counted) yield* deps.quota.check(env.userId, adding, "write files")
-        const versionId = before ? yield* keepVersion(ctx, env.userId, full, before, "agent") : null
-        const written = yield* attempt(() => writeRegularFile(top, segments, content, { createFolders: true }))
-        if (counted) deps.quota?.wrote(env.userId, adding)
+        const expected = before?.info ?? null
+        const quota = counted ? deps.quota : undefined
+        const reservation = quota
+          ? yield* quota.replacement(env.userId, expected, before, content.byteLength, "write files")
+          : null
+        let keptBytes = 0
+        let committed = false
+        const { written, versionId } = yield* Effect.gen(function* () {
+          if (reservation && !reservation.reserve(content.byteLength))
+            return yield* Effect.fail(new QuotaExceeded(reservation.over(content.byteLength)))
+          let versionId: string | null = null
+          if (before) {
+            if (reservation) {
+              const { sha256: hash, byteSize, info, bytes } = before
+              const saved = yield* deps.holding(
+                [hash],
+                Effect.andThen(
+                  storeMedia(deps.dataDir, hash, bytes),
+                  reservation.keep(content.byteLength, byteSize, (maxAddedBytes) =>
+                    deps.writer.RecordReplacementVersion({
+                      userId: env.userId as never,
+                      maxAddedBytes,
+                      version: {
+                        path: full,
+                        inode: info.ino,
+                        sha256: hash,
+                        byteSize,
+                        mime: "application/octet-stream",
+                        origin: "agent",
+                        rolloutId: ctx.rolloutId,
+                        toolCallId: ctx.toolCallId
+                      }
+                    })
+                  )
+                )
+              )
+              keptBytes = saved.addedBytes
+              versionId = saved.id
+            } else
+              versionId = yield* keepVersion(
+                ctx,
+                env.userId,
+                full,
+                { bytes: before.bytes, inode: before.info.ino },
+                "agent"
+              )
+          }
+          const written = yield* attempt(() =>
+            writeRegularFile(top, segments, content, {
+              createFolders: true,
+              expected,
+              ...(reservation
+                ? {
+                    stage: reservation.stage,
+                    committing: () => reservation.committing(content.byteLength, keptBytes),
+                    landed: (file) => {
+                      reservation.landed(file)
+                      committed = true
+                    }
+                  }
+                : {})
+            })
+          )
+          return { written, versionId }
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (!committed) {
+                reservation?.release()
+                quota?.wrote(env.userId, keptBytes)
+              }
+            })
+          ),
+          Effect.uninterruptible
+        )
         deps.onChanged?.(env.userId, [full])
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
@@ -978,6 +1050,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           root,
           segments,
           (before) => {
+            if (!isUtf8(before!)) throw new FilePathRefused(`${full} isn't valid UTF-8 and can't be edited as text.`)
             let text = before!.toString("utf8")
             for (const [index, edit] of edits.entries()) {
               const label = edits.length > 1 ? `Edit ${index + 1}: ` : ""
@@ -1576,6 +1649,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         // Counted from here, so Reset can't empty the home folder under it.
         enter(env.userId)
         let handedOver = false
+        const treeScope = Scope.makeUnsafe()
         return yield* Effect.gen(function* () {
           const start = yield* currentDir(ctx, env)
           const cwd =
@@ -1630,9 +1704,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
           const endOutput = (bytes: number) =>
             Effect.promise(async () => void (await sink?.end(bytes).catch(() => undefined)))
           const notStarted = (why: string) => ({ isError: true, text: `Not started: ${why}.` })
+          const lockTrees = lockFileTrees([
+            env.userId,
+            ...setup.places.flatMap(({ owner }) => (owner ? [owner.userId] : []))
+          ]).pipe(Effect.provideService(Scope.Scope, treeScope))
 
           if (background) {
-            const { before, why } = yield* scanPlaces(setup.places).pipe(
+            const { before, why } = yield* lockTrees.pipe(
+              Effect.andThen(scanPlaces(setup.places)),
               Effect.flatMap((before) => Effect.map(checkStart, (why) => ({ before, why }))),
               Effect.onExit((exit) =>
                 exit._tag === "Success" && exit.value.why === null
@@ -1683,9 +1762,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
                         : "The command couldn't run.\n"
                   }
                 })
-                .finally(() => {
+                .finally(async () => {
                   live.delete(entry)
-                  void setup.close().finally(() => leave(env.userId))
+                  try {
+                    await setup.close()
+                  } finally {
+                    leave(env.userId)
+                    await Effect.runPromise(Scope.close(treeScope, Exit.void))
+                  }
                 })
             }
             jobs.set(job.id, job)
@@ -1710,18 +1794,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
             const before = yield* scanPlaces(setup.places)
             const why = yield* checkStart
             if (why !== null) return { notStarted: why } as const
+            let runningCommand: Promise<RunResult> | undefined
             const result = yield* attempt((signal) => {
               // Stopping the call (Stop) or taking away what it was given stops the command.
               signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
               if (signal.aborted) entry.controller.abort()
-              return entry.controller.signal.aborted ? Promise.resolve(null) : spec(entry.controller.signal)
-            })
+              return entry.controller.signal.aborted
+                ? Promise.resolve(null)
+                : (runningCommand = spec(entry.controller.signal))
+            }).pipe(Effect.ensuring(Effect.promise(async () => void (await runningCommand?.catch(() => undefined)))))
             live.delete(entry)
             if (result === null) return { notStarted: entry.stopped ?? "it was stopped" } as const
             const after = yield* scanPlaces(setup.places)
             return { result, found: diffPlaces(before, after) }
           })
-          const ran = yield* Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run)).pipe(
+          const ran = yield* lockTrees.pipe(
+            Effect.andThen(Semaphore.withPermit(instance)(Semaphore.withPermit(accountPermits(env.userId))(run))),
             Effect.onExit((exit) =>
               Effect.promise(async () => {
                 live.delete(entry)
@@ -1767,6 +1855,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
             ]
           }
         }).pipe(
+          Effect.onExit((exit) => (handedOver ? Effect.void : Scope.close(treeScope, exit))),
           Effect.ensuring(
             Effect.sync(() => {
               slot?.release()
@@ -1909,7 +1998,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       const segments = host
         ? recipe.path.split("/").filter(Boolean)
         : resolveFilesPath(recipe.path, FILES_MOUNT).segments
-      return yield* Semaphore.withPermit(writeLock(env.userId))(
+      return yield* withFileTree(
+        env.userId,
         Effect.gen(function* () {
           const current = yield* attempt(() => readRegularFile(top, segments, VERSION_MAX_BYTES + 1)).pipe(
             Effect.orElseSucceed(() => null)
@@ -1923,8 +2013,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
             { bytes: current.bytes, inode: current.info.ino },
             "restore"
           )
-          // The kept version and the restored content count until the next measurement.
-          if (!host) deps.quota?.wrote(env.userId, current.bytes.byteLength)
+          // The kept version counts until the next measurement, even if Undo fails later.
+          const quota = host ? undefined : deps.quota
+          quota?.wrote(env.userId, current.bytes.byteLength)
+          let restored: Buffer | null = null
           if (typeof recipe.before === "string") {
             // A version past retention (30 days) is gone with its content.
             const version = yield* deps.reader
@@ -1936,10 +2028,20 @@ export const makeFileTools = (deps: FileToolDeps) => {
               )
             if (!version.mediaPath || !isMediaPath(version.mediaPath))
               return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
-            const bytes = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
-            yield* attempt(() => writeRegularFile(top, segments, bytes))
-            if (!host) deps.quota?.wrote(env.userId, bytes.byteLength)
-          } else yield* attempt(() => removeFile(top, segments))
+            restored = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
+          }
+          // The live bytes go away only when this path held the inode's last link.
+          yield* attempt(async () => {
+            const free = quota?.freed(env.userId, current.info.nlink === 1 ? current.info.size : 0)
+            try {
+              if (restored === null) await removeFile(top, segments)
+              else await writeRegularFile(top, segments, restored)
+            } catch (error) {
+              if (free !== undefined) quota?.unfreed(env.userId, free)
+              throw error
+            }
+            if (restored !== null) quota?.wrote(env.userId, restored.byteLength)
+          })
           deps.onChanged?.(env.userId, [recipe.path as string])
           return yield* deps.writer.CompleteFileUndo({
             userId: actor.id,
@@ -2015,26 +2117,30 @@ export const makeFileTools = (deps: FileToolDeps) => {
         controller: new AbortController(),
         stopped: null
       }
-      const result = yield* Semaphore.withPermit(instance)(
-        Semaphore.withPermit(accountPermits(env.userId))(
-          Effect.suspend(() => {
-            live.add(entry)
-            return attempt((signal) => {
-              signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
-              if (signal.aborted) entry.controller.abort()
-              return selected.run(
-                {
-                  command: script,
-                  cwd: FILES_MOUNT,
-                  mounts: accountMounts(env),
-                  env: commandEnv(),
-                  network: "none",
-                  limits: { ...limits.run, timeoutMs }
-                },
-                entry.controller.signal
-              )
+      const result = yield* withFileTree(
+        env.userId,
+        Semaphore.withPermit(instance)(
+          Semaphore.withPermit(accountPermits(env.userId))(
+            Effect.suspend(() => {
+              live.add(entry)
+              let runningCommand: Promise<RunResult> | undefined
+              return attempt((signal) => {
+                signal.addEventListener("abort", () => entry.controller.abort(), { once: true })
+                if (signal.aborted) entry.controller.abort()
+                return (runningCommand = selected.run(
+                  {
+                    command: script,
+                    cwd: FILES_MOUNT,
+                    mounts: accountMounts(env),
+                    env: commandEnv(),
+                    network: "none",
+                    limits: { ...limits.run, timeoutMs }
+                  },
+                  entry.controller.signal
+                ))
+              }).pipe(Effect.ensuring(Effect.promise(async () => void (await runningCommand?.catch(() => undefined)))))
             })
-          })
+          )
         )
       ).pipe(Effect.ensuring(Effect.sync(() => (live.delete(entry), leave(env.userId)))))
       if (entry.stopped !== null) return { ok: false, lines: [] as Array<string> }

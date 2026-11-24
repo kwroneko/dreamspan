@@ -761,13 +761,16 @@ export class ChatSession {
   private async read(
     range: PathRange,
     limit = PAGE,
-    forkId = this.view.forkId ?? this.requestedFork
+    forkId = this.view.forkId ?? this.requestedFork,
+    viewRead?: { generation: number; fallback?: boolean }
   ): Promise<PathWindow | null> {
+    const current = () => !this.disposed && viewRead?.generation === this.generation
     const result = await this.call((client) =>
       client("ReadPath", { chatId: this.chatId, forkId, leafSlotId: null, range, limit })
     )
     if (result.ok) return result.value
-    if (result.error.tag === "NotFound" && (forkId !== null || range._tag === "Around")) {
+    if (!current()) return null
+    if (viewRead?.fallback && result.error.tag === "NotFound" && (forkId !== null || range._tag === "Around")) {
       const sameFork =
         range._tag === "Around"
           ? await this.call((client) =>
@@ -780,6 +783,7 @@ export class ChatSession {
               })
             )
           : null
+      if (!current()) return null
       const fallback = sameFork?.ok
         ? sameFork
         : await this.call((client) =>
@@ -791,7 +795,7 @@ export class ChatSession {
               limit
             })
           )
-      if (fallback.ok && !this.disposed) {
+      if (fallback.ok && current()) {
         this.requestedFork = fallback.value.forkId
         this.notice(
           sameFork?.ok
@@ -801,7 +805,7 @@ export class ChatSession {
         return fallback.value
       }
     }
-    if (!this.disposed) this.update({ error: result.error.message, loading: false })
+    if (current()) this.update({ error: result.error.message, loading: false })
     return null
   }
 
@@ -836,7 +840,8 @@ export class ChatSession {
         this.read(
           anchor === null ? { _tag: "Bottom" } : { _tag: "Around", slot: anchor },
           limit,
-          followCurrent ? null : undefined
+          followCurrent ? null : undefined,
+          { generation, fallback: true }
         ),
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
@@ -1041,7 +1046,7 @@ export class ChatSession {
     this.report()
     const generation = this.generation
     await this.reading(async () => {
-      const window = await this.read({ _tag: "Older", from })
+      const window = await this.read({ _tag: "Older", from }, PAGE, undefined, { generation })
       this.paging = false
       this.report()
       if (window === null || this.disposed || generation !== this.generation || this.view.older !== from) return
@@ -1063,7 +1068,7 @@ export class ChatSession {
     this.report()
     const generation = this.generation
     await this.reading(async () => {
-      const window = await this.read({ _tag: "Newer", after })
+      const window = await this.read({ _tag: "Newer", after }, PAGE, undefined, { generation })
       this.paging = false
       this.report()
       if (window === null || this.disposed || generation !== this.generation || this.view.newer !== after) return
@@ -2333,11 +2338,9 @@ export class ChatSession {
     const forkGeneration = this.forkGeneration
     const forkId = this.view.forkId
     return this.reading(async () => {
-      const window = await this.read({ _tag: "Around", slot: slotId }, 1)
+      const window = await this.read({ _tag: "Around", slot: slotId }, 1, forkId)
       if (this.disposed || forkGeneration !== this.forkGeneration || forkId !== this.view.forkId) return
       const entry = window?.entries.find((e) => e.slotId === slotId)
-      // A missing fork can make read() fall back to the current one. That snapshot
-      // cannot repair this fork, and passing it to applySlot would read again forever.
       if (entry?.shownForkId !== undefined && forkId !== null && entry.shownForkId !== forkId) return
       if (entry) this.applySlot(entry)
     })

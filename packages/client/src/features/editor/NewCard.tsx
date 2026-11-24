@@ -21,8 +21,12 @@ export function NewCardButton({ persona = false, icon = false }: { persona?: boo
   const [open, setOpen] = useOpenPlace(persona ? "new-persona" : "new-card")
   return (
     <>
-      <Button hint={`Opens a form to create a ${persona ? "persona" : "card"}.`} onClick={() => setOpen(true)}>
-        {icon && <Icon name="plus" />}
+      <Button
+        hint={`Opens a form to create a ${persona ? "persona" : "card"}.`}
+        size={icon ? "chip" : "default"}
+        onClick={() => setOpen(true)}
+      >
+        {icon && <Icon name="plus" size={12} />}
         New {persona ? "persona" : "card"}
       </Button>
       <NewCardDialog key={persona ? "persona" : "card"} persona={persona} open={open} onOpenChange={setOpen} />

@@ -461,7 +461,7 @@ export class EditorStore {
         const content = this.current(key)
         return content === null ? [] : [{ field: key, content }]
       })
-    this.liveDoc = applyDrafts(kind, this.head, values).doc
+    this.liveDoc = shareSnapshot(this.liveDoc, applyDrafts(kind, this.head, values).doc) as Doc
     this.valueDoc = shareSnapshot(this.valueDoc, withHeld(this.liveDoc, this.held())) as Doc
   }
 
@@ -640,8 +640,8 @@ export class EditorStore {
     return typeof value === "string" ? value : ""
   }
 
-  value(path: FieldPath): unknown {
-    return getAt(this.valueDoc, path)
+  value(path: FieldPath, includeHeld = true): unknown {
+    return getAt(includeHeld ? this.valueDoc : this.liveDoc, path)
   }
 
   /** The immutable revision the visible text was typed on, even after a stale refresh. */
@@ -1254,8 +1254,8 @@ export const useText = (store: EditorStore, path: FieldPath) =>
   useSyncExternalStore(store.subscribe(textField(path), STRUCTURE), () => store.text(path))
 
 /** A value from the document with the value drafts applied. */
-export const useValue = <A>(store: EditorStore, path: FieldPath) =>
-  useSyncExternalStore(store.subscribe(STRUCTURE), () => store.value(path)) as A
+export const useValue = <A>(store: EditorStore, path: FieldPath, includeHeld = true) =>
+  useSyncExternalStore(store.subscribe(STRUCTURE), () => store.value(path, includeHeld)) as A
 
 /** The last revision only: typing and draft saves do not invalidate every field's chrome. */
 export const useRevisionDoc = (store: EditorStore) =>

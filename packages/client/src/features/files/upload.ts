@@ -1,7 +1,7 @@
 // Uploads into Files (spec/FILES-AND-ENVIRONMENT.md §1.1): files and whole folders, from the
 // pickers or a drop, keeping subfolders. When a name is taken the user answers once for the
 // batch: Keep both, Replace or Skip.
-import { joinPath, type UploadConflict, type UploadOutcome } from "@dreamspan/shared/files.ts"
+import { joinPath, type UploadConflict, type UploadOutcome, type UploadUndoEntry } from "@dreamspan/shared/files.ts"
 import { NameTaken, NoRoom, type FilesSource } from "./source.ts"
 
 /** One thing to upload: a file at a path relative to the folder it goes into, or an empty folder. */
@@ -65,13 +65,13 @@ export interface UploadReport {
   readonly written: ReadonlyArray<string>
   readonly skipped: number
   readonly failed: ReadonlyArray<{ readonly relative: string; readonly message: string }>
-  /** The top-level names the batch made, for Undo. */
-  readonly made: ReadonlyArray<string>
+  /** Entries the server created, including any missing parents. */
+  readonly made: ReadonlyArray<UploadUndoEntry>
   /** The server refused for lack of room: the batch stopped there, with this much and these many files left. */
   readonly noRoom: { readonly bytes: number; readonly files: number } | null
 }
 
-/** The bytes and file count of a batch, for the room check before it starts. */
+/** The bytes and file count left when an upload is refused for lack of room. */
 export const batchSize = (items: ReadonlyArray<UploadItem>) =>
   items.reduce(
     (sum, item) => (item.kind === "file" ? { bytes: sum.bytes + item.file.size, files: sum.files + 1 } : sum),
@@ -91,7 +91,7 @@ export const uploadAll = async (
 ): Promise<UploadReport> => {
   let answer: ConflictAnswer | null = null
   const written: Array<string> = []
-  const made = new Set<string>()
+  const made: Array<UploadUndoEntry> = []
   const failed: Array<{ relative: string; message: string }> = []
   let skipped = 0
   let noRoom: UploadReport["noRoom"] = null
@@ -101,8 +101,8 @@ export const uploadAll = async (
     const path = joinPath(folder, item.relative)
     try {
       if (item.kind === "folder") {
-        await source.createFolder(path)
-        made.add(joinPath(folder, item.relative.split("/")[0]!))
+        const outcome = await source.createFolder(path, true)
+        made.push(...(outcome.created ?? []))
         continue
       }
       const put = (conflict: UploadConflict) =>
@@ -116,12 +116,9 @@ export const uploadAll = async (
         if (answer === null) break
         outcome = await put(answer)
       }
+      made.push(...(outcome.created ?? []))
       if (outcome.outcome === "skipped") skipped++
-      else {
-        written.push(outcome.path)
-        // A replaced file isn't the batch's to take back by deleting it.
-        if (outcome.outcome === "written") made.add(topOf(folder, outcome.path))
-      }
+      else written.push(outcome.path)
     } catch (error) {
       if (error instanceof NoRoom) {
         noRoom = batchSize(items.slice(index))
@@ -132,11 +129,5 @@ export const uploadAll = async (
     if (item.kind === "file") done += item.file.size
     onProgress?.(done, total)
   }
-  return { written, skipped, failed, made: [...made], noRoom }
-}
-
-/** The batch's top-level path that holds `path`: the file itself, or the dropped folder. */
-const topOf = (folder: string, path: string) => {
-  const rest = path.slice(folder.length).replace(/^\/+/, "")
-  return joinPath(folder, rest.split("/")[0]!)
+  return { written, skipped, failed, made, noRoom }
 }

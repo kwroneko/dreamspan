@@ -21,7 +21,8 @@ const page = (
   owner: string,
   time: BigInt64Array,
   /** Runs after each OpenComposer is answered, before the page goes on: a race laid out by hand. */
-  afterOpen: () => Promise<unknown> = async () => {}
+  afterOpen: () => Promise<unknown> = async () => {},
+  beforeSave: (payload: Parameters<Api["SaveComposer"]>[0]) => Promise<unknown> = async () => {}
 ) => {
   /** What this page's keepalive requests wait for before they reach the server (`hold`). */
   let network: Promise<unknown> = Promise.resolve()
@@ -38,6 +39,8 @@ const page = (
         const value = await Effect.runPromise(
           fn((tag, p) => {
             opened ||= tag === "OpenComposer"
+            if (tag === "SaveComposer")
+              return Effect.promise(() => beforeSave(p)).pipe(Effect.andThen(api.SaveComposer(p)))
             return (api as never as Record<string, (p: never) => Effect.Effect<unknown, unknown>>)[tag]!(p)
           })
         )
@@ -129,8 +132,45 @@ const scenarios = [
   "cutting the text and pasting it back",
   "page hidden and shown again",
   "reload",
+  "reload with a failed corrective read",
   "a late copy of text already sent"
 ] as const
+
+for (const receipt of ["none", "accepted before send", "rejected after send"] as const)
+  it.live(`stops a pre-send save after another tab sends the turn (${receipt})`, () =>
+    Effect.gen(function* () {
+      idb.clear()
+      const api = yield* client()
+      const owner = (yield* api.Whoami()).id
+      const chat = yield* api.CreateChat({ title: "Synthetic concurrent send" })
+      const time = new BigInt64Array(new SharedArrayBuffer(8))
+      const text = "One turn"
+      const other = page(api, chat.id, owner, time)
+      let tip: string | null = null
+      const first = page(api, chat.id, owner, time, undefined, async (payload) => {
+        if (receipt === "accepted before send") await Effect.runPromise(api.SaveComposer(payload))
+        tip = await send(api, other, null)
+        if (receipt === "rejected after send") await Effect.runPromise(api.SaveComposer(payload))
+      })
+      yield* Effect.promise(async () => {
+        await open(other.store)
+        await open(first.store)
+        other.store.type(text)
+        await other.store.flush()
+        first.store.type(text)
+        let submitted = false
+        await first.store.submit(async () => {
+          submitted = true
+          return { sent: false }
+        })
+        assert.isNotNull(tip)
+        assert.isFalse(submitted)
+        assert.strictEqual(first.store.snapshot().text, "")
+        assert.deepStrictEqual(await Effect.runPromise(api.ListRecoveredTexts({ limit: 100, before: null })), [])
+      })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
 for (const scenario of scenarios)
   it.live(`${scenario}, sending and reopening the chat moves no text to the bin and shows no notice`, () => {
     const clock = new SharedArrayBuffer(8)
@@ -168,20 +208,21 @@ for (const scenario of scenarios)
           first.store.type(text)
         } else if (scenario === "a late copy of text already sent") {
           // Kept while the page closed, never sent from it: the same words went from elsewhere.
+          const opened = await Effect.runPromise(api.OpenComposer({ chatId: chat.id, forkId: null }))
           await keepCopy(
             makeCopy(
               owner,
               `composer:${chat.id}`,
-              first.store.snapshot().draftId!,
+              opened.id,
               {
                 kind: "composer",
                 payload: {
                   chatId: chat.id,
-                  draftId: first.store.snapshot().draftId!,
-                  rowVersion: 1,
-                  session: 0,
+                  draftId: opened.id,
+                  rowVersion: opened.rowVersion,
+                  session: opened.session,
                   next: false,
-                  content: opening.slice(0, 20)
+                  content: opening
                 }
               },
               Number(Atomics.load(time, 0)) - 60_000
@@ -204,12 +245,22 @@ for (const scenario of scenarios)
           const closing = first
           const release = closing.hold()
           closing.store.beacon()
+          let reads = 0
           first = page(api, chat.id, owner, time, async () => {
+            reads++
             release()
             await Promise.all(closing.keepalives)
             await vi.waitFor(async () => assert.lengthOf(await copiesOfUser(owner), 0))
+            if (reads === 2 && scenario === "reload with a failed corrective read") throw new Error("Offline")
           })
-          await open(first.store)
+          if (scenario === "reload with a failed corrective read") {
+            first.store.setFork(null, false)
+            await vi.waitFor(() => assert.strictEqual(reads, 2))
+            await first.store.flush()
+            assert.isFalse(first.store.snapshot().ready)
+            await first.pause(2000)
+            assert.isTrue(first.store.snapshot().ready)
+          } else await open(first.store)
           assert.strictEqual(first.store.snapshot().text, text, "the reopened box has the last keystrokes")
           text = `${first.store.snapshot().text} howls outside.`
           first.store.type(text)

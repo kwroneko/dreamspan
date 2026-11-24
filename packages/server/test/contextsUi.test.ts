@@ -167,10 +167,13 @@ describe("the inspector's separate context", () => {
   ]
   it("is the viewer's, or a narrator's whole chat, or none in a shared context", () => {
     assert.deepStrictEqual(viewOf({ inputs: inputs({ viewer: "wren" }) }), { viewer: "wren", narrator: false })
-    assert.deepStrictEqual(viewOf({ inputs: inputs({ presence: { narrators: ["wren"] } }) as never }), {
+    const narrator = { speaker: "wren", cards: [], presence: { narrators: ["wren" as EntityId] } }
+    assert.deepStrictEqual(viewOf({ inputs: { ...narrator, contextView: "separate" } }), {
       viewer: "wren",
       narrator: true
     })
+    assert.isNull(viewOf({ inputs: { ...narrator, contextView: "shared" } }))
+    assert.isNull(viewOf({ inputs: narrator }))
     assert.isNull(viewOf({ inputs: inputs({}) }))
   })
   it("lists what the viewer didn't know, by any of its identities, once each", () => {

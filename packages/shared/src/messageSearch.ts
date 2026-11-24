@@ -91,7 +91,7 @@ const foldText = (text: string) => {
   return { folded, origin }
 }
 
-const isWord = /[\p{L}\p{N}]/u
+const foldedWord = /[\p{L}\p{N}]+/gu
 
 /**
  * Where `phrase` first stands in `text` (a UTF-16 offset), its words side by side in order,
@@ -101,20 +101,9 @@ export const findPhrase = (text: string, phrase: ReadonlyArray<string>): number 
   if (phrase.length === 0) return null
   const { folded, origin } = foldText(text)
   const targets = phrase.map(fold)
-  // The text's words: where each starts and ends in the folded text.
-  const starts: Array<number> = []
-  const ends: Array<number> = []
-  for (let i = 0; i < folded.length; i++) {
-    if (!isWord.test(folded[i]!) || (i > 0 && isWord.test(folded[i - 1]!))) continue
-    let end = i + 1
-    while (end < folded.length && isWord.test(folded[end]!)) end++
-    starts.push(i)
-    ends.push(end)
-    i = end - 1
-  }
-  for (let w = 0; w + targets.length <= starts.length; w++) {
-    if (targets.every((target, k) => folded.slice(starts[w + k]!, ends[w + k]!).startsWith(target)))
-      return origin[starts[w]!]!
+  const words = [...folded.matchAll(foldedWord)]
+  for (let w = 0; w + targets.length <= words.length; w++) {
+    if (targets.every((target, k) => words[w + k]![0].startsWith(target))) return origin[words[w]!.index]!
   }
   return null
 }
@@ -129,17 +118,10 @@ export const markWords = (text: string, words: ReadonlyArray<string>): ReadonlyA
   const { folded, origin } = foldText(text)
   const targets = words.map(fold)
   const marks: Array<Mark> = []
-  for (let i = 0; i < folded.length; i++) {
-    if (i > 0 && isWord.test(folded[i - 1]!)) continue
-    if (!isWord.test(folded[i]!)) continue
-    const word = targets.find((t) => folded.startsWith(t, i))
-    if (word === undefined) continue
-    const start = origin[i]!
-    // The whole word of the text, so a prefix marks the word it starts.
-    let end = i + word.length
-    while (end < folded.length && isWord.test(folded[end]!)) end++
-    marks.push({ at: start, length: origin[end]! - start })
-    i = end - 1
+  for (const word of folded.matchAll(foldedWord)) {
+    if (!targets.some((target) => word[0].startsWith(target))) continue
+    const start = origin[word.index]!
+    marks.push({ at: start, length: origin[word.index + word[0].length]! - start })
   }
   return marks
 }

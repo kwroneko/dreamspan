@@ -141,6 +141,7 @@ export { ProviderError } from "./errors.ts"
 /** The last answer of a connection's price endpoint, for the connection as it was then (`key`). */
 interface PriceProbeRecord extends PriceFeedState {
   readonly key: string
+  readonly rowVersion: number
   /** The stored models the last full answer covered (named or absent), so a 304 is only asked for when it speaks for all. */
   readonly covered?: ReadonlySet<string>
 }
@@ -1301,8 +1302,9 @@ export const layer = (options: ProvidersOptions = {}) =>
       const refreshPriceFeeds = (userId: UserId, prepared: Prepared, manual: boolean) =>
         Effect.gen(function* () {
           const connectionId = prepared.connection.id
+          const rowVersion = prepared.connection.rowVersion
           if (prepared.settings.priceEndpoint !== true) {
-            probes.delete(connectionId)
+            if ((probes.get(connectionId)?.rowVersion ?? rowVersion) <= rowVersion) probes.delete(connectionId)
             return
           }
           const key = probeKey(prepared)
@@ -1342,8 +1344,19 @@ export const layer = (options: ProvidersOptions = {}) =>
             nextAt: number | null,
             detail: string | null,
             coveredNow: ReadonlySet<string> | undefined = covered
-          ) =>
-            probes.set(connectionId, { key, state, at, nextAt, detail, ...(coveredNow ? { covered: coveredNow } : {}) })
+          ) => {
+            const current = probes.get(connectionId)
+            if (current === undefined || current.rowVersion <= rowVersion)
+              probes.set(connectionId, {
+                key,
+                rowVersion,
+                state,
+                at,
+                nextAt,
+                detail,
+                ...(coveredNow ? { covered: coveredNow } : {})
+              })
+          }
           if (probe === null || probe.state === "failed") {
             const detail = probe === null ? "No answer in time." : prepared.scrub(probe.detail)
             yield* Effect.logInfo(`price list of ${connectionId}: ${detail}`)
@@ -1390,10 +1403,15 @@ export const layer = (options: ProvidersOptions = {}) =>
               ? (feeds[0]?.feed?.validUntil ?? null)
               : (fresh.list.validUntil ?? (fresh.maxAgeMs === null ? null : at + fresh.maxAgeMs))
           const coveredNow = fresh === null ? covered : new Set(stored.map((m) => m.key))
-          const stored_ = yield* fromStorage(writer.SetModelPriceFeeds({ userId, connectionId, feeds })).pipe(
-            Effect.as(true),
-            Effect.catch((e) => Effect.as(Effect.logWarning("could not store a price list", e), false))
-          )
+          const stored_ = yield* fromStorage(
+            writer.SetModelPriceFeeds({
+              userId,
+              connectionId,
+              expectedRowVersion: rowVersion,
+              feeds
+            })
+          ).pipe(Effect.catch((e) => Effect.as(Effect.logWarning("could not store a price list", e), null)))
+          if (stored_?.stale) return
           // A failed store is asked about again at the failure interval, not an hour later.
           if (stored_) record("supported", nextPriceFetch(at, validUntil), null, coveredNow)
           else record("failed", at + PRICE_RETRY_MS, "Could not store the price list.", covered)
@@ -1412,23 +1430,42 @@ export const layer = (options: ProvidersOptions = {}) =>
       const priceTimerRound: ProvidersShape["priceTimerRound"] = Effect.gen(function* () {
         const due = yield* reader.ListPriceFeedConnections({ usedSince: now() - DAY_MS })
         for (const { userId, connectionId } of due) {
-          const record = probes.get(connectionId)
-          if (record && (record.nextAt === null || now() < record.nextAt)) continue
-          yield* prepare(userId, connectionId).pipe(
-            Effect.flatMap((prepared) => refreshPriceFeeds(userId, prepared, false)),
-            Effect.catch((error) => {
-              // No credentials to ask with: back off like any failure, and say so once per backoff.
-              const at = now()
-              probes.set(connectionId, {
-                key: "prepare-failed",
-                state: "failed",
-                at,
-                nextAt: at + PRICE_RETRY_MS,
-                detail: "The connection could not be prepared."
+          yield* Effect.gen(function* () {
+            const resolved = yield* reader.ResolveConnection({ userId, connectionId })
+            const credential = resolved.credential
+            const key =
+              "prepare-failed:" +
+              createHash("sha256")
+                .update(
+                  JSON.stringify([
+                    resolved.connection.rowVersion,
+                    credential?.id,
+                    credential?.origins,
+                    credential && Buffer.from(credential.keyEnc).toString("base64")
+                  ])
+                )
+                .digest("hex")
+            const record = probes.get(connectionId)
+            if (record?.key === key && record.nextAt !== null && now() < record.nextAt) return
+            const prepared = yield* prepareResolved(resolved, null).pipe(
+              Effect.catch((error) => {
+                // Retry the same unusable connection after the backoff, or immediately after an edit.
+                const at = now()
+                const rowVersion = resolved.connection.rowVersion
+                if ((probes.get(connectionId)?.rowVersion ?? rowVersion) <= rowVersion)
+                  probes.set(connectionId, {
+                    key,
+                    rowVersion,
+                    state: "failed",
+                    at,
+                    nextAt: at + PRICE_RETRY_MS,
+                    detail: "The connection could not be prepared."
+                  })
+                return Effect.as(Effect.logInfo(`price timer skipped ${connectionId}`, error), null)
               })
-              return Effect.logInfo(`price timer skipped ${connectionId}`, error)
-            })
-          )
+            )
+            if (prepared !== null) yield* refreshPriceFeeds(userId, prepared, false)
+          }).pipe(Effect.catch((error) => Effect.logInfo(`price timer skipped ${connectionId}`, error)))
         }
       }).pipe(Effect.catch((error) => Effect.logWarning("price timer", error)))
       const priceTimerMs = options.priceTimerMs ?? 60_000
@@ -1988,18 +2025,10 @@ export const layer = (options: ProvidersOptions = {}) =>
               // comments included.
               const idleS = prepared.settings.idleTimeoutS ?? DEFAULT_IDLE_TIMEOUT_S
               const idle = new AbortController()
-              let heardAt: number | null = prepared.kind.acceptsFetch ? null : Date.now()
+              let heardAt: number | null = null
               const heard = () => {
                 if (heardAt !== null) heardAt = Date.now()
               }
-              const watch = setInterval(
-                () => {
-                  if (heardAt === null || Date.now() - heardAt < idleS * 1000) return
-                  state.silentFor = idleS
-                  idle.abort()
-                },
-                Math.min(1000, idleS * 250)
-              )
               const observed: typeof fetch = async (input, init) => {
                 if (state.pendingIdentity) {
                   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
@@ -2114,6 +2143,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 terms.prefix
                   ? ({ ...piModel, compat: { ...piModel.compat, supportsMidConvoEffort: false } } as PiModel<Api>)
                   : piModel
+              if (!prepared.kind.acceptsFetch) heardAt = Date.now()
               const events = prepared.kind.streams.streamSimple(streamModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one. A
                 // kind with its own transport authorizes the request itself from the stored key,
@@ -2335,6 +2365,14 @@ export const layer = (options: ProvidersOptions = {}) =>
                   return final
                 }
               })
+              const watch = setInterval(
+                () => {
+                  if (heardAt === null || Date.now() - heardAt < idleS * 1000) return
+                  state.silentFor = idleS
+                  idle.abort()
+                },
+                Math.min(1000, idleS * 250)
+              )
               try {
                 for await (const event of events) {
                   heard()

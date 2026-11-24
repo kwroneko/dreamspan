@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto"
 // JavaScript git only: no git executable, hooks, filters, package manager or lifecycle scripts.
-import fs from "node:fs"
-import { lstat, mkdir, readdir, readFile, realpath, writeFile, rm } from "node:fs/promises"
+import fs, { type BigIntStats } from "node:fs"
+import { lstat, mkdir, opendir, readdir, readFile, realpath, writeFile, rm } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 import git from "isomorphic-git"
 import { Schema } from "effect"
 import { PluginCommit, PluginId, PluginManifest } from "@dreamspan/shared/plugins.ts"
 
-export const limits = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256 }
+export const limits = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256, directories: 512, depth: 24 }
 export const validPath = (path: string) => {
   if (
     !path ||
@@ -51,7 +51,8 @@ export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>
   let total = 0,
     directories = 0
   const visit = async (dir: string, prefix: string) => {
-    if (++directories > 512 || prefix.split("/").length > 24) throw new Error("Plugin directory limit exceeded")
+    if (++directories > limits.directories || prefix.split("/").length > limits.depth)
+      throw new Error("Plugin directory limit exceeded")
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (prefix === "" && entry.name === ".git") {
         if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("Invalid git directory")
@@ -83,27 +84,43 @@ export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>
   if (files.has(".gitmodules")) throw new Error("Plugin submodules are refused")
   return files
 }
-export const safeGit = async (folder: string) => {
-  const metadata = await lstat(join(folder, ".git"))
+/** Collect only as many names as the caller's traversal can accept, in stable order. */
+export const boundedPluginEntries = async (dir: string, remaining: number, limitError: string) => {
+  const names: string[] = []
+  for await (const entry of await opendir(dir)) {
+    if (names.length >= remaining) throw new Error(limitError)
+    names.push(entry.name)
+  }
+  return names.sort()
+}
+
+export const safeGit = async (folder: string, stamp?: (path: string, info: BigIntStats) => void) => {
+  const root = join(folder, ".git")
+  const metadata = await lstat(root, { bigint: true })
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Git metadata links are refused")
+  const maxEntries = 4096
+  const limitError = "Git metadata limit exceeded"
   let count = 0,
-    bytes = 0
-  const visit = async (dir: string, depth: number) => {
-    if (depth > 16 || ++count > 4096) throw new Error("Git metadata limit exceeded")
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name)
-      if (++count > 4096) throw new Error("Git metadata limit exceeded")
+    bytes = 0n
+  const visit = async (dir: string, depth: number, info: BigIntStats) => {
+    if (depth > 16 || ++count > maxEntries) throw new Error(limitError)
+    stamp?.(dir, info)
+    const names = await boundedPluginEntries(dir, maxEntries - count, limitError)
+    count += names.length
+    for (const name of names) {
+      const path = join(dir, name)
+      const entry = await lstat(path, { bigint: true })
       if (entry.isSymbolicLink()) throw new Error("Git metadata links are refused")
-      if (entry.isDirectory()) await visit(path, depth + 1)
+      if (entry.isDirectory()) await visit(path, depth + 1, entry)
       else {
-        const info = await lstat(path)
-        bytes += info.size
-        if (!info.isFile() || info.nlink !== 1 || info.size > 32 * 1024 * 1024 || bytes > 128 * 1024 * 1024)
+        bytes += entry.size
+        if (!entry.isFile() || entry.nlink !== 1n || entry.size > 32n * 1024n * 1024n || bytes > 128n * 1024n * 1024n)
           throw new Error("Git metadata size limit exceeded")
+        stamp?.(path, entry)
       }
     }
   }
-  await visit(join(folder, ".git"), 0)
+  await visit(root, 0, metadata)
 }
 const verifyObject = async (folder: string, oid: string) => {
   const raw = await git.readObject({ fs, dir: folder, oid, format: "content" })
@@ -121,7 +138,8 @@ export const commitFiles = async (folder: string, commit: string) => {
     directories = 0
   const portable = new Set<string>()
   const visit = async (oid: string, prefix: string) => {
-    if (++directories > 512 || prefix.split("/").length > 24) throw new Error("Plugin directory limit exceeded")
+    if (++directories > limits.directories || prefix.split("/").length > limits.depth)
+      throw new Error("Plugin directory limit exceeded")
     await verifyObject(folder, oid)
     const { tree } = await git.readTree({ fs, dir: folder, oid })
     for (const item of tree) {

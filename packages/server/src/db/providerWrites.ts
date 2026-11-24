@@ -1,4 +1,4 @@
-import { writeSetting } from "./settings.ts"
+import { readSetting, writeSetting } from "./settings.ts"
 import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
@@ -8,7 +8,7 @@ import type { ConnectionSettings, ModelId, ModelOverrides } from "@dreamspan/sha
 import { findProvider, providerChanges } from "@dreamspan/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { ModelKeyTaken, NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import {
@@ -169,6 +169,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(normalized), updated_at: Date.now() })},
                      row_version = row_version + 1
                    WHERE id = ${connectionId}`
+        if (row.base_url !== normalized.baseUrl)
+          yield* sql`UPDATE models SET upstream_json = json_remove(upstream_json, '$.priceFeed')
+            WHERE connection_id = ${connectionId} AND json_type(upstream_json, '$.priceFeed') IS NOT NULL`
         return yield* reloadConnection(connectionId)
       }).pipe(transaction(sql, "UpdateConnection")),
 
@@ -371,9 +374,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return { changed }
       }).pipe(transaction(sql, "RecomputeCosts")),
 
-    SetModelPriceFeeds: ({ userId, connectionId, feeds }) =>
+    SetModelPriceFeeds: ({ userId, connectionId, expectedRowVersion, feeds }) =>
       Effect.gen(function* () {
-        yield* ownedConnection(userId, connectionId)
+        const row = yield* ownedConnection(userId, connectionId)
+        if (row.row_version !== expectedRowVersion) return { updated: 0, stale: true }
         let updated = 0
         for (const { key, feed } of feeds) {
           const rows =
@@ -387,7 +391,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                   WHERE connection_id = ${connectionId} AND model_key = ${key} RETURNING id`
           updated += rows.length
         }
-        return { updated }
+        return { updated, stale: false }
       }).pipe(transaction(sql, "SetModelPriceFeeds")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
@@ -452,6 +456,17 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       writeSetting(sql, "app", "", key, value)
         .pipe(Effect.catchTag("StaleWrite", Effect.die))
         .pipe(Effect.asVoid, transaction(sql, "SetAppSetting")),
+
+    SetAccountFilesQuota: ({ userId, bytes }) =>
+      Effect.gen(function* () {
+        const key = "files.quotas"
+        const { value } = yield* readSetting(sql, "app", "", key)
+        const decoded = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Int))(value ?? {})
+        const quotas = { ...(decoded._tag === "Some" ? decoded.value : {}) }
+        if (bytes === null) delete quotas[userId]
+        else quotas[userId] = bytes
+        yield* writeSetting(sql, "app", "", key, quotas).pipe(Effect.catchTag("StaleWrite", Effect.die))
+      }).pipe(transaction(sql, "SetAccountFilesQuota")),
 
     RecordImageTokenCount: ({ userId, sha256, kind, modelKey, detail, tokens }) =>
       sql`INSERT INTO image_token_counts ${sql.insert({

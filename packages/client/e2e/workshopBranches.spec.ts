@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { sidePanel } from "./support/workshopSideChat.ts"
@@ -45,6 +46,70 @@ const fixture = (title: string) =>
       return { story, workshop, first }
     })
   )
+
+test("a popped-out workshop cannot send the side panel to a stale story branch", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1000 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const { story, workshop } = await fixture("Workshop branch cache")
+  await page.goto(`${server().url}/chats/${story.id}?panel=workshop`)
+  await expect(sidePanel(page).getByText("The bandits feel sudden.")).toBeVisible()
+  await sidePanel(page).getByRole("link", { name: "Open beside the story" }).click()
+  const frames = page.locator("[data-frame]")
+  await expect(frames).toHaveCount(2)
+  const headerLink = frames.nth(1).locator(`[data-workshop-story="${story.id}"]`)
+  await expect(headerLink).toContainText("branch Original")
+  const opening = frames.first().getByRole("article").filter({ hasText: "The caravan leaves at dawn." })
+  await opening.click()
+  await closePanel(page)
+
+  await messageMenu(opening, "Branch from here")
+  const dialog = page.getByRole("dialog", { name: "Branch from here" })
+  await expect(dialog.locator(`[data-fork-workshop="${workshop.id}"]`)).toBeVisible()
+  await dialog.getByRole("button", { name: "Create branch" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(headerLink).toContainText("branch Original")
+  const panel = await openPanel(page, "Workshop")
+  const side = panel.locator(`[data-side-chat="${workshop.id}"]`)
+  await expect(side.getByLabel("Message", { exact: true })).toBeVisible()
+  await expect(side.getByText("Is the dawn start believable?")).toBeVisible()
+  await expect(side.getByText("The bandits feel sudden.")).toHaveCount(0)
+})
+
+test("a standalone workshop's branch list has no deleted-story labels", async ({ page }) => {
+  const workshop = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateWorkshop({ title: "Standalone branches" })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "A separate plan.",
+        reply: false
+      })
+      if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+      yield* api.CreateFork({ chatId: chat.id, fromForkId: chat.currentForkId, atSlotId: sent.entry.slotId })
+      return chat
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  let branchRequest: string | undefined
+  let received = false
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload)) as { _tag: string; id: string; tag?: string }
+      if (message._tag === "Request" && message.tag === "ListWorkshopBranches") branchRequest = message.id
+    })
+    socket.on("framereceived", ({ payload }) => {
+      const message = JSON.parse(String(payload)) as { _tag: string; requestId?: string }
+      if (message._tag === "Exit" && branchRequest !== undefined && message.requestId === branchRequest) received = true
+    })
+  })
+  await page.goto(`${server().url}/chats/${workshop.id}`)
+  const trigger = page.getByRole("button", { name: /^Branch: .*switch branch$/ }).first()
+  await trigger.click()
+  await expect.poll(() => received).toBe(true)
+  await expect(page.getByText("Its story branch was deleted", { exact: true })).toHaveCount(0)
+})
 
 for (const width of [1440, 390])
   test(`branching the story offers its workshop then or now, and the panel follows the branch at ${width}`, async ({

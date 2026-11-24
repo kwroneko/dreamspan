@@ -157,17 +157,17 @@ export function ToolTabs({
   const active = values.indexOf(value)
   const ready = room !== null && tabs.every((tab) => widths[tab.value] !== undefined)
   useInitialTabFocus(row, ready, focusOnMount)
-  const fitFor = (order: ReadonlyArray<string>, open: number) =>
+  const fitFor = (order: ReadonlyArray<string>, selected: string | null = value) =>
     ready
       ? fitTools(
           order.map((entry) => widths[entry]!),
           chrome.more,
           chrome.divider,
           room,
-          open
+          selected === null ? -1 : order.indexOf(selected)
         )
       : { count: order.length, guest: false }
-  const { count, guest: hasGuest } = fitFor(values, active)
+  const { count, guest: hasGuest } = fitFor(values)
   const visible = tabs.slice(0, count)
   const hidden = tabs.slice(count)
   const guest = hasGuest ? tabs[active]! : null
@@ -183,7 +183,7 @@ export function ToolTabs({
   const outOfMore = (index: number) => {
     for (let at = Math.min(count, values.length - 1); at > 0; at--) {
       const next = moved(values, index, at)
-      if (fitFor(next, -1).count > at) return next
+      if (fitFor(next).count > at) return next
     }
     return moved(values, index, 0)
   }
@@ -307,7 +307,7 @@ export function ToolTabs({
     let next = placedBefore(values, dragged, over.before)
     const shows = (order: ReadonlyArray<string>) => {
       const at = order.indexOf(dragged)
-      return at < fitFor(order, -1).count
+      return at < fitFor(order).count
     }
     const step = over.zone === "menu" ? 1 : -1
     for (let at = next.indexOf(dragged); shows(next) !== (over.zone === "strip"); at += step) {
@@ -634,7 +634,7 @@ export function ToolTabs({
       {movable && arranging && (
         <ArrangeTabs
           tabs={tabs}
-          inRow={(order) => fitFor(order, -1).count}
+          inRow={(order) => fitFor(order, null).count}
           onReorder={reorder}
           onResetOrder={() => onResetOrder?.()}
           reordered={reordered}

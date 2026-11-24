@@ -232,14 +232,15 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
     assert.deepStrictEqual(yield* bob.ListMediaApproval({ refIds: [ref.id] }), [])
 
     yield* alice.DecideMediaApproval({
-      refIds: [ref.id],
-      decisions: [
-        { host: "cards.test", choice: "approve-subdomains" },
-        { host: "other.test", choice: "once" },
-        { host: "private.test", choice: "approve" },
-        { host: "rebind.test", choice: "once" },
-        { host: "declined.test", choice: "decline" }
-      ]
+      decisions: (
+        [
+          { host: "cards.test", choice: "approve-subdomains" },
+          { host: "other.test", choice: "once" },
+          { host: "private.test", choice: "approve" },
+          { host: "rebind.test", choice: "once" },
+          { host: "declined.test", choice: "decline" }
+        ] as const
+      ).map(({ host, choice }) => ({ host, choice, urls: asked.find((item) => item.host === host)!.urls }))
     })
     assert.deepStrictEqual(
       (yield* alice.GetMediaHosts()).hosts.find((host) => host.host === "cards.test"),
@@ -531,15 +532,22 @@ it.live("keeps one-time grants scoped to their files and the default host remova
         sourcePath: null
       })
     const first = yield* create('<img src="https://once.test/first.png">')
-    yield* alice.ListMediaApproval({ refIds: [first.ref.id] })
-    yield* alice.DecideMediaApproval({ refIds: [first.ref.id], decisions: [{ host: "once.test", choice: "once" }] })
-    yield* (yield* SavedMedia).settle
+    const [reviewed] = yield* alice.ListMediaApproval({ refIds: null })
     const second = yield* create('<img src="https://once.test/second.png"><img src="https://cardex.zip/i/third.png">')
     assert.strictEqual((yield* alice.GetSavedMediaStatus({ refId: second.ref.id })).approval, 2)
+    yield* alice.DecideMediaApproval({
+      decisions: [{ host: reviewed!.host, choice: "once", urls: reviewed!.urls }]
+    })
+    yield* (yield* SavedMedia).settle
+    assert.strictEqual((yield* alice.GetSavedMediaStatus({ refId: first.ref.id })).approval, 0)
     assert.deepStrictEqual((yield* alice.GetMediaHosts()).hosts, [])
-    assert.deepStrictEqual(yield* alice.ListMediaApproval({ refIds: [second.ref.id] }), [
-      { host: "cardex.zip", files: 1, kinds: [{ kind: "image", files: 1 }] },
-      { host: "once.test", files: 1, kinds: [{ kind: "image", files: 1 }] }
-    ])
+    const remaining = yield* alice.ListMediaApproval({ refIds: [second.ref.id] })
+    assert.deepStrictEqual(
+      remaining.map(({ host, files, kinds }) => ({ host, files, kinds })),
+      [
+        { host: "cardex.zip", files: 1, kinds: [{ kind: "image", files: 1 }] },
+        { host: "once.test", files: 1, kinds: [{ kind: "image", files: 1 }] }
+      ]
+    )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
 )

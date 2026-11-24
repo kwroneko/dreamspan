@@ -186,12 +186,12 @@ describe("tool loading review regressions", () => {
 
 // The persisted transcript is reusable only with the same card and offer. These tests exercise
 // the real continuity decision with synthetic storage replies, without reading any chat data.
-for (const change of ["card", "instructions", "tools"] as const) {
+for (const change of ["card", "card without loads", "instructions", "tools"] as const) {
   it.effect(`reassembles instead of carrying stale loads after ${change} changes`, () =>
     Effect.gen(function* () {
       const tool = {
         name: "read_card",
-        deferred: true,
+        deferred: change !== "card without loads",
         description: "Read",
         parameters: {},
         label: "Read",
@@ -201,10 +201,10 @@ for (const change of ["card", "instructions", "tools"] as const) {
         assemblerVersion: ASSEMBLER_VERSION,
         inputs: { cards: [{ entity: "a", revision: "old" }], model: null },
         continuity: { path: [] },
-        agent: { tools: [tool], cardSkills: [own] }
+        agent: { tools: [tool], cardSkills: change === "card without loads" ? [] : [own] }
       }
       const fresh = structuredClone(snapshot)
-      if (change === "card") fresh.inputs.cards[0]!.revision = "new"
+      if (change === "card" || change === "card without loads") fresh.inputs.cards[0]!.revision = "new"
       if (change === "instructions") fresh.agent.cardSkills = [{ ...own, instructions: "Changed" }]
       if (change === "tools") fresh.agent.tools = [{ ...tool, description: "Changed definition" }]
       const reader = {

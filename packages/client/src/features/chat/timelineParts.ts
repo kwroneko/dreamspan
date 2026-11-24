@@ -59,8 +59,7 @@ export const lcmTimeline = {
     const { entries, lcm, summaries, divider, historyDivider } = input
     // Above the chat's first message, the Messages and Summaries tabs (owner, 2026-11-18), when
     // summaries exist and the boundary isn't the first row anyway.
-    const first = entries[0]
-    const start = !!lcm?.layer.length && first !== undefined && (first.position ?? first.depth) === 0 && divider !== 0
+    const start = !!lcm?.layer.length && entries.length > 0 && input.atHistoryStart === true && divider !== 0
     const top: ReadonlyArray<TimelineRowV1> = start
       ? [{ key: "lcm-tabs", estimate: 44, from: Infinity, to: -1, body: { kind: "lcm-tabs" } }]
       : []

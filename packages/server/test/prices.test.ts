@@ -423,6 +423,44 @@ describe("price sources of a stored model", () => {
     assert.deepStrictEqual(s.builtin!.price, { input: 1, output: 1 })
   })
 
+  it("only fills endpoint cache rates in the same currency and otherwise prices from a whole table", () => {
+    const makeSources = (cacheRead?: number, currency?: string) =>
+      priceSources(
+        { provider: "openrouter", priceEndpoint: true },
+        model(
+          {
+            priceFrom: "list",
+            price: {
+              input: 3,
+              output: 4,
+              ...(cacheRead === undefined ? {} : { cacheRead }),
+              ...(currency ? { currency } : {})
+            },
+            priceFeed: { fetchedAt: now, currency: "EUR", price: { input: 1, output: 1, currency: "EUR" } }
+          },
+          "x/y"
+        ),
+        now
+      )
+    const charge = (sources: ReturnType<typeof makeSources>, cacheRead: number) =>
+      costOf(
+        builtinCostFormulas,
+        { kind: "openai-chat", api: "openai-completions", model: "x/y" },
+        {
+          counts: { ...unknownCounts, inputUncached: 1_000_000, cacheRead, output: 0 },
+          capture: emptyCapture(),
+          sources,
+          price: null
+        }
+      )
+    const usd = makeSources(2)
+    assert.notProperty(usd.endpoint!.price, "cacheRead")
+    assert.include(charge(usd, 1_000_000), { amount: 5, currency: "USD" })
+    assert.include(charge(usd, 0), { amount: 1, currency: "EUR" })
+    assert.include(charge(makeSources(2, "EUR"), 1_000_000), { amount: 3, currency: "EUR" })
+    assert.isNull(charge(makeSources(), 1_000_000))
+  })
+
   it.effect("records on refresh whether a price came from the list or the built-in table", () =>
     Effect.gen(function* () {
       const kind = {

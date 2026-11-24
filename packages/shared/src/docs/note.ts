@@ -12,21 +12,26 @@ export const OWN_TURN_FRAMING =
 
 /** The shared field after cutting a passage for an own-turn note. */
 export const cutOwnTurnText = (text: string, at: number, length: number): string => {
+  const end = at + length
   const before = text.slice(0, at),
-    after = text.slice(at + length)
+    after = text.slice(end)
   const left = before.match(/\s*$/)![0],
     right = after.match(/^\s*/)![0]
   const head = before.slice(0, before.length - left.length),
     tail = after.slice(right.length)
-  if (!head) return tail
   if (!tail) return head
+  const indentAt = Math.max(right.lastIndexOf("\r"), right.lastIndexOf("\n")) + 1
+  const indent = right.slice(indentAt)
+  if (!head) {
+    const startsLine = indentAt > 0 || /[\r\n][^\S\r\n]*$/.test(text.slice(0, end))
+    return startsLine ? indent + tail : tail
+  }
   const whitespace = left + right
   const lines = whitespace.match(/\r\n|[\r\n]/g) ?? []
   const separator = lines.length ? lines[0]!.repeat(Math.min(2, lines.length)) : whitespace ? " " : ""
   // Keep the retained line's indentation. Removing a line inside a list must not
   // turn its indented continuation into a new paragraph outside that list.
-  const indent = lines.length ? (right.match(/(?:^|[\r\n])([^\S\r\n]*)$/)?.[1] ?? "") : ""
-  return head + separator + indent + tail
+  return head + separator + (lines.length ? indent : "") + tail
 }
 
 /** A move may select text within HTML or whole elements/macros, never cut their syntax. */

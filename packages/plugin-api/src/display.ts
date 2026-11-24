@@ -143,6 +143,8 @@ export interface TimelineInputV1 {
     readonly depth: number
     readonly position?: number | undefined
   }>
+  /** The loaded window has no earlier history. */
+  readonly atHistoryStart?: boolean
   readonly hasBudget: boolean
   readonly assemblyError: boolean
   readonly historyDivider: number

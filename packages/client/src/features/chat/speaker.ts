@@ -6,6 +6,7 @@
 // One store per open chat, so the composer and the Cast tab read and change the same choice.
 import type { EntityId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { ComposerChoice } from "@dreamspan/shared/composerApi.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { useSyncExternalStore } from "react"
 import { focusComposer } from "./composerFocus.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -35,6 +36,9 @@ type Change = {
   readonly guidanceSlot?: SlotId | null
 }
 
+type PendingTarget = { readonly id: string; readonly slot: SlotId | null }
+const targetKey = (draftId: string) => `dreamspan.pending-guidance-target:${draftId}`
+
 /** How long a choice that couldn't be read waits before it's read again. */
 const RETRY_MS = 2000
 
@@ -55,6 +59,9 @@ class ComposerChoices {
   /** Changes on their way: a published choice that arrives meanwhile is older than them. */
   private writing = 0
   private writes: Promise<unknown> = Promise.resolve()
+  private readonly pendingTargets = new Map<string, PendingTarget | null>()
+  /** A stored target can be replayed once when its draft is opened. */
+  private replayTargetId: string | null = null
   /** A speaker picked before the composer's draft was known ("Write as" as the chat opens). */
   private early: EntityId | null = null
   /**
@@ -85,10 +92,38 @@ class ComposerChoices {
     for (const listener of this.listeners) listener()
   }
 
+  private pendingTarget(draftId: string): PendingTarget | null {
+    const local = this.pendingTargets.get(draftId)
+    if (local !== undefined) return local
+    try {
+      const raw = localStorage.getItem(targetKey(draftId))
+      if (raw === null) return null
+      const target = JSON.parse(raw) as Partial<PendingTarget> | null
+      return target && typeof target.id === "string" && (typeof target.slot === "string" || target.slot === null)
+        ? { id: target.id, slot: target.slot }
+        : null
+    } catch {
+      return null
+    }
+  }
+
+  private keepTarget(draftId: string, target: PendingTarget | null) {
+    try {
+      if (target === null) localStorage.removeItem(targetKey(draftId))
+      else localStorage.setItem(targetKey(draftId), JSON.stringify(target))
+      this.pendingTargets.delete(draftId)
+    } catch {
+      // Keep the optimistic choice in this tab if browser storage is unavailable.
+      this.pendingTargets.set(draftId, target)
+    }
+  }
+
   /** The composer shows `draftId` now (null while it goes to another tip). */
   bind(draftId: string | null, guidance = false) {
     if (draftId === this.state.draftId) return
     this.reads++
+    const pending = draftId === null ? null : this.pendingTarget(draftId)
+    this.replayTargetId = pending?.id ?? null
     this.setState({
       draftId,
       loaded: false,
@@ -97,7 +132,7 @@ class ComposerChoices {
       replyFrom: null,
       noReplies: false,
       guidance,
-      guidanceSlot: null
+      guidanceSlot: this.earlyGuidanceSlot === undefined ? (pending?.slot ?? null) : this.earlyGuidanceSlot
     })
     if (draftId !== null) void this.read()
   }
@@ -129,16 +164,23 @@ class ComposerChoices {
     })
   }
 
-  private applyChoice(next: ChoiceState) {
+  private applyChoice(next: ChoiceState & { readonly draftId: string }) {
     const speaker = this.early
-    const guidanceSlot = this.earlyGuidanceSlot
+    const earlySlot = this.earlyGuidanceSlot
+    const pending = this.pendingTarget(next.draftId)
+    const replay = earlySlot === undefined && pending?.id === this.replayTargetId ? pending : null
     this.early = null
     this.earlyGuidanceSlot = undefined
-    this.setState({ ...next, guidanceSlot: guidanceSlot === undefined ? next.guidanceSlot : guidanceSlot })
-    if (speaker !== null || guidanceSlot !== undefined)
+    this.replayTargetId = null
+    this.setState({
+      ...next,
+      guidanceSlot: earlySlot === undefined ? (pending === null ? next.guidanceSlot : pending.slot) : earlySlot
+    })
+    if (replay !== null) void this.write(next.draftId, { guidanceSlot: replay.slot }, replay)
+    if (speaker !== null || earlySlot !== undefined)
       void this.change({
         ...(speaker === null ? {} : { speaker }),
-        ...(guidanceSlot === undefined ? {} : { guidanceSlot })
+        ...(earlySlot === undefined ? {} : { guidanceSlot: earlySlot })
       })
   }
 
@@ -147,6 +189,7 @@ class ComposerChoices {
     this.reads++
     this.applyChoice({
       ...this.state,
+      draftId: choice.draftId,
       loaded: true,
       saving: false,
       speaker: choice.speakerEntityId,
@@ -175,7 +218,16 @@ class ComposerChoices {
       if (draftId === null && change.guidanceSlot !== undefined) this.earlyGuidanceSlot = change.guidanceSlot
       return { ok: true, value: null }
     }
-    if (change.guidanceSlot !== undefined) this.earlyGuidanceSlot = undefined
+    const target = change.guidanceSlot === undefined ? null : { id: uuidv7(), slot: change.guidanceSlot }
+    if (target !== null) {
+      this.earlyGuidanceSlot = undefined
+      this.replayTargetId = null
+      this.keepTarget(draftId, target)
+    }
+    return this.write(draftId, change, target)
+  }
+
+  private async write(draftId: string, change: Change, target: PendingTarget | null): Promise<Outcome<unknown>> {
     this.reads++
     this.writing++
     this.setState({
@@ -206,6 +258,14 @@ class ComposerChoices {
     )
     this.writes = request
     const result = await request
+    if (
+      target !== null &&
+      result.ok &&
+      result.value.draftId === draftId &&
+      result.value.guidanceSlotId === target.slot &&
+      this.pendingTarget(draftId)?.id === target.id
+    )
+      this.keepTarget(draftId, null)
     this.writing--
     if (this.writing === 0) {
       // Read again even after success: a different tab's newer event may have arrived

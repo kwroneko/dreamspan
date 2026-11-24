@@ -11,7 +11,7 @@ import { stateEventsThrough } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast, chatStateAt, previewNamesOf } from "./cards.ts"
 import { previewText } from "./previewText.ts"
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcluded, contextExcludedIn } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import {
   type ChatId,
@@ -35,7 +35,8 @@ import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { binItemBranches, binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { branchStart, forkColumns, forkRecency, forkThrough } from "./forks.ts"
+import { branchStart, forkColumns, forkRecency, forkThrough, onForkPath } from "./forks.ts"
+import { PANEL_MESSAGES } from "@dreamspan/shared/panelDataApi.ts"
 import {
   displayEndOf,
   displayLength,
@@ -369,11 +370,20 @@ export const makeReadHandlers = Effect.gen(function* () {
    * that places insertions: the same ranges as by depth, with the cursors (`older`, `newer`)
    * the slots at the positions next to the window, which may be inserted ones.
    */
-  const readDisplay = (chatId: ChatId, fork: ForkRow, leafSlotId: SlotId | null, range: PathRange, limit: number) =>
+  const readDisplay = (
+    chatId: ChatId,
+    fork: ForkRow,
+    leafSlotId: SlotId | null,
+    range: PathRange,
+    limit: number,
+    displayLeaf = false
+  ) =>
     Effect.gen(function* () {
       const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
       let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
       const shown = yield* displayTo(chatId, fork, leafSlotId)
+      if (displayLeaf && leafSlotId !== null && shown.end < 0)
+        return yield* new NotFound({ entity: "slot", id: leafSlotId })
       const read = (pieces: ReadonlyArray<PathPiece>, first: number, last: number, view: string) =>
         last < first ? Effect.succeed([] as ReadonlyArray<PathRow>) : displayWindow(sql, pieces, first, last, view)
       const at = (pieces: ReadonlyArray<PathPiece>, position: number) =>
@@ -398,7 +408,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         case "Bottom": {
           const first = Math.max(0, shown.end - limit + 1)
           return window(
-            leaf,
+            displayLeaf ? yield* at(shown.pieces, shown.end) : leaf,
             yield* read(shown.pieces, first, shown.end, fork.id),
             yield* at(shown.pieces, first - 1),
             null
@@ -461,6 +471,44 @@ export const makeReadHandlers = Effect.gen(function* () {
       }
     })
 
+  const pathAt = (chatId: ChatId, fork: ForkRow, leafSlotId: SlotId | null, limit: number) =>
+    Effect.gen(function* () {
+      const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
+      if (!(yield* rearranges(sql, chatId, fork.id))) {
+        // No insertions: the display path is the structural one, read as before.
+        if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
+        const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
+        if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
+        // Deleted messages are walked through but not shown; their replies stay in place.
+        return {
+          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+          olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null,
+          tipSlotId: fork.tip_slot_id as SlotId | null
+        }
+      }
+      // The last `limit` positions up to the leaf, or up to the display end.
+      const shown = yield* displayTo(chatId, fork, leafSlotId)
+      if (shown.end < 0) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
+      const first = Math.max(0, shown.end - limit + 1)
+      const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
+      return {
+        entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+        olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null,
+        tipSlotId: fork.tip_slot_id as SlotId | null
+      }
+    })
+
+  const decodedState = (chatId: ChatId, slotId: SlotId | null, fork: string | null, operation: string) =>
+    Effect.gen(function* () {
+      const rows = yield* stateEventsThrough(sql, chatId, slotId, fork)
+      const events = yield* Effect.forEach(rows, (row) =>
+        decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
+          Effect.mapError((error) => new StorageError({ reason: "corrupt", operation, message: error.message }))
+        )
+      )
+      return yield* withoutPurged(sql, events)
+    })
+
   const handlers = {
     WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
     // --- Parallel threads (spec/THREADS.md §4.3)
@@ -478,30 +526,19 @@ export const makeReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         const fork = yield* liveFork(chat, forkId ?? null)
-        const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
-        if (!(yield* rearranges(sql, chatId, fork.id))) {
-          // No insertions: the display path is the structural one, read as before.
-          if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
-          const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
-          if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
-          // Deleted messages are walked through but not shown; their replies stay in place.
-          return {
-            entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-            olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null,
-            tipSlotId: fork.tip_slot_id as SlotId | null
-          }
-        }
-        // The last `limit` positions up to the leaf, or up to the display end.
-        const shown = yield* displayTo(chatId, fork, leafSlotId)
-        if (shown.end < 0) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
-        const first = Math.max(0, shown.end - limit + 1)
-        const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
-        return {
-          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-          olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null,
-          tipSlotId: fork.tip_slot_id as SlotId | null
-        }
+        return yield* pathAt(chatId, fork, leafSlotId, limit)
       }).pipe(query("GetPath")),
+
+    PanelContext: ({ userId, chatId, forkId, slotId }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const fork = yield* liveFork(chat, forkId)
+        if (!(yield* onForkPath(sql, chatId, fork, slotId))) return yield* new NotFound({ entity: "slot", id: slotId })
+        const { entries } = yield* pathAt(chatId, fork, slotId, PANEL_MESSAGES)
+        // A deleted message's panel doesn't show.
+        if (entries.at(-1)?.slotId !== slotId) return yield* new NotFound({ entity: "slot", id: slotId })
+        return { entries, events: yield* decodedState(chatId, slotId, fork.id, "PanelContext") }
+      }).pipe(query("PanelContext")),
 
     // The message's own versions, each as the fork shows it: a copy it amended in its
     // original's place, with the fork's flags.
@@ -551,15 +588,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           const viewed = yield* liveFork(chat, fork as ForkId)
           if (viewed.tip_slot_id === slotId) at = (yield* displayEndOf(sql, chatId, viewed)) as SlotId | null
         }
-        const rows = yield* stateEventsThrough(sql, chatId, at, fork)
-        const events = yield* Effect.forEach(rows, (row) =>
-          decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
-            Effect.mapError(
-              (error) => new StorageError({ reason: "corrupt", operation: "StateEventsAt", message: error.message })
-            )
-          )
-        )
-        return yield* withoutPurged(sql, events)
+        return yield* decodedState(chatId, at, fork, "StateEventsAt")
       }).pipe(query("StateEventsAt")),
 
     ListBin: ({ userId, limit, before }) =>
@@ -890,7 +919,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         return found.map(toChat)
       }).pipe(query("ListChats")),
 
-    ReadPath: ({ userId, chatId, forkId, leafSlotId, range, limit }) =>
+    ReadPath: ({ userId, chatId, forkId, leafSlotId, range, limit, displayLeaf }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         // By fork, unless a leaf is named: the path to it, which no fork need end at, as the
@@ -900,7 +929,8 @@ export const makeReadHandlers = Effect.gen(function* () {
         let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
         let view: string = fork.id
         // A fork with insertions is read by position on its display path.
-        if (yield* rearranges(sql, chatId, fork.id)) return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
+        if (yield* rearranges(sql, chatId, fork.id))
+          return yield* readDisplay(chatId, fork, leafSlotId, range, limit, displayLeaf)
         if (leaf === null)
           return new PathWindow({ leafSlotId: null, forkId: shownFork, entries: [], older: null, newer: null })
         // Deleted messages are walked through but not shown; their replies stay in place.
@@ -956,6 +986,27 @@ export const makeReadHandlers = Effect.gen(function* () {
           }
         }
       }).pipe(query("ReadPath")),
+
+    ReadPathVersionAt: ({ userId, chatId, forkId, leafSlotId, position }) =>
+      Effect.gen(function* () {
+        const chat = yield* ownedChat(userId, chatId)
+        const fork = yield* liveFork(chat, forkId)
+        let slotId: string | null
+        if (yield* rearranges(sql, chatId, fork.id)) {
+          const shown = yield* displayTo(chatId, fork, leafSlotId)
+          slotId = position > shown.end ? null : yield* slotAtPosition(sql, shown.pieces, position)
+        } else {
+          const leaf = yield* slotIn(chatId, leafSlotId)
+          slotId = (yield* ancestorsAt(sql, leaf, [position])).get(position) ?? null
+        }
+        if (slotId === null) return null
+        const [version] = yield* sql<{ id: VersionId; speakerEntityId: EntityId | null }>`
+          SELECT v.id, v.speaker_entity_id AS speakerEntityId FROM slots s
+          JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
+          WHERE s.id = ${slotId} AND NOT ${slotDeletedIn(sql, fork.id, "s")}
+            AND NOT ${contextExcludedIn(sql, fork.id)}`
+        return version ?? null
+      }).pipe(query("ReadPathVersionAt")),
 
     // --- Branches (DESIGN §3.2) and forks
     PreviewForkNotes: (payload) => previewFork(sql, payload).pipe(query("PreviewForkNotes")),

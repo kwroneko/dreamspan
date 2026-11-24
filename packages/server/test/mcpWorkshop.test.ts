@@ -140,14 +140,17 @@ const addServer = (api: Api, server: FakeMcpServer, name: string, about = "", ti
   })
 
 /** A model as the account default, a fresh workshop and its events. */
-const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
+const workshop = (handler: (request: Recorded, res: ServerResponse) => void, context?: number) =>
   Effect.gen(function* () {
     const mock = yield* Effect.acquireRelease(
       Effect.promise(() => startMockProvider(handler)),
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: context === undefined ? {} : { context }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     return { mock, api, chat, events }
@@ -338,6 +341,39 @@ describe("MCP servers in workshops", () => {
       const entry = transcript.entries.find((e) => e.role === "toolResult" && e.toolCallId === "b1")
       assert.isTrue(entry?.role === "toolResult" && entry.text.includes("line 5999 of the archive"))
       assert.isTrue(entry?.role === "toolResult" && entry.sent !== undefined && !entry.sent.includes("line 5999"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a shortened read_run page keeps its original-step cursor on the provider wire", () =>
+    Effect.gen(function* () {
+      const script = scripted([
+        { name: "mcp_big_dump", args: {}, id: "original" },
+        { name: "read_run", args: { message: 0, call: "original", max_tokens: 4000 }, id: "first-page" }
+      ])
+      const { api, chat, events, mock } = yield* workshop(script.handler, 24_000)
+      for (const capability of ["plugins.write", "plugins.apply", "network", "subagents"] as const)
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability, mode: "off" })
+      const big = yield* fakeServer([fakeTool("dump")])
+      const body = Array.from({ length: 6000 }, (_, i) => `${i}: XQYZ & <tag> "entry"`).join("\n")
+      big.state.call = async () => ({ content: [{ type: "text", text: body }] })
+      const connection = yield* addServer(api, big, "Big")
+      yield* api.SetMcpUse({ connectionId: connection.id, workshops: true })
+
+      const versionId = yield* run(api, chat, events, "read the archive")
+      const transcript = yield* api.GetRunTranscript({ versionId: versionId as VersionId })
+      const first = transcript.entries.find((e) => e.role === "toolResult" && e.toolCallId === "first-page")
+      assert.isDefined(first, `steps sent to the provider: ${toolMessages(mock.requests()).map((m) => m.tool_call_id)}`)
+      const sent = first?.role === "toolResult" ? first.sent : undefined
+      assert.isString(
+        sent,
+        `the quota shortened the page: ${first?.role === "toolResult" ? first.text.slice(0, 250) : ""}`
+      )
+      assert.match(
+        sent!,
+        /<\/tool_data>\n\[Result continues: read_run with message 0 and call "page:v2:1:[1-9]\d*:[a-f0-9]{24}"/
+      )
+      const wire = toolMessages(mock.requests()).find((m) => m.tool_call_id === "first-page")
+      assert.strictEqual(wire?.content, sent)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 

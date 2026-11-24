@@ -363,6 +363,15 @@ export const mcpToolFromFrozen = (
 /** A provider's call id, shown back to the model only when it is plain (they're source text). */
 const plainCallId = (call: string) => /^[A-Za-z0-9_.:-]{1,128}$/.test(call)
 
+/** The model sees a bounded first page; the full quoted result stays in the story transcript. */
+export const storyMcpResultPage = (text: string, call: string, frame?: string) => {
+  const more = (end: number) =>
+    plainCallId(call)
+      ? `[Result shortened. read_result with call "${call}" and offset=${end} continues it.]`
+      : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
+  return toolDataPage(text, { frame, more }).text || more(0)
+}
+
 /**
  * The rest of a long server result in a story (spec/MCP.md §9): pages a result of this run's own
  * transcript, by its call id, and nothing else, so it never reads another run.
@@ -384,14 +393,26 @@ export const readResultTool: RolloutTool<{ readonly call: string; readonly offse
     Effect.sync((): ToolOutput => {
       const offered = context.offer?.tools ?? []
       const result = (context.transcript?.() ?? []).find((m) => m.role === "toolResult" && m.toolCallId === call) as
-        { readonly toolName: string; readonly content: ReadonlyArray<{ type: string; text?: string }> } | undefined
+        | {
+            readonly toolName: string
+            readonly content: ReadonlyArray<{ type: string; text?: string }>
+            readonly details?: { readonly sentText?: string }
+          }
+        | undefined
       if (!result || !offered.find((t) => t.name === result.toolName)?.mcp)
         return { text: "No result of a server's tool in this reply has that call id.", isError: true }
-      // The transcript keeps the result's envelope; pages quote its original once, by its offsets.
-      const text = toolDataBody(result.content.flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join(""))
+      const parts = result.content.flatMap((p) => (p.type === "text" && p.text ? [p.text] : []))
+      const [stored = "", ...otherText] = parts
+      // Old first pages quoted the envelope itself. The saved projection preserves that offset
+      // basis, even for runs that predate the explicit body-offset marker.
+      const sent = result.details?.sentText ?? ""
+      const legacyNotice = sent.match(/\n\[Result shortened\. read_result [^\n]* offset=(\d+) continues it\.\]$/)
+      const shown = legacyNotice ? toolDataBody(sent.slice(0, legacyNotice.index)) : ""
+      const legacy = shown.length > 0 && shown.length === Number(legacyNotice?.[1]) && stored.startsWith(shown)
+      const text = legacy ? parts.join("") : toolDataBody(stored) + otherText.join("")
       if (offset >= text.length)
         return { text: `That result has ${text.length} characters; start before that.`, isError: true }
-      const frame = `<result_metadata>${escapeToolData(JSON.stringify({ offset, total_characters: text.length }))}</result_metadata>`
+      const frame = `<result_metadata>${escapeToolData(JSON.stringify({ offset, total_characters: text.length, offset_basis: legacy ? "envelope" : "body" }))}</result_metadata>`
       const page = toolDataPage(text, {
         offset,
         frame,

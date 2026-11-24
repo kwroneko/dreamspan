@@ -26,6 +26,8 @@ export interface Portrait {
   readonly name: string
   readonly mediaId: string | null
   readonly picture?: AvatarCrop | undefined
+  /** The whole picture's own address when it isn't a stored file (a card source's card). */
+  readonly src?: string | undefined
   /** A message's attached image rather than a portrait: the viewer's labels say "image". */
   readonly image?: true | undefined
 }
@@ -203,6 +205,7 @@ export function PortraitView({
   const { mode } = useImagePrefs()
   const [zoom, setZoom] = useState<Zoom>("fit")
   const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null; min: number } | null>(null)
+  src = src ?? portrait.src
   const shows = portrait.mediaId !== null || src !== undefined
   const visible = shows && mode === "show"
   const shownScale = scale?.value ?? 1

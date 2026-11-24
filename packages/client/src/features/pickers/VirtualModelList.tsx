@@ -46,7 +46,7 @@ function Facts({ model, used, mixed }: { model: ModelChoice; used: number | unde
 }
 
 /** Where the focused row is now; when it left the list, the selectable row nearest its old place. */
-function focusedIndex(rows: ReadonlyArray<ModelRow>, focus: { readonly key: string; readonly index: number } | null) {
+function focusedIndex(rows: ReadonlyArray<ModelRow>, focus: ModelFocus | null) {
   if (!focus || rows.length === 0) return -1
   const at = rows[focus.index]?.key === focus.key ? focus.index : rows.findIndex((row) => row.key === focus.key)
   if (at >= 0) return at
@@ -56,6 +56,8 @@ function focusedIndex(rows: ReadonlyArray<ModelRow>, focus: { readonly key: stri
       if (index >= 0 && index < rows.length && !("heading" in rows[index]!)) return index
   return -1
 }
+
+type ModelFocus = { readonly key: string; readonly index: number; readonly control: "radio" | "pin" }
 
 export function VirtualModelList({
   ref,
@@ -86,7 +88,7 @@ export function VirtualModelList({
   const parent = useRef<HTMLDivElement>(null)
   // The focused row by key, and its place when it was focused: rows regrouped under it (pins
   // changing elsewhere) keep it focused, or its neighbour when it left the list.
-  const [focus, setFocus] = useState<{ readonly key: string; readonly index: number } | null>(null)
+  const [focus, setFocus] = useState<ModelFocus | null>(null)
   // Whether focus is in the list, so a regroup that remounts or moves the row refocuses it.
   const inside = useRef(false)
   // A row the keys moved to that may mount only on the next render.
@@ -121,7 +123,7 @@ export function VirtualModelList({
       return
     }
     if (index >= rows.length) return
-    setFocus({ key: rows[index]!.key, index })
+    setFocus({ key: rows[index]!.key, index, control: "radio" })
     pending.current = true
     if (windowed) virtualizer.scrollToIndex(index, { align: "auto" })
     // A mounted row may already be the retained index after focus returned to search.
@@ -136,16 +138,20 @@ export function VirtualModelList({
   }))
   useLayoutEffect(() => {
     if (focused < 0) return
-    const row = parent.current?.querySelector<HTMLElement>(`[data-model-index="${focused}"] [role=radio]`)
-    if (focus && focus.index !== focused) {
+    const key = rows[focused]!.key
+    const control = focus?.key === key ? focus.control : "radio"
+    const row = parent.current?.querySelector<HTMLElement>(`[data-model-index="${focused}"]`)
+    const radio = row?.querySelector<HTMLElement>("[role=radio]")
+    const target = (control === "pin" ? row?.querySelector<HTMLElement>("button[aria-pressed]") : radio) ?? radio
+    if (focus && (focus.index !== focused || focus.key !== key)) {
       // The rows moved under the focused one: follow it, keeping it in view if focus is here.
-      setFocus({ key: rows[focused]!.key, index: focused })
+      setFocus({ key, index: focused, control })
       if (!inside.current) return
       if (windowed) virtualizer.scrollToIndex(focused, { align: "auto" })
-      else row?.scrollIntoView({ block: "nearest" })
+      else target?.scrollIntoView({ block: "nearest" })
     }
-    if (row && document.activeElement !== row && (inside.current || pending.current)) row.focus()
-    if (row) pending.current = false
+    if (target && document.activeElement !== target && (inside.current || pending.current)) target.focus()
+    if (target) pending.current = false
   }, [focus, focused, rows, windowed, virtualizer])
   return (
     <div
@@ -212,6 +218,11 @@ export function VirtualModelList({
               data-picker-row={choice.value}
               className={`absolute left-0 flex w-full items-center gap-1 rounded-md pe-2 ${checked ? "bg-accent/10" : "hover:bg-hover"}`}
               style={{ top: item.start, height: item.size }}
+              onFocus={(event) => {
+                const control = event.target.getAttribute("role") === "radio" ? "radio" : "pin"
+                if (focus?.key !== row.key || focus.index !== item.index || focus.control !== control)
+                  setFocus({ key: row.key, index: item.index, control })
+              }}
             >
               <Tooltip
                 label={
@@ -231,10 +242,6 @@ export function VirtualModelList({
                       ? { "aria-description": row.choice.description }
                       : {})}
                   ref={checked ? (focusRef as RefObject<HTMLButtonElement | null>) : undefined}
-                  onFocus={() => {
-                    if (focus?.key !== row.key || focus.index !== item.index)
-                      setFocus({ key: row.key, index: item.index })
-                  }}
                   onClick={() => onChoose(choice.value)}
                   className="flex h-full min-w-0 flex-1 flex-col justify-center rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
                 >

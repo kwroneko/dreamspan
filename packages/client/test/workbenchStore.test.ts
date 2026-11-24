@@ -15,8 +15,8 @@ it("replaces an earlier layout when a fresh URL opens, even without further inte
   const earlier = new WorkbenchStore("user", createMemoryHistory({ initialEntries: ["/chats/a"] }), null, () => {})
   earlier.split(earlier.frames()[0]!.id, "row")
   let saved = JSON.stringify(saveLayout(earlier.layout))
-  const fresh = new WorkbenchStore("user", createMemoryHistory({ initialEntries: ["/"] }), null, (json) => {
-    saved = json
+  const fresh = new WorkbenchStore("user", createMemoryHistory({ initialEntries: ["/"] }), null, (layout) => {
+    saved = JSON.stringify(saveLayout(layout))
   })
   const stop = fresh.start()
   window.dispatchEvent(new Event("pagehide"))

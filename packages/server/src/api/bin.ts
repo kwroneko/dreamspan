@@ -8,10 +8,31 @@ import { NotFound, type ServerError } from "@dreamspan/shared/errors.ts"
 import { Cause, Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import type { DeletedChatItem } from "../db/ops.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { BinContentGone } from "../files/bin.ts"
 import { internal, toServerError } from "./internal.ts"
+
+/** Finish live sessions affected by the writer's workshop companion deletions. */
+export const notifyWorkshopDeletions = (userId: UserId, workshops: DeletedChatItem["workshops"]) =>
+  Effect.gen(function* () {
+    const generations = yield* Generations
+    const hub = yield* ChatHub
+    const reader = yield* Reader
+    for (const { chatId, forkIds } of workshops) {
+      yield* Effect.forEach(generations.runningIn(chatId, forkIds ?? undefined), (versionId) =>
+        Effect.ignore(generations.stop(userId, versionId))
+      )
+      if (forkIds === null) hub.close(chatId, { _tag: "Deleted" })
+      else {
+        hub.publish(chatId, { _tag: "Reload" })
+        const chat = yield* reader.GetChat({ userId, chatId }).pipe(Effect.option)
+        if (chat._tag === "Some") hub.publish(chatId, { _tag: "Chat", chat: chat.value })
+      }
+    }
+  })
 
 export const makeBinHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -93,11 +114,14 @@ export const makeBinHandlers = Effect.gen(function* () {
     PurgeBinItem: ({ itemId, expectedForkIds }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const chatIds = yield* writer.PurgeBinItem({
-          userId: id,
-          itemId,
-          ...(expectedForkIds ? { expectedForkIds } : {})
-        })
+        const chatIds = yield* files.bin.serial(
+          id,
+          writer.PurgeBinItem({
+            userId: id,
+            itemId,
+            ...(expectedForkIds ? { expectedForkIds } : {})
+          })
+        )
         yield* afterPurge(id, chatIds)
         // A file's content goes from disk once its row has, and attachment copies no message names any more.
         yield* files.bin.sweep(id)
@@ -107,7 +131,10 @@ export const makeBinHandlers = Effect.gen(function* () {
     EmptyBin: ({ itemIds, expectedForkIds }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const result = yield* writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
+        const result = yield* files.bin.serial(
+          id,
+          writer.EmptyBin({ userId: id, itemIds, ...(expectedForkIds ? { expectedForkIds } : {}) })
+        )
         yield* afterPurge(id, result.chatIds)
         yield* files.bin.sweep(id)
         yield* dropAttachmentCopies(id)

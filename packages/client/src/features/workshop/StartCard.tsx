@@ -5,6 +5,8 @@
 // New workshop makes nothing (owner, 2026-11-17: "The chat is created when the first message is
 // sent"): it opens the workshop not made yet (`/new/workshop`, StartWorkshopPage.tsx) with these
 // choices and the title, where they can still change, and its first message makes it.
+import { SidebarStartLink } from "../characters/NewCharacterChat.tsx"
+import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
@@ -164,6 +166,36 @@ export const useWorkshopStart = () => {
   const [card, setCard] = usePlaceParam(CARD_KEY, "")
   const [persona, setPersona] = usePlaceParam(PERSONA_KEY, "")
   return { card, setCard, persona, setPersona }
+}
+
+/** The sidebar's "New Workshop", beside New Roleplay above All chats (owner, 2026-11-24). */
+export function NewWorkshopStart() {
+  return (
+    <SidebarStartLink
+      to="/new/workshop"
+      icon="tool"
+      label="New Workshop"
+      hint="Start a workshop: a chat with an assistant about your cards, presets and lorebooks, outside any story."
+    />
+  )
+}
+
+/**
+ * "New Workshop with <name>" above a character's chats (owner, 2026-11-24): a new workshop whose
+ * assistant speaks as that card (its personality, as in a roleplay), chosen as the start card's
+ * Assistant is (`workshopCard`), and still changeable there before the first message.
+ */
+export function NewWorkshopWithCharacter({ entityId, label }: { entityId: EntityId; label: string }) {
+  return (
+    <SidebarStartLink
+      to="/new/workshop"
+      search={{ [CARD_KEY]: entityId }}
+      icon="tool"
+      label="New Workshop"
+      name={label}
+      hint={`Start a workshop with ${label} as the assistant: for writing and editing cards, presets and lorebooks.`}
+    />
+  )
 }
 
 export function WorkshopStartCard() {

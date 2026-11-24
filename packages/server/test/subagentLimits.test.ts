@@ -7,6 +7,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import {
@@ -99,6 +100,45 @@ describe("subagent limits", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("known charges still cap the reply's combined spend after an unpriced child", () =>
+    Effect.gen(function* () {
+      const script = scripted({
+        parent: [
+          { ...START, id: "unpriced", args: { ...START.args, model: "same" } },
+          { ...START, id: "priced", args: { ...START.args, model: "priced" } },
+          { ...START, id: "last", args: { ...START.args, model: "priced", task: "Keep looking." } }
+        ],
+        child: (done, body) => (JSON.stringify(body.messages).includes("Keep looking.") ? forever(done) : undefined),
+        usage: { prompt_tokens: 3000, completion_tokens: 0, total_tokens: 3000 }
+      })
+      const { api, chat, events, mock } = yield* setup(script)
+      const writer = yield* Writer
+      const userId = (yield* api.GetSession()).user.id
+      const connectionId = (yield* api.GetGenerationDefaults()).model!.connection
+      const model = yield* writer.AddUserModel({
+        userId,
+        connectionId,
+        key: "priced-model",
+        overrides: {},
+        upstream: { price: { input: 100, output: 0 } }
+      })
+      const pick = `${connectionId} ${model.id}`
+      yield* api.ChangeSubagentSettings({
+        picks: ["same", pick],
+        rows: { [pick]: { alias: "priced", note: "" } },
+        limits: { cost: 0.5, runCostTimes: 1 }
+      })
+      const versionId = yield* task(api, chat, "look")
+      yield* eventually(() => finished(events, versionId) !== undefined)
+      assert.strictEqual(finished(events, versionId)?.status, "complete")
+      assert.deepStrictEqual(
+        childBodies(mock).map((body) => body.model),
+        ["mock-model", "priced-model", "priced-model"]
+      )
+      assert.include(toolTexts(lastParent(mock))[2], "Stopped at its limit")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("a reply starts at most its per-reply count", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -111,6 +151,31 @@ describe("subagent limits", () => {
       assert.include(results[0], "Report.")
       assert.include(results[1], "started as many subagents as it may")
       assert.lengthOf(childBodies(mock), 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a resumed reply can start a child after a lookup reuses a discarded spawn's ID", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const look = { name: "list_library", args: { kind: "card" }, id: "before" }
+      const parent = [look, START]
+      const script = scripted({ parent, child: () => undefined })
+      const { api, chat, events, mock } = yield* setup(script)
+      yield* api.ChangeSubagentSettings({ limits: { perRun: 1 } })
+      const versionId = yield* task(api, chat, "look")
+      yield* eventually(() => finished(events, versionId)?.status === "complete")
+      assert.lengthOf(childBodies(mock), 1)
+
+      parent[1] = { ...look, id: START.id }
+      parent.push({ ...START, id: "fresh" })
+      const slot = yield* (yield* Reader).GetSlot({
+        userId: (yield* api.Whoami()).id,
+        slotId: (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
+      })
+      const resumed = yield* api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: slot.entry.rowVersion })
+      yield* eventually(() => finished(events, resumed.version.id)?.status === "complete")
+      assert.lengthOf(childBodies(mock), 2)
+      assert.include(toolTexts(lastParent(mock)).at(-1), "Report.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

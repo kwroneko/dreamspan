@@ -45,7 +45,6 @@ import {
   type LayoutAction,
   stripCorners,
   neighbours,
-  restoreLayout,
   type Node,
   type Split,
   type Tab,
@@ -56,6 +55,7 @@ import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { decodeLayout, encodeLayout, WORKBENCH_PARAM } from "./layoutParam.ts"
+import { persistHref } from "./kinds.ts"
 import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../tabLayoutParams.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
@@ -91,11 +91,9 @@ const useWideScreen = () => useSyncExternalStore(subscribeWide, () => matchMedia
 /** Sets where the side panel's toggle goes: the top-right strip's end (tab.tsx `usePanelTogglePlace`). */
 const PanelToggleHostRef = createContext<(element: HTMLElement | null) => void>(() => {})
 
-/** The layout as `WorkbenchStore` saves it (`saveLayout`), into the browser tab's URL. */
-const saveToUrl = (json: string) => {
-  const layout = restoreLayout(JSON.parse(json))
-  writeLayoutParam(WORKBENCH_PARAM, layout ? encodeLayout(layout, (href) => href, withoutLayoutParams) : null)
-}
+/** Save the live layout into the browser tab's URL. */
+const saveToUrl = (layout: Layout) =>
+  writeLayoutParam(WORKBENCH_PARAM, encodeLayout(layout, persistHref, withoutLayoutParams))
 
 /** Registered in the shell's center column (`centerColumn`). */
 export function Workbench() {
@@ -210,7 +208,11 @@ function useLinkGestures(store: WorkbenchStore) {
       else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href, { whole: true })
     }
     const beside = (event: Event) => {
-      if (event instanceof CustomEvent && typeof event.detail === "string") store.openBeside(event.detail)
+      if (!(event instanceof CustomEvent)) return
+      const detail: unknown = event.detail
+      if (typeof detail === "string") store.openBeside(detail)
+      else if (typeof detail === "object" && detail !== null && "href" in detail && typeof detail.href === "string")
+        store.openBeside(detail.href, { preview: "preview" in detail && detail.preview === true })
     }
     window.addEventListener(OPEN_BESIDE, beside)
     const dblclick = (event: MouseEvent) => {

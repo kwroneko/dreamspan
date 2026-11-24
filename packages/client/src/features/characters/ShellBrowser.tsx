@@ -44,7 +44,8 @@ import { SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { SourceChips, SourceFiltersPanel } from "../cardSources/filters.tsx"
 import { GroupGrid, useGroupsSwitch } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
+import { characterChatActions, sidebarChatStarts, sidebarFoot } from "./homeSlots.ts"
+import { StartRow } from "./NewCharacterChat.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading, LoadingProgress, PlaceholderBar } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -481,7 +482,8 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
 
 /**
  * A chat row's portraits while it is pending, and after, until it unmounts: two portrait boxes
- * and the count tile's sliver, whatever the cast turns out to be, so reading it moves nothing.
+ * and the count tile's sliver, whatever the cast turns out to be, so reading it moves nothing
+ * (the tile is one width for every count).
  * The chat's own picture is known at once and fills the first box; read faces fill both; a box
  * left over stays empty. Pending boxes without a picture are quiet bars.
  */
@@ -524,6 +526,7 @@ function ReservedPortraits({ fork, pending }: { fork: ShellFork; pending: boolea
         })}
         <PortraitOverflow
           remaining={count ? remaining : 1}
+          fixedWidth
           className={`fork-row-overflow${count ? "" : " invisible"}`}
         />
       </span>
@@ -647,7 +650,11 @@ export function ForkRow({
                             )}
                           </span>
                         ))}
-                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow invisible" />
+                        <PortraitOverflow
+                          remaining={fork.cast.length - 2}
+                          fixedWidth
+                          className="fork-row-overflow invisible"
+                        />
                       </>
                     ) : (
                       <>
@@ -662,7 +669,7 @@ export function ForkRow({
                             size="md"
                           />
                         ))}
-                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
+                        <PortraitOverflow remaining={fork.cast.length - 2} fixedWidth className="fork-row-overflow" />
                       </>
                     )}
                   </span>
@@ -1275,18 +1282,25 @@ function Browser() {
           filtersId="side-source-filters"
         />
       )}
-      {/* Below every filter row, directly above the list it navigates: coming or going, it moves only the list. */}
-      {!grid && (scope.entity || scope.chat) && (
+      {/* Below every filter row, directly above the list it navigates. In All chats too, as where
+          you are, so the list starts at the same height in every scope (owner, 2026-11-24). */}
+      {!grid && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
-          <Tooltip label="Back to the list of all your chats.">
-            <button
-              type="button"
-              className="shrink-0 text-accent hover:underline"
-              onClick={() => setScope({ entity: null, chat: null })}
-            >
+          {kind === "all" ? (
+            <span aria-current="location" className="shrink-0 font-medium">
               All chats
-            </button>
-          </Tooltip>
+            </span>
+          ) : (
+            <Tooltip label="Back to the list of all your chats.">
+              <button
+                type="button"
+                className="shrink-0 text-accent hover:underline"
+                onClick={() => setScope({ entity: null, chat: null })}
+              >
+                All chats
+              </button>
+            </Tooltip>
+          )}
           {scope.entity && (
             <>
               <span aria-hidden className="shrink-0 text-muted">
@@ -1326,7 +1340,7 @@ function Browser() {
             </>
           )}
           {/* On the breadcrumbs' own line, so the rows don't move when it goes. */}
-          {forks.progress && (
+          {forks.progress && kind !== "all" && (
             <LoadingProgress
               noun={kind === "chat" ? "branches" : "chats"}
               ready={forks.progress.ready}
@@ -1401,7 +1415,15 @@ function Browser() {
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
             {kind === "character" && card && (
-              <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+              <StartRow>
+                <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+              </StartRow>
+            )}
+            {/* In the slot a character's New Roleplay has, as tall: side by side, stacked where they don't fit. */}
+            {kind === "all" && (
+              <StartRow>
+                <SlotOutlet slot={sidebarChatStarts} props={{}} />
+              </StartRow>
             )}
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && data && (

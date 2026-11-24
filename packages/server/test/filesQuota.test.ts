@@ -2,7 +2,7 @@
 // a small quota is refused new writes and commands with how much it uses, the usage RPC says
 // so, an admin's quota lifts it, and retention removes old versions and the media only they
 // named. Synthetic data only.
-import { link, mkdir, symlink, truncate, writeFile } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, rename, symlink, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
@@ -52,19 +52,27 @@ describe("a walk that stops at its limits", () => {
         await mkdir(join(root, "files"), { recursive: true })
         for (let i = 0; i < 20; i++) await writeFile(join(root, "files", `f${i}`), "")
       })
+      let prunes = 0
       const quota = makeFilesQuota({
         reader: {
           GetAppSetting: () => Effect.succeed(null),
           FileVersionBytes: () => Effect.succeed(0)
         } as never,
-        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
+        writer: {
+          PruneFileVersions: () =>
+            Effect.sync(() => {
+              prunes++
+              return { versions: 0, attachments: 0, media: 0 }
+            })
+        } as never,
         folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
         defaultBytes: 10 * 2 ** 30,
         walkMaxEntries: 5
       })
       const refused = yield* Effect.exit(quota.check("u", 1, "write files"))
       assert.strictEqual(refused._tag, "Failure")
-      assert.match(String(yield* quota.afterCommand("u")), /too many to count/)
+      assert.strictEqual(prunes, 0)
+      assert.match(String(yield* quota.afterCommand("u")), /couldn't be fully counted/)
     })
   )
 })
@@ -243,6 +251,30 @@ describe("the cached figure between walks", () => {
     })
   )
 
+  for (const counted of [3_000, 5_000]) {
+    it.live(`retains only unmeasured upload bytes when a walk counted ${counted} bytes under the temporary name`, () =>
+      Effect.gen(function* () {
+        const { quota, gate, root } = yield* Effect.promise(() => setup("quota-upload-inode"))
+        const first = yield* quota.usage("u")
+        const upload = quota.hold("u")
+        assert.isTrue(upload.reserve(counted, first.quotaBytes))
+        const temporary = join(root, "files", ".upload.rp-tmp")
+        yield* Effect.promise(() => writeFile(temporary, Buffer.alloc(counted)))
+        const file = yield* Effect.promise(() => lstat(temporary))
+        gate.arm()
+        const walking = yield* Effect.forkChild(quota.measure("u"))
+        yield* Effect.promise(() => gate.reached)
+        assert.isTrue(upload.reserve(5_000 - counted, first.quotaBytes))
+        yield* Effect.promise(() => truncate(temporary, 5_000))
+        yield* Effect.promise(() => rename(temporary, join(root, "files", "upload")))
+        upload.landed(file)
+        gate.open()
+        const measured = yield* Fiber.join(walking)
+        assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 5_000 - counted)
+      })
+    )
+  }
+
   it.live("an entry found smaller than a walk began with is logged and removed, not a failure", () =>
     Effect.gen(function* () {
       const { quota, onRead } = yield* Effect.promise(() => setup("quota-shrunk"))
@@ -319,6 +351,24 @@ describe("measuring", () => {
     assert.isNull(parseByteSize("ten gigs"))
     assert.isNull(parseByteSize("-1G"))
   })
+
+  it.live.skipIf(process.getuid?.() === 0)(
+    "marks an unreadable directory as partial and a missing path as complete",
+    () =>
+      Effect.promise(async () => {
+        const root = tempDir("measure-unreadable")
+        const folder = join(root, "restricted")
+        await mkdir(folder)
+        await writeFile(join(folder, "hidden"), "synthetic contents")
+        await chmod(folder, 0)
+        try {
+          assert.isTrue((await measureTree(root)).partial)
+          assert.isFalse((await measureTree(join(root, "missing"))).partial)
+        } finally {
+          await chmod(folder, 0o700)
+        }
+      })
+  )
 
   it.live("counts sizes, each inode once, and never follows links", () =>
     Effect.promise(async () => {
@@ -435,6 +485,29 @@ it.live.skipIf(!commands)(
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   120_000
+)
+
+it.live("concurrent admin edits keep each account's quota override", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const admin = yield* api.Whoami()
+    const writer = yield* Writer
+    const other = yield* writer.CreateUser({
+      handle: "quota-neighbor",
+      displayName: "Neighbor",
+      role: "user",
+      passwordHash: "synthetic"
+    })
+    yield* Effect.all(
+      [
+        api.SetFilesQuota({ userId: admin.id, quotaBytes: 100_000 }),
+        api.SetFilesQuota({ userId: other.id, quotaBytes: 200_000 })
+      ],
+      { concurrency: "unbounded" }
+    )
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: admin.id })).quotaBytes, 100_000)
+    assert.strictEqual((yield* api.GetFilesUsage({ userId: other.id })).quotaBytes, 200_000)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 )
 
 it.live("retention removes old versions, and the media only they named", () => {

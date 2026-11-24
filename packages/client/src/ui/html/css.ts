@@ -290,6 +290,7 @@ interface Out {
   readonly key: string
   readonly type: TokenType
   readonly delim?: string
+  readonly media?: string
 }
 
 const keyOf = (token: CSSToken): string => {
@@ -414,8 +415,13 @@ class Writer {
   hash(value: string) {
     this.push({ text: `#${serializeName(value)}`, key: `${TokenType.Hash}:${value}`, type: TokenType.Hash })
   }
-  string(value: string) {
-    this.push({ text: serializeString(value), key: `${TokenType.String}:${value}`, type: TokenType.String })
+  string(value: string, media?: string) {
+    this.push({
+      text: serializeString(value),
+      key: `${TokenType.String}:${value}`,
+      type: TokenType.String,
+      ...(media === undefined ? {} : { media })
+    })
   }
   delim(char: string) {
     this.push({ text: char, key: `${TokenType.Delim}:${char}`, type: TokenType.Delim, delim: char })
@@ -493,7 +499,6 @@ const REMOTE = /^\s*(?:https?:)?\/\//i
 
 interface Policy {
   readonly mediaScope: string | null | undefined
-  readonly media: string[]
   /** Something naming another site was left out: the message says so. */
   remote: boolean
   readonly keyframes: ReadonlySet<string>
@@ -537,18 +542,14 @@ function writeUrl(address: string, writer: Writer, policy: Policy, options: Valu
   if (value.startsWith("#") && value.length > 1) target = `#${renameId(value.slice(1))}`
   else if (!options.fragmentsOnly && /^data:/i.test(value))
     target = options.fontSource ? dataFont(value, policy) : value
-  else if (!options.fragmentsOnly) {
-    target = proxyMediaUrl(value, policy.mediaScope)
-    // Only proxied addresses go through the download queue (mediaQueue.ts): a saved copy is
-    // this app's own file, and a placeholder makes no request.
-    if (target?.startsWith("/media/external?")) policy.media.push(target)
-  }
+  else if (!options.fragmentsOnly) target = proxyMediaUrl(value, policy.mediaScope)
   if (target === null) {
     policy.remote ||= REMOTE.test(value)
     return false
   }
   writer.fn("url")
-  writer.string(target)
+  // Track queued addresses on the output token, which is discarded with a refused rule.
+  writer.string(target, target.startsWith("/media/external?") ? target : undefined)
   writer.punct(")")
   return true
 }
@@ -850,7 +851,8 @@ function writeSelectors(
   writer: Writer,
   nested: boolean,
   mode: ScopeMode,
-  ownClass?: string
+  messageClass?: string,
+  privateRule = false
 ): boolean {
   let written = 0
   for (const selector of selectorList(prelude)) {
@@ -870,9 +872,18 @@ function writeSelectors(
         writer.delim(".")
         writer.ident(MESSAGE_SCOPE)
       }
-      if (ownClass) {
+      if (messageClass) {
+        // Match either the source body or all other bodies without changing specificity.
+        writer.punct(":")
+        writer.fn("where")
+        if (!privateRule) {
+          writer.punct(":")
+          writer.fn("not")
+        }
         writer.delim(".")
-        writer.ident(ownClass)
+        writer.ident(messageClass)
+        if (!privateRule) writer.punct(")")
+        writer.punct(")")
       }
       writer.space()
     }
@@ -893,7 +904,7 @@ const SIMPLE_NAME = /^-?[_a-zA-Z][-\w]*$/
 interface Context {
   readonly policy: Policy
   readonly mode: ScopeMode
-  readonly declarations?: "shared" | "fonts"
+  readonly declarations?: "shared" | "private"
   readonly generatedText?: boolean
 }
 
@@ -905,14 +916,13 @@ function writeRule(item: Extract<Item, { kind: "rule" }>, writer: Writer, contex
       writer,
       nested,
       context.mode,
-      context.declarations === "fonts" ? context.policy.messageClass : undefined
+      context.declarations ? context.policy.messageClass : undefined,
+      context.declarations === "private"
     )
   )
     return writer.reset(mark)
   writer.punct("{")
-  const bodyFrom = writer.mark()
   writeBlock(blockItems(item.body), writer, { ...context, generatedText: textPseudo(item.prelude) })
-  if (context.declarations === "fonts" && writer.mark() === bodyFrom) return writer.reset(mark)
   writer.punct("}")
 }
 
@@ -921,7 +931,7 @@ function writeBlock(items: ReadonlyArray<Item>, writer: Writer, context: Context
   for (const item of items) {
     if (item.kind === "decl") {
       const font = /^(font|font-family)$/i.test(item.name)
-      if (!context.declarations || (context.declarations === "fonts" ? font : !font))
+      if (context.declarations !== "shared" || !font)
         writeDeclaration(item, writer, context.policy, context.generatedText)
     } else if (item.kind === "rule") writeRule(item, writer, context, true)
     else writeAtRule(item, writer, context, true)
@@ -1094,7 +1104,6 @@ export function scopeStyles(
   })
   const policy: Policy = {
     mediaScope,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,
@@ -1109,7 +1118,7 @@ export function scopeStyles(
       .map((one) => one.css)
       .filter((css) => css !== "")
       .join("\n"),
-    media: policy.media,
+    media: scoped.flatMap((one) => one.media ?? []),
     blocked: scoped.some((one) => one.blocked)
   }
 }
@@ -1141,24 +1150,17 @@ function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode)
     writer.punct("{")
   }
   const rulesFrom = writer.mark()
-  writeRules(
-    items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face")),
-    writer,
-    context
-  )
-  if (policy.messageClass && policy.fonts.size)
-    writeRules(
-      items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face")),
-      writer,
-      { policy, mode, declarations: "fonts" }
-    )
+  const rules = items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face"))
+  writeRules(rules, writer, context)
+  // The source body gets the complete cascade, including shorthand resets and their longhands.
+  if (context.declarations === "shared") writeRules(rules, writer, { ...context, declarations: "private" })
   if (mode === "scope") {
     if (writer.mark() === rulesFrom) writer.reset(scopedFrom)
     else writer.punct("}")
   }
   const text = writer.text()
   if (text === null) return { css: "", blocked: policy.remote }
-  return { css: text, blocked: policy.remote, media: policy.media }
+  return { css: text, blocked: policy.remote, media: writer.out.flatMap((token) => token.media ?? []) }
 }
 
 /** A CSS value's text from its own writer, checked; null when anything in it is refused. */
@@ -1187,7 +1189,6 @@ export function cleanStyle(
   if (values === null) return { style: null, blocked: false }
   const policy: Policy = {
     mediaScope,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,
@@ -1215,7 +1216,6 @@ export function cleanPresentation(value: string): string | null {
   if (values === null) return null
   const policy: Policy = {
     mediaScope: null,
-    media: [],
     remote: false,
     fontBytes: 0,
     fontExpanded: 0,

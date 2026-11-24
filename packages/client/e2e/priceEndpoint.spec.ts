@@ -99,7 +99,7 @@ for (const [width, height] of [
       await expect(row.locator('[data-price-source="endpoint"]')).toHaveText("$0.25 / $0.75")
       await hover(page, "$0.25 / $0.75", /from this server’s price list, fetched .*, 80 % of list price/)
       // The routes the server lists, with their own prices (PRICES §4.4).
-      await expect(row.locator("[data-price-routes]")).toHaveText("Routes: fast $0.3 / $0.9 (90 %)")
+      await expect(row.locator("[data-price-routes]")).toHaveText("Routes: fast $0.300 / $0.900 (90 %)")
       await hover(page, /^Routes: fast/, /Where this server may send the model/)
       expect(provider.priceRequests).toBe(before + 1)
       // The switch says what the server answered last (PRICES §4.5).

@@ -196,6 +196,45 @@ describe("per-model reply behaviour", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("a reasoning-only answer to the final request counts as capped", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      let asked = 0
+      const writer = yield* mock((res) =>
+        sse(
+          res,
+          asked++ === 0
+            ? completionChunks(["Unsent text."], {})
+            : [
+                {
+                  id: "cmpl-thinking",
+                  object: "chat.completion.chunk",
+                  model: "served-model",
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { role: "assistant", reasoning_content: "Considering the reply." },
+                      finish_reason: null
+                    }
+                  ]
+                },
+                ...completionChunks([], {})
+              ]
+        )
+      )
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${writer.url}/v1` },
+        model: {},
+        modelKey: "writer-model",
+        state: [...TOOLS_ON, { key: "agent.request_cap", value: { cap: 2 } }]
+      })
+      assert.strictEqual(asked, 2)
+      assert.notInclude(version.content, "Considering the reply.")
+      yield* counted(api, { replies: 1, ...none, capped: 1 })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("a resumed reply that is stopped, or fails, still counts once, as it ended", () => {
     const config = testConfig()
     return Effect.gen(function* () {

@@ -7,6 +7,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem, CannotDeleteLastFork } from "./bin.ts"
 import {
   MessageImages,
+  MessageLibrary,
   Chat,
   ChatId,
   ChatSummary,
@@ -619,6 +620,8 @@ export class ChatApi extends RpcGroup.make(
       branch: Schema.Boolean,
       content: Schema.String,
       images: Schema.optionalKey(MessageImages),
+      /** Cards, lorebooks and presets attached to a workshop message (spec/WORKSHOP-CARDS.md §4). */
+      library: Schema.optionalKey(MessageLibrary),
       imageDraftIds: Schema.optionalKey(ComposerImageIds),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /**

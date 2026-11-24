@@ -42,6 +42,25 @@ const ownedRollout = (sql: Sql, userId: string, rolloutId: string) =>
     return row
   })
 
+const approvalCapabilityOff = Effect.fnUntraced(function* (
+  sql: Sql,
+  userId: string,
+  chatId: string,
+  capability: string,
+  target: string
+) {
+  const grants = yield* sql<{ target: string; mode: "off" | "ask" | "allow" }>`SELECT target, mode
+    FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId}
+      AND capability = ${capability} AND target IN ('', ${target})
+      AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+  if (target !== "" && grants.some((grant) => grant.target === target && grant.mode === "off")) return true
+  const standing = grants.filter((grant) => grant.target === "").map((grant) => [capability, grant.mode] as const)
+  return resolveMode({ workshopCapabilities, capabilityDefaults }, new Map(standing), capability, "outside") === "off"
+})
+
+const capabilityOff = () =>
+  new ApprovalRefused({ message: "This capability is turned off. Look again before allowing it." })
+
 export const writeGrant = (
   sql: Sql,
   userId: string,
@@ -101,6 +120,8 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const run = yield* ownedRollout(sql, userId, rolloutId)
         if (run.status !== "running") return yield* new ApprovalRefused({ message: "This run is no longer running." })
+        if (yield* approvalCapabilityOff(sql, userId, run.chat_id, capability, prompt.rerun?.connectionId ?? ""))
+          return yield* capabilityOff()
         const rows = yield* sql`INSERT INTO tool_approvals ${sql.insert({
           rollout_id: rolloutId,
           tool_call_id: toolCallId,
@@ -127,7 +148,12 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         }>`SELECT status, digest, capability, prompt_json
           FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
-        const asked = JSON.parse(row.prompt_json) as { storyAt?: StoryAt; grantTarget?: unknown; once?: unknown }
+        const asked = JSON.parse(row.prompt_json) as {
+          storyAt?: StoryAt
+          grantTarget?: unknown
+          once?: unknown
+          rerun?: { connectionId: string }
+        }
         const expectedAt = asked.storyAt
         // Server-written with the request: the client's answer can't name other content.
         const target = typeof asked.grantTarget === "string" ? asked.grantTarget : ""
@@ -149,20 +175,8 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         const [run] = yield* sql<{ status: string }>`SELECT status FROM rollouts WHERE id = ${rolloutId}`
         if (row.status !== "pending" || run?.status !== "running")
           return yield* new ApprovalRefused({ message: "This was already answered." })
-        const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
-          FROM workshop_grants WHERE chat_id = ${chat_id} AND owner_user_id = ${userId} AND target = ''
-            AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        if (
-          resolveMode(
-            { workshopCapabilities, capabilityDefaults },
-            new Map(grants.map((g) => [g.capability, g.mode])),
-            row.capability,
-            "outside"
-          ) === "off"
-        )
-          return yield* new ApprovalRefused({
-            message: "This capability is turned off. Look again before allowing it."
-          })
+        if (yield* approvalCapabilityOff(sql, userId, chat_id, row.capability, asked.rerun?.connectionId ?? ""))
+          return yield* capabilityOff()
         // Running an interrupted MCP call again is one answer for one call (spec/MCP.md §8.3).
         // A question for this one call only (a server plugin's commit from Files) has no standing answer.
         if (answer === "allow_chat" && (row.capability === "mcp" || asked.once === true))
@@ -303,10 +317,8 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         // was resumed from. A kept call carries its result over; a call made again under the
         // same id has a result of its own, so an earlier run's change isn't listed for it.
         const runs = yield* lineage(sql, version.rollout_id)
-        const calls =
-          version.transcript === null
-            ? new Map<string, string | null>()
-            : callsFrom(JSON.parse(version.transcript) as ReadonlyArray<AgentMessage>, versionId)
+        const transcript = JSON.parse(version.transcript ?? "[]") as ReadonlyArray<AgentMessage>
+        const calls = callsFrom(transcript, versionId)
         const rows = yield* sql<Parameters<typeof toRolloutEffect>[0]>`SELECT e.* FROM rollout_effects e
           WHERE e.rollout_id IN ${sql.in(runs.map((r) => r.id))}
           ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC`
@@ -336,7 +348,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         const children = yield* childEffects(
           sql,
           runs.map((r) => r.id),
-          { calls: new Set(calls.keys()), undone: true }
+          { kept: { calls: new Set(calls.keys()), transcript }, undone: true }
         )
         const own = rows
           .filter((row) => {

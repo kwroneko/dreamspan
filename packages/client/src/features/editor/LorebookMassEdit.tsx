@@ -206,11 +206,14 @@ function ManySetting({
 export function MassEditDialog({
   store,
   root,
+  selection,
   uids,
   onClose
 }: {
   store: EditorStore
   root: FieldPath
+  /** Original URL selection, including entries removed since the dialog opened. */
+  selection: string
   uids: ReadonlyArray<number>
   onClose: () => void
 }) {
@@ -223,7 +226,7 @@ export function MassEditDialog({
   // The ticked settings and their values (undefined: nothing chosen yet).
   // Kept as typed: each ticked setting as { v } (absent v: nothing chosen yet), since JSON has no undefined.
   const form = useDurableForm<{ ticked: Readonly<Record<string, { v?: MassValue }>> }>(
-    `mass-edit:${store.refId}:${root.join("/")}`,
+    `mass-edit:${store.refId}:${root.join("/")}:${selection}`,
     "Mass edit",
     { ticked: {} }
   )

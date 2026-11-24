@@ -2,7 +2,7 @@
 // DATA-MODEL §3.2, spec/LIBRARY-FORKS.md): edits, forks, re-imports and merges.
 import { assert, describe, it } from "@effect/vitest"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
-import { newSharedNote } from "@dreamspan/shared/editing.ts"
+import { newSharedNote, valueField, type FieldPath } from "@dreamspan/shared/editing.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { Doc, EntityKind, RefId } from "@dreamspan/shared/library.ts"
 import { Effect } from "effect"
@@ -10,6 +10,7 @@ import * as Database from "../src/db/Database.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
 import { promptPreset } from "@dreamspan/shared/docs/preset.ts"
 import { cardDoc, docFor, presetDoc } from "./support/docs.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
 
@@ -730,14 +731,34 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  // Review of 7e301b2d9 (8): deleting a lorebook entry ends its fields' drafts. Keys typed into
-  // it (a value draft: a list of text) go to the recovered texts, one per line; settings don't.
-  it.live("a discarded draft of a list of text goes to the recovered texts, a setting's doesn't", () =>
+  it.live("discard recovers lorebook entry keys one per line and leaves settings out of the bin", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, upstream } = yield* setup()
-      const end = (field: string, content: string) =>
+      const { writer, reader, userId } = yield* setup()
+      const book = loreBook([loreEntry({}, 1)]).document
+      const { ref: lorebook } = yield* writer.CreateEntity({
+        userId,
+        kind: "lorebook",
+        label: "Book",
+        subtitle: "",
+        doc: book,
+        schemaVersion: book.schema_version,
+        origin: "user",
+        sourcePath: null
+      })
+      const card = cardDoc("Card", { character_book: book })
+      const { ref: embedded } = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Card",
+        subtitle: "",
+        doc: card,
+        schemaVersion: card.schema_version,
+        origin: "user",
+        sourcePath: null
+      })
+      const end = (ref: typeof lorebook, path: FieldPath, content: string) =>
         Effect.gen(function* () {
-          const key = new DraftKey({ targetKind: "entity_field", targetId: upstream.id, field })
+          const key = new DraftKey({ targetKind: "entity_field", targetId: ref.id, field: valueField(path) })
           const draft = yield* writer.SaveDraft({
             draftId: null,
             expectedSession: null,
@@ -745,7 +766,7 @@ describe("library", () => {
             key,
             content,
             expectedRowVersion: null,
-            baseRevision: upstream.headRevisionId
+            baseRevision: ref.headRevisionId
           })
           const ended = yield* writer.ClearDraft({
             userId,
@@ -757,11 +778,15 @@ describe("library", () => {
           const texts = yield* reader.ListRecoveredTexts({ userId, source: key, limit: 10, before: null })
           return { recovered: ended.recovered, texts: texts.map((text) => text.content) }
         })
-      assert.deepStrictEqual(yield* end(`=${JSON.stringify(["entries", "uid=1", "key"])}`, '["dragon","new key"]'), {
+      assert.deepStrictEqual(yield* end(lorebook, ["entries", "uid=1", "keys"], '["dragon","new key"]'), {
         recovered: 1,
         texts: ["dragon\nnew key"]
       })
-      assert.deepStrictEqual(yield* end(`=${JSON.stringify(["entries", "uid=1", "depth"])}`, "4"), {
+      assert.deepStrictEqual(
+        yield* end(embedded, ["character_book", "entries", "uid=1", "secondary_keys"], '["cave","mountain"]'),
+        { recovered: 1, texts: ["cave\nmountain"] }
+      )
+      assert.deepStrictEqual(yield* end(lorebook, ["entries", "uid=1", "triggers"], '["normal","continue"]'), {
         recovered: 0,
         texts: []
       })

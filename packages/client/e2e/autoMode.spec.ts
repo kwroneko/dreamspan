@@ -103,12 +103,8 @@ const openChip = async (page: Page) => {
   await openPanel(page, "Cast")
   return chip(page)
 }
-/** A phone's panel is a sheet over the chat: closed, the row above the box shows. */
-const showChat = async (page: Page) => {
-  const sheet = page.getByRole("dialog").filter({ has: page.getByRole("tablist", { name: "Chat panel" }) })
-  if (await sheet.isVisible()) await sheet.getByRole("button", { name: "Close", exact: true }).click()
-  await expect(sheet).toHaveCount(0)
-}
+const castSheet = (page: Page) =>
+  page.getByRole("dialog").filter({ has: page.getByRole("tablist", { name: "Chat panel" }) })
 const row = (page: Page) => page.getByRole("group", { name: "Auto replies", exact: true })
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Auto replies" })
 const messages = (page: Page) => page.locator("article[data-slot]")
@@ -121,7 +117,7 @@ const start = async (page: Page, replies: number, tokens?: number) => {
     await dialog(page).getByLabel("Token limit (optional)", { exact: true }).fill(String(tokens))
   await dialog(page).getByRole("button", { name: "Start", exact: true }).click()
   await expect(dialog(page)).toHaveCount(0)
-  await showChat(page)
+  await expect(castSheet(page)).toHaveCount(0)
 }
 
 /** Nothing more is sent: the count of requests stays where it is for a while. */
@@ -152,6 +148,19 @@ for (const width of [1440, 390])
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme })
+      if (width === 390)
+        await page.addInitScript(() => {
+          const send = WebSocket.prototype.send
+          WebSocket.prototype.send = function (data) {
+            if (
+              typeof data === "string" &&
+              JSON.parse(data).tag === "Generate" &&
+              document.querySelector('[data-layout-overlay="Modal sheet covers the page"]')
+            )
+              document.documentElement.dataset.coveredAutoReply = "true"
+            send.call(this, data)
+          }
+        })
       const chatId = await chatOf(["Mira", "Wren", "Ash"])
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(messages(page)).toHaveCount(1)
@@ -186,10 +195,14 @@ for (const width of [1440, 390])
       provider.hold()
       await dialog(page).getByRole("button", { name: "Start", exact: true }).click()
       await expect(dialog(page)).toHaveCount(0)
-      await expect(chip(page)).toBeDisabled()
-      await showChat(page)
+      if (width === 1440) await expect(chip(page)).toBeDisabled()
+      await expect(castSheet(page)).toHaveCount(0)
       await expect(row(page)).toContainText("Reply 1 of 2.")
       await expect(row(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible()
+      if (width === 390) {
+        await expect.poll(() => provider.completions.length).toBe(before + 1)
+        await expect(page.locator("html")).not.toHaveAttribute("data-covered-auto-reply", "true")
+      }
       await page.mouse.move(0, 0)
       if (shots) await page.screenshot({ path: `${shots}/running-${width}-${colorScheme}.png` })
       await expectLayout(page, test.info(), `auto-running-${width}-${colorScheme}`)
@@ -257,6 +270,52 @@ test("typing ends a run; Continue carries on only when clicked, and Stop stops t
   provider.release()
   await staysAt(before + 2)
 })
+
+for (const action of ["typing", "Stop and Dismiss"] as const)
+  test(`${action} while Auto's Generate acknowledgement is pending`, async ({ page }) => {
+    let requestId: string | undefined
+    let release: (() => void) | undefined
+    let stops = 0
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+        if (request?.tag === "Generate") requestId = request.id
+        if (request?.tag === "StopGeneration") stops++
+        upstream.send(data)
+      })
+      upstream.onMessage((data) => {
+        const response = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+        if (requestId !== undefined && response?._tag === "Exit" && response.requestId === requestId)
+          release = () => socket.send(data)
+        else socket.send(data)
+      })
+    })
+
+    const chatId = await chatOf(["Mira", "Wren", "Ash"])
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(messages(page)).toHaveCount(1)
+    const before = provider.completions.length
+    provider.hold()
+    await start(page, 5)
+    await expect.poll(() => provider.completions.length).toBe(before + 1)
+    await expect.poll(() => release !== undefined).toBe(true)
+    if (action === "typing") {
+      await box(page).fill("Wait")
+      await expect(row(page)).toHaveAttribute("data-auto-run", "typed")
+      release!()
+      await staysAt(before + 1)
+      expect(stops).toBe(0)
+      provider.release()
+      await expect(row(page)).toContainText("Stopped after 1 of 5: you started typing.")
+    } else {
+      await row(page).getByRole("button", { name: "Stop", exact: true }).click()
+      await row(page).getByRole("button", { name: "Dismiss", exact: true }).click()
+      expect(stops).toBe(0)
+      release!()
+      await expect.poll(() => stops).toBe(1)
+    }
+  })
 
 test("a run belongs to its tab: a reload ends it", async ({ page }) => {
   const chatId = await chatOf(["Mira", "Wren", "Ash"])
@@ -327,7 +386,9 @@ test("a draft blocks Start and two tabs cannot queue auto replies", async ({ pag
   await expect(dialog(page).getByRole("button", { name: "Start", exact: true })).toBeDisabled()
   expect(provider.completions.length).toBe(before)
   await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click()
-  await showChat(page)
+  const sheet = castSheet(page)
+  if (await sheet.isVisible()) await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(sheet).toHaveCount(0)
   await box(page).fill("")
   const other = await context.newPage()
   await other.goto(`${server().url}/chats/${chatId}`)

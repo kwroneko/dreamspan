@@ -13,8 +13,9 @@
 // Retention: versions older than 30 days are removed every hour (the writer's
 // PruneFileVersions, in batches); the media sweep removes their bytes later, outside any
 // transaction.
+import type { Stats } from "node:fs"
 import { lstat, readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { Effect, Schema } from "effect"
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import type { Reader, Writer } from "../db/Database.ts"
@@ -53,16 +54,19 @@ export interface Usage {
   readonly usedBytes: number
   readonly quotaBytes: number
   readonly measuredAt: number
-  /** The walk stopped at its limits: the real usage is higher. */
+  /** The walk was incomplete: some usage may be uncounted. */
   readonly partial: boolean
 }
 
 const PARTIAL_TEXT = (what: string) =>
-  `Your files are too many to count. Delete files you don't need and empty the bin to ${what} again.`
+  `Your files couldn't be fully counted. Check that the folders are accessible, or delete files and empty the bin to ${what} again.`
 
 export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
 }
+
+type Inode = Pick<Stats, "dev" | "ino">
+const inodeKey = (info: Inode) => `${info.dev}:${info.ino}`
 
 /**
  * Bytes under `root`, links not followed (a link counts itself), each inode once. Missing:
@@ -75,29 +79,38 @@ export const measureTree = async (
   maxMs = WALK_MAX_MS,
   /** Count only what deleting `root` would free for sure: a file with other links frees nothing. */
   soleOwnerOnly = false,
-  /** Inodes already counted, shared by the trees of one walk: a file linked into two counts once. */
-  seen = new Set<string>()
+  /** Counted bytes by inode, shared by the trees of one walk. */
+  seen = new Map<string, number>(),
+  /** Active upload files have their own quota holds until they land. */
+  skip?: (path: string) => boolean
 ) => {
   const deadline = Date.now() + maxMs
   let bytes = 0
   let entries = 0
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return null
+  }
   const stack = [root]
   while (stack.length) {
     const path = stack.pop()!
-    const info = await lstat(path, { bigint: false }).catch(() => null)
+    if (skip?.(path)) continue
+    const info = await lstat(path, { bigint: false }).catch(missing)
     if (!info) continue
-    const key = `${info.dev}:${info.ino}`
+    const key = inodeKey(info)
     if (seen.has(key)) continue
-    seen.add(key)
     // Files and links by size; folders by the blocks their entries take.
-    bytes += info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
+    const size = info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
+    seen.set(key, size)
+    bytes += size
     if (++entries >= maxEntries || Date.now() > deadline) return { bytes, entries, partial: true }
     if (info.isDirectory()) {
-      const names = await readdir(path).catch(() => [] as Array<string>)
-      for (const name of names) stack.push(join(path, name))
+      const names = await readdir(path).catch(missing)
+      for (const name of names ?? []) stack.push(join(path, name))
     }
   }
-  return { bytes, entries, partial: false }
+  return { bytes, entries, partial }
 }
 
 /**
@@ -111,16 +124,21 @@ export const measureBin = async (
   maxEntries = WALK_MAX_ENTRIES,
   maxMs = WALK_MAX_MS,
   soleOwnerOnly = false,
-  seen = new Set<string>(),
+  seen = new Map<string, number>(),
   items = true
 ) => {
   const deadline = Date.now() + maxMs
-  const holders = items ? await readdir(bin).catch(() => [] as Array<string>) : [""]
+  let partial = false
+  const missing = (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") partial = true
+    return []
+  }
+  const holders = items ? await readdir(bin).catch(missing) : [""]
   let bytes = 0
   let entries = 0
   for (const holder of holders) {
     const folder = holder === "" ? bin : join(bin, holder)
-    for (const name of await readdir(folder).catch(() => [] as Array<string>)) {
+    for (const name of await readdir(folder).catch(missing)) {
       const left = Math.max(1, maxEntries - entries)
       const measured = await measureTree(
         join(folder, name),
@@ -134,7 +152,7 @@ export const measureBin = async (
       if (measured.partial || entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
     }
   }
-  return { bytes, partial: false }
+  return { bytes, partial }
 }
 
 export interface QuotaDeps {
@@ -161,16 +179,17 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * Bytes app-side writes added since the last measurement, so checks between walks add up, as
    * entries: one for each streaming upload (it grows as chunks arrive and is given back whole),
    * and one per account for everything else (`wrote`). An entry only grows or is removed. A walk
-   * takes off exactly what each entry held when it began, so a give-back during a walk and
-   * a write after it can't be subtracted twice or wiped.
+   * normally takes off exactly what each entry held when it began, so a give-back during a
+   * walk and a write after it can't be subtracted twice or wiped.
    */
   const pending = new Map<string, Map<number, number>>()
-  /** A copy staged outside Files is invisible to a quota walk until its database row lands. */
-  const unlandedCopies = new Set<number>()
+  /** A staged upload or copy is accounted for only by its hold until it lands. */
+  const stagingHolds = new Set<number>()
+  const stagingNames = new Map<string, Set<string>>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement, by token. */
   const frees = new Map<string, Map<number, number>>()
-  /** Uploads that landed (were renamed into place) while the account's walk ran. */
-  const landing = new Map<string, Set<number>>()
+  /** Uploads and copies that landed while the account's walk ran. */
+  const landing = new Map<string, Map<number, { readonly inode: string; readonly reserved: number } | null>>()
   let nextId = 1
   const ambient = new Map<string, number>()
   const total = (entries: Map<number, number> | undefined) => {
@@ -198,21 +217,22 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const walk = (userId: string): Effect.Effect<Usage> =>
     Effect.gen(function* () {
       const started = Date.now()
-      // What each entry held before this walk began may or may not be in what it reads, and is
-      // taken off when the walk ends; what lands during the walk stays (over-counting at worst,
-      // never missing it). Frees go the other way: they are applied before the removal, so a walk
+      // Take off the bytes each entry held when the walk began, except for staged uploads and
+      // copies. A landing upload is reconciled against what the walk saw of its inode. Frees
+      // go the other way: they are applied before the removal, so a walk
       // that ends later either counted the file (clearing the free over-counts) or reached it
       // after (clearing is exact); keeping it could subtract bytes the walk never counted.
       const heldBefore = new Map(pending.get(userId))
-      for (const id of heldBefore.keys()) if (unlandedCopies.has(id)) heldBefore.delete(id)
-      const landedDuring = new Set<number>()
+      for (const id of heldBefore.keys()) if (stagingHolds.has(id)) heldBefore.delete(id)
+      const landedDuring = new Map<number, { readonly inode: string; readonly reserved: number } | null>()
       landing.set(userId, landedDuring)
       const { filesRoot, home, bin, output } = deps.folders(userId)
       // Files and the bin share their inodes: a file deleted while linked elsewhere counts once.
-      const seen = new Set<string>()
+      const seen = new Map<string, number>()
+      const skipStaged = (path: string) => stagingNames.get(userId)?.has(basename(path)) === true
       const [files, homeUse, binUse, outputUse] = yield* Effect.promise(() =>
         Promise.all([
-          measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen),
+          measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen, skipStaged),
           measureTree(home, deps.walkMaxEntries),
           bin === undefined
             ? Promise.resolve({ bytes: 0, partial: false })
@@ -245,15 +265,22 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       for (const [id, was] of heldBefore) {
         const now = entries?.get(id)
         if (now === undefined) continue
-        // An upload renamed into place during the walk may have been listed as its temporary
-        // name and gone before it was read: the walk may not hold it at all, so its entry stays
-        // (over-counting until the next walk, never missing it).
+        // A renamed upload is handled below. A copy outside Files has no measured inode and
+        // keeps its pending bytes until the next walk, which sees its database row.
         if (landedDuring.has(id)) continue
         // An entry only grows or goes, so a smaller one is a bug: say so, and take off what is
         // left of it rather than fail the call that asked for a figure.
         if (now < was) shrunk.push(`files quota: pending entry ${id} shrank from ${was} to ${now}`)
         if (now <= was) entries!.delete(id)
         else entries!.set(id, now - was)
+      }
+      for (const [id, upload] of landedDuring) {
+        if (upload === null) continue
+        // The walk may have seen the file at either name, while it was still growing, or
+        // missed it across the rename. Retain only the reservation the walk didn't count.
+        const remaining = upload.reserved - (seen.get(upload.inode) ?? 0)
+        pending.get(userId)?.delete(id)
+        if (remaining > 0) grow(userId, id, remaining)
       }
       frees.delete(userId)
       for (const warning of shrunk) yield* Effect.logWarning(warning)
@@ -315,14 +342,19 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const check = (userId: string, adding: number, what: string): Effect.Effect<Usage, QuotaExceeded> =>
     Effect.gen(function* () {
       let now = yield* usage(userId)
-      // A walk that stopped at its limits counted only part of the files: what it didn't reach
-      // could hold any amount (millions of empty files first, large ones after), so it isn't room.
       if (!now.partial && now.usedBytes + adding <= now.quotaBytes) return now
-      const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
-      if (trimmed > 0 || now.partial || Date.now() - now.measuredAt > 60_000) {
-        yield* measure(userId)
-        // With what landed while it walked, which its figure doesn't hold.
+      if (now.partial || Date.now() - now.measuredAt > 60_000) {
+        yield* measure(userId, true)
         now = yield* usage(userId)
+      }
+      // An incomplete walk can justify pressure retention only from bytes it actually saw.
+      const counted = now.partial ? (usages.get(userId)?.usedBytes ?? 0) - total(frees.get(userId)) : now.usedBytes
+      if (counted + adding > now.quotaBytes) {
+        const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
+        if (trimmed > 0) {
+          yield* measure(userId, true)
+          now = yield* usage(userId)
+        }
       }
       if (now.partial) return yield* Effect.fail(new QuotaExceeded(PARTIAL_TEXT(what)))
       if (now.usedBytes + adding <= now.quotaBytes) return now
@@ -336,30 +368,113 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * measurement, which sees the file itself. `release` (a write that didn't land) returns
    * exactly what the hold still counts, whatever walks came between.
    */
-  const hold = (userId: string, outsideFiles = false) => {
+  const hold = (userId: string, stage?: "outside-files" | { readonly temporaryName: string }) => {
     const id = nextId++
-    if (outsideFiles) unlandedCopies.add(id)
+    if (stage !== undefined) stagingHolds.add(id)
+    let temporaryName: string | undefined
+    const stageName = (name: string) => {
+      temporaryName = name
+      const names = stagingNames.get(userId) ?? new Set<string>()
+      names.add(name)
+      stagingNames.set(userId, names)
+    }
+    if (typeof stage === "object") stageName(stage.temporaryName)
+    const unstage = () => {
+      stagingHolds.delete(id)
+      if (temporaryName === undefined) return
+      const names = stagingNames.get(userId)
+      names?.delete(temporaryName)
+      if (names?.size === 0) stagingNames.delete(userId)
+    }
     let released = false
+    let reserved = 0
+    const fits = (bytes: number, quotaBytes: number) => {
+      const known = usages.get(userId)
+      return (
+        !released &&
+        known?.partial !== true &&
+        (known?.usedBytes ?? 0) + total(pending.get(userId)) - total(frees.get(userId)) + bytes <= quotaBytes
+      )
+    }
     return {
+      stage: stageName,
+      fits,
       reserve: (bytes: number, quotaBytes: number) => {
-        if (released) return false
-        const known = usages.get(userId)?.usedBytes ?? 0
-        if (known + total(pending.get(userId)) - total(frees.get(userId)) + bytes > quotaBytes) return false
+        if (!fits(bytes, quotaBytes)) return false
+        reserved += bytes
         grow(userId, id, bytes)
         return true
       },
-      /** The file is in place: a walk running now may not have seen it, so its entry stays. */
-      landed: () => {
-        unlandedCopies.delete(id)
-        landing.get(userId)?.add(id)
+      /** The file is in place. Give the walk its inode to account for a read under either name. */
+      landed: (file?: Inode) => {
+        unstage()
+        landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },
       release: () => {
+        if (released) return
         released = true
-        unlandedCopies.delete(id)
+        unstage()
+        landing.get(userId)?.delete(id)
         pending.get(userId)?.delete(id)
       }
     }
   }
+
+  /** Reserve the net charge after the old live file is replaced and its version is kept. */
+  const replacement = (
+    userId: string,
+    before: Stats | null,
+    version: { readonly sha256: string; readonly byteSize: number } | null,
+    bytes: number,
+    what: string,
+    held?: ReturnType<typeof hold>
+  ) =>
+    Effect.gen(function* () {
+      const released = before?.isFile() && before.nlink === 1 ? before.size : 0
+      const retained =
+        version && (yield* deps.reader.FileVersionBytes({ userId: userId as never, sha256: version.sha256 })) === 0
+          ? version.byteSize
+          : 0
+      const cost = (size: number, kept = retained) => size + kept - released
+      const room = yield* check(userId, cost(bytes), what)
+      const holdBytes = held ?? hold(userId, "outside-files")
+      let reserved = 0
+      let credit = 0
+      const over = (size: number, kept = retained) => overText(room.usedBytes + cost(size, kept), room.quotaBytes, what)
+      const reserve = (size: number, kept = retained) => {
+        const more = cost(size, kept) - reserved
+        if (more <= 0) return holdBytes.fits(more, room.quotaBytes)
+        if (!holdBytes.reserve(more, room.quotaBytes)) return false
+        reserved += more
+        return true
+      }
+      return {
+        over,
+        reserve,
+        keep: <A, E, R>(
+          size: number,
+          previousBytes: number,
+          record: (maxAddedBytes: number) => Effect.Effect<A | null, E, R>
+        ) =>
+          Effect.gen(function* () {
+            const first = yield* record(retained)
+            if (first !== null) return first
+            if (!reserve(size, previousBytes)) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            const saved = yield* record(previousBytes)
+            if (saved === null) return yield* Effect.fail(new QuotaExceeded(over(size, previousBytes)))
+            return saved
+          }),
+        stage: holdBytes.stage,
+        committing: (size: number, kept: number) => {
+          credit = freed(userId, reserved - cost(size, kept))
+        },
+        landed: holdBytes.landed,
+        release: () => {
+          holdBytes.release()
+          unfreed(userId, credit)
+        }
+      }
+    })
 
   /** The refusal for a streaming write that ran out of room. */
   const overMessage = (used: number, quotaBytes: number, what: string) => overText(used, quotaBytes, what)
@@ -428,12 +543,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   /** An admin's quota for one account; null returns it to the instance default. */
   const setQuota = (userId: string, bytes: number | null) =>
     Effect.gen(function* () {
-      const raw = yield* deps.reader.GetAppSetting({ key: QUOTAS_SETTING })
-      const decoded = Schema.decodeUnknownOption(Quotas)(raw ?? {})
-      const quotas: Record<string, number> = { ...(decoded._tag === "Some" ? decoded.value : {}) }
-      if (bytes === null) delete quotas[userId]
-      else quotas[userId] = bytes
-      yield* deps.writer.SetAppSetting({ key: QUOTAS_SETTING, value: quotas })
+      yield* deps.writer.SetAccountFilesQuota({ userId: userId as never, bytes })
       return yield* usage(userId)
     })
 
@@ -450,6 +560,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     setQuota,
     sweepVersions,
     remeasureActive,
+    replacement,
     intervals: { measureMs: MEASURE_EVERY, retentionMs: 60 * 60_000 }
   }
 }

@@ -24,7 +24,7 @@ export const instructions: InstallAssemblyModule = (a) =>
     })
   })
 export const style: InstallAssemblyModule = (a) =>
-  a.summaryStyles.register({ id: "settings", select: () => "synthetic" })
+  a.summaryStyles.register({ id: "settings", select: (style) => style ?? "synthetic" })
 export const disableLeaf: InstallAssemblyModule = (a) => a.leafPlanners.disable("leaf")
 export const disableMaintenance: InstallAssemblyModule = (a) => a.maintenancePlanners.disable("maintenance")
 export const wrappingInstruction: InstallAssemblyModule = (a) => {

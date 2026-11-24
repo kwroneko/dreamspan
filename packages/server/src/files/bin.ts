@@ -4,13 +4,13 @@
 // bin without a row is always left over (a purge, an eviction, a failed move) and the sweep removes
 // it. Restore moves it back to its path, or to "name (restored)" when that is taken, then forgets
 // the row. Everything on disk goes through descriptors opened without following links.
-import { constants } from "node:fs"
+import { constants, type Stats } from "node:fs"
 import { lstat, mkdir, open, readdir, rename, rmdir, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import type { BinItem } from "@dreamspan/shared/bin.ts"
-import { Cause, Effect } from "effect"
+import { Cause, Effect, Semaphore } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 import { resolveFilesPath } from "./environment.ts"
 import { measureBin, measureTree, type FilesQuota } from "./quota.ts"
@@ -57,18 +57,21 @@ export interface FilesBinDeps {
 
 export const makeFilesBin = (deps: FilesBinDeps) => {
   const binRoot = (userId: string) => join(deps.filesDir, BIN_FOLDER, userId)
-  /** One bin change at a time per account: a restore and a sweep never cross. */
-  const queues = new Map<string, Promise<unknown>>()
-  const serial = <A>(userId: string, run: () => Promise<A>): Promise<A> => {
-    const before = queues.get(userId) ?? Promise.resolve()
-    const next = before.catch(() => undefined).then(run)
-    const settled = next.catch(() => undefined)
-    queues.set(userId, settled)
-    void settled.then(() => {
-      if (queues.get(userId) === settled) queues.delete(userId)
+  /** One bin change at a time per account, across the row and the files on disk. */
+  const queues = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const serial = <A, E, R>(userId: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      const entry = queues.get(userId) ?? { lock: Semaphore.makeUnsafe(1), users: 0 }
+      queues.set(userId, entry)
+      entry.users++
+      return entry.lock.withPermit(effect.pipe(Effect.uninterruptible)).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--entry.users === 0) queues.delete(userId)
+          })
+        )
+      )
     })
-    return next
-  }
 
   const openBin = async (userId: string) => {
     await mkdir(binRoot(userId), { recursive: true, mode: 0o700 })
@@ -85,14 +88,16 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
     segments: ReadonlyArray<string>,
     full: string,
     /** Who deleted it, when not the owner of the tree (a folder shared with them). */
-    actor?: { readonly userId: string; readonly handle: string }
-  ): Effect.Effect<BinItem, unknown> =>
+    actor?: { readonly userId: string; readonly handle: string },
+    matches?: (info: Stats) => boolean
+  ): Effect.Effect<BinItem | null, unknown> =>
     Effect.gen(function* () {
       if (segments.length === 0) return yield* Effect.fail(new FilePathRefused("The top folder can't be deleted."))
       const name = segments.at(-1)!
       const source = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
       return yield* Effect.gen(function* () {
         const info = yield* Effect.tryPromise(() => lstat(at(source, name)))
+        if (matches && !matches(info)) return null
         const entryKind = info.isFile()
           ? "file"
           : info.isDirectory()
@@ -115,25 +120,40 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
           byteSize,
           ...(actor ? { actor: { userId: actor.userId as never, handle: actor.handle } } : {})
         })
-        yield* Effect.tryPromise(async () => {
+        const moved = yield* Effect.tryPromise(async () => {
           const bin = await openBin(userId)
           try {
             await mkdir(at(bin, itemId), { mode: 0o700 })
-            const holder = await open(at(bin, itemId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+            let moved = false
             try {
-              await rename(at(source, name), at(holder, name))
-            } catch (error) {
-              await holder.close()
-              await rmdir(at(bin, itemId)).catch(() => undefined)
-              throw error
+              const holder = await open(at(bin, itemId), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+              try {
+                if (matches) {
+                  const current = await lstat(at(source, name)).catch((error: NodeJS.ErrnoException) => {
+                    if (error.code === "ENOENT") return null
+                    throw error
+                  })
+                  if (!current || !matches(current)) return false
+                }
+                await rename(at(source, name), at(holder, name))
+                moved = true
+                return true
+              } finally {
+                await holder.close()
+              }
+            } finally {
+              if (!moved) await rmdir(at(bin, itemId)).catch(() => undefined)
             }
-            await holder.close()
           } finally {
             await bin.close()
           }
         }).pipe(
           Effect.tapError(() => deps.writer.ForgetFileBinItem({ userId: userId as never, itemId }).pipe(Effect.ignore))
         )
+        if (!moved) {
+          yield* deps.writer.ForgetFileBinItem({ userId: userId as never, itemId })
+          return null
+        }
         return item
       }).pipe(Effect.ensuring(Effect.promise(() => source.close())))
     })
@@ -146,14 +166,16 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
     userId: string,
     itemId: string
   ): Effect.Effect<{ readonly item: BinItem; readonly path: string }, unknown> =>
-    Effect.gen(function* () {
-      const root = deps.rootOf(userId)
-      yield* Effect.promise(() => mkdir(root, { recursive: true, mode: 0o700 }).catch(() => undefined))
-      const item = yield* deps.reader.FileBinItem({ userId: userId as never, itemId })
-      const { segments } = resolveFilesPath(item.path, FILES_TOP)
-      if (segments.length === 0) return yield* Effect.fail(new FilePathRefused("That item has no place to go back to."))
-      const placed = yield* Effect.tryPromise(() =>
-        serial(userId, async () => {
+    serial(
+      userId,
+      Effect.gen(function* () {
+        const root = deps.rootOf(userId)
+        yield* Effect.promise(() => mkdir(root, { recursive: true, mode: 0o700 }).catch(() => undefined))
+        const item = yield* deps.reader.FileBinItem({ userId: userId as never, itemId })
+        const { segments } = resolveFilesPath(item.path, FILES_TOP)
+        if (segments.length === 0)
+          return yield* Effect.fail(new FilePathRefused("That item has no place to go back to."))
+        const placed = yield* Effect.tryPromise(async () => {
           const bin = await openBin(userId)
           try {
             let holder: FileHandle
@@ -189,17 +211,17 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
             await rmdir(at(bin, itemId)).catch(() => undefined)
             await bin.close()
           }
-        })
-      ).pipe(
-        Effect.tapError((error) =>
-          Cause.isUnknownError(error) && error.cause instanceof BinContentGone
-            ? deps.writer.ForgetFileBinItem({ userId: userId as never, itemId }).pipe(Effect.ignore)
-            : Effect.void
+        }).pipe(
+          Effect.tapError((error) =>
+            Cause.isUnknownError(error) && error.cause instanceof BinContentGone
+              ? deps.writer.ForgetFileBinItem({ userId: userId as never, itemId }).pipe(Effect.ignore)
+              : Effect.void
+          )
         )
-      )
-      const restored: BinItem = yield* deps.writer.ForgetFileBinItem({ userId: userId as never, itemId })
-      return { item: restored, path: `${FILES_TOP}/${placed.join("/")}` }
-    })
+        const restored: BinItem = yield* deps.writer.ForgetFileBinItem({ userId: userId as never, itemId })
+        return { item: restored, path: `${FILES_TOP}/${placed.join("/")}` }
+      })
+    )
 
   /**
    * Removes the content of items no longer in the bin (purged, emptied or evicted), one account's
@@ -218,8 +240,9 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
       let freed = 0
       for (const user of users) {
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(user)) continue
-        const bytes = yield* Effect.tryPromise(() =>
-          serial(user, async () => {
+        const bytes = yield* serial(
+          user,
+          Effect.tryPromise(async () => {
             const bin = await open(binRoot(user), O_RDONLY | O_DIRECTORY | O_NOFOLLOW).catch(() => null)
             if (!bin) return 0
             try {
@@ -248,7 +271,7 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
       return freed
     })
 
-  return { binRoot, toBin, restore, sweep }
+  return { binRoot, toBin, restore, serial, sweep }
 }
 
 export type FilesBin = ReturnType<typeof makeFilesBin>

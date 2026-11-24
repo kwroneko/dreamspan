@@ -80,4 +80,14 @@ describe("message search words", () => {
       after: false
     })
   })
+
+  it("finds and marks supplementary-plane words using UTF-16 offsets", () => {
+    const text = `${"word ".repeat(100)}𐐀𐐨𐐩, tide`
+    const at = text.indexOf("𐐀")
+    expect(findPhrase(text, ["𐐨𐐨", "tide"])).toBe(at)
+    expect(markWords(text, ["𐐨𐐨"])).toEqual([{ at, length: 6 }])
+    const shown = excerpt(text, ["𐐨𐐨"])
+    expect(shown.before).toBe(true)
+    expect(shown.marks.map((mark) => shown.text.slice(mark.at, mark.at + mark.length))).toEqual(["𐐀𐐨𐐩"])
+  })
 })

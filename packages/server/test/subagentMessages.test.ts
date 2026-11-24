@@ -10,6 +10,7 @@ import { Effect, Stream } from "effect"
 import type { RolloutStep } from "@dreamspan/shared/agent.ts"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -349,6 +350,84 @@ describe("subagents in the background, and messages", () => {
       assert.strictEqual(row.continued, true)
       assert.strictEqual(row.status, "done")
       assert.strictEqual(row.handle, "research-1")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("Resume delivers a dangling message even after the subagent read the same words", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const textToSend = "Check again."
+      const first = {
+        call: { name: "message_agent", args: { agent: "research-1", message: textToSend }, id: "first-message" }
+      }
+      let holdParent = true
+      let parentHeld = false
+      const script = scripted({
+        parent: (messages) => {
+          if (reported(messages)) return "Done."
+          const done = toolTexts(messages).length
+          return done === 0 ? BG : done === 1 ? first : "Waiting."
+        },
+        child: (messages) => {
+          const done = toolTexts(messages).length
+          return done < 2 ? { call: { ...LIST.call, id: `child-list-${done}` } } : "Checked."
+        }
+      })
+      script.hold(1)
+      const { api, chat, events, mock } = yield* workshop((request, res) => {
+        const messages = (request.body as unknown as Body).messages
+        if (holdParent && reported(messages)) parentHeld = true
+        else script.handler(request, res)
+      })
+      yield* task(api, chat, "send a message twice")
+      yield* eventually(() => steps(events).some((e) => e.waitingFor === 1) && script.isHeld())
+      const waiting = steps(events).find((e) => e.waitingFor === 1)!.versionId
+      script.hold(null)
+      const inboxCount = () =>
+        completions(mock.requests())
+          .filter(isChild)
+          .at(-1)
+          ?.messages.filter((m) => m.role === "user" && text(m).includes(textToSend)).length
+      yield* eventually(() => parentHeld)
+      assert.strictEqual(inboxCount(), 1)
+      yield* api.StopGeneration({ versionId: waiting })
+      yield* eventually(() => finished(events, waiting)?.status === "stopped")
+
+      // Leave the second call in the saved turn, with no tool result, as after a stop before dispatch.
+      const [rows] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT p.rollout_id, p.transcript_json FROM rollout_payloads p JOIN versions v ON v.rollout_id = p.rollout_id WHERE v.id = ?",
+            params: [waiting]
+          }
+        ],
+        { readOnly: true }
+      )
+      const row = rows![0]!
+      const saved = JSON.parse(String(row["transcript_json"])) as Array<AgentMessage>
+      const at = saved.findLastIndex((m) => m.role === "rpApp" && m.report?.callId === BG.call.id)
+      assert.isAtLeast(at, 0)
+      const turn = saved.find(
+        (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === first.call.id)
+      )
+      assert.isTrue(turn?.role === "assistant")
+      if (turn?.role !== "assistant") return
+      const second = {
+        ...turn,
+        timestamp: Date.now(),
+        content: turn.content.map((p) => (p.type === "toolCall" ? { ...p, id: "second-message" } : p))
+      }
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?",
+          params: [JSON.stringify([...saved.slice(0, at + 1), second]), String(row["rollout_id"])]
+        }
+      ])
+      holdParent = false
+      const resumed = yield* resume(api, chat, waiting)
+      yield* eventually(() => finished(events, resumed)?.status === "complete")
+      assert.strictEqual(inboxCount(), 2)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

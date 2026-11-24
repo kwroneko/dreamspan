@@ -1,4 +1,4 @@
-import { toolData, toolDataPage, TOOL_RESULT_CHARS } from "./toolData.ts"
+import { toolData, toolDataPage, toolDataParts, TOOL_RESULT_CHARS } from "./toolData.ts"
 import { admitsEffect, outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
 // The assembler built the context once; each provider request is that prefix plus the
@@ -52,6 +52,7 @@ import { forTarget, rolloutRequest } from "./wire.ts"
 import { Mailbox } from "./mailbox.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { declarePresence } from "./tools/sendPresence.ts"
+import { storyMcpResultPage } from "./tools/mcp.ts"
 import {
   BAD_ARGS,
   CALL_TOOL,
@@ -490,8 +491,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // Under the send tool alone, text is never the reply, so it's never carried on (Resume
       // writes the turn again with its tools, api/agent.ts): this only guards that.
       let continuation = plan.contract === "send_message" ? undefined : run.resume?.continuation
-      /** What this turn streamed into the body: any output, and text in particular. */
-      const body = { text: false, prose: false }
+      /** Whether this turn streamed any output into the body. */
+      const body = { text: false }
       let partialSavedAt = Date.now()
       const streamFn: StreamFn = (piModel, transcript, options) => {
         const events = createAssistantMessageEventStream()
@@ -547,7 +548,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Text streams into the body as it comes; a tool call in the same turn makes it an
         // intermediate step, and the body starts over (DESIGN §7.2: not the message).
         body.text = false
-        body.prose = false
+        let prose = false
         let called = false
         let done: AssistantMessage | undefined
         let rawArguments: Readonly<Record<string, string>> | undefined
@@ -596,7 +597,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     const sending = sends && (event.name === SEND_MESSAGE || event.name === NO_REPLY) && !last
                     // Thinking before the message is the message's reasoning; text before any
                     // call, or thinking before another tool, was a step.
-                    if (!called && (sending ? body.prose : body.text)) emit({ restart: true })
+                    if (!called && body.text && (!sending || prose)) emit({ restart: true })
                     called = true
                     // Kept on a turn cut off after it, so a resume resamples rather than continues it.
                     partial = {
@@ -648,9 +649,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     if (Result.isFailure(decoded) || called) return
                     // Under the send tool alone, a turn's text isn't the reply: it shows in Steps
                     // once the turn ends (spec/REPLY-CONTRACT.md §3.2). The cap's answer is.
-                    if (sendOnly && !last && typeof decoded.success === "string") return
+                    if (typeof decoded.success === "string") {
+                      if (decoded.success.trim()) prose = true
+                      if (sendOnly && !last) return
+                    }
                     body.text = true
-                    if (typeof decoded.success === "string") body.prose = true
                     emit(decoded.success)
                   }
                 })
@@ -1000,17 +1003,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               .filter((step) => step.kind === "tool")
               .findLastIndex((step) => step.id === toolCallId) + 1
           const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, stepNumber)} recovers it; follow its page cursors for the rest.]`
-          // A story has no read_run: its server results are paged by read_result, this run's only.
-          const storyMore = (end: number) =>
-            /^[A-Za-z0-9_.:-]{1,128}$/.test(toolCallId)
-              ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it.]`
-              : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
           // Page the original, not the envelope this wrapped it in: paging the envelope quoted it twice.
           const pageSource = result !== raw ? raw.text : fullText
           let sentText =
             quote && fullText.length > TOOL_RESULT_CHARS
-              ? toolDataPage(pageSource, { frame: raw.frame, more: workshopData ? () => recovery : storyMore }).text ||
-                (workshopData ? recovery : storyMore(0))
+              ? workshopData
+                ? toolDataPage(pageSource, { frame: raw.frame, more: () => recovery }).text || recovery
+                : storyMcpResultPage(pageSource, toolCallId, raw.frame)
               : fullText
           if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript && !raw.replayed) {
             const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
@@ -1023,10 +1022,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             if ((await textTokens(sentText)) > remaining) {
               let marker = `\n${recovery}`
               if ((await textTokens(marker)) > remaining) marker = ""
-              const page = (limit: number) =>
-                quote
-                  ? toolDataPage(pageSource, { limit, frame: raw.frame, more: () => recovery }).text
-                  : fullText.slice(0, limit) + marker
+              const page =
+                raw.renderPage ??
+                ((limit: number) =>
+                  quote
+                    ? toolDataPage(pageSource, { limit, frame: raw.frame, more: () => recovery }).text
+                    : fullText.slice(0, limit) + marker)
               let lo = 0,
                 hi = Math.min(TOOL_RESULT_CHARS, sentText.length)
               while (lo < hi) {
@@ -1551,11 +1552,20 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                         })
                     )
                   )
+          const mcpReceipt = receipt !== null && !workshopData && frozen.some((t) => t.name === call.name && t.mcp)
+          const receiptPage = mcpReceipt && receipt.text.length > TOOL_RESULT_CHARS ? toolDataParts(receipt.text) : null
           const refusal = dispatchRefusal(call)
           const result = receipt
             ? {
-                content: [{ type: "text" as const, text: workshopData ? receipt.text : budgetResult(receipt.text) }],
-                details: null,
+                content: [
+                  {
+                    type: "text" as const,
+                    text: workshopData || mcpReceipt ? receipt.text : budgetResult(receipt.text)
+                  }
+                ],
+                details: receiptPage
+                  ? { sentText: storyMcpResultPage(receiptPage.text, call.id, receiptPage.frame) }
+                  : null,
                 isError: receipt.isError
               }
             : refusal && (!dispatch || refusal !== BAD_ARGS)
@@ -1674,7 +1684,6 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             yield* Effect.promise(() => flush())
           } else emit({ restart: true })
           body.text = false
-          body.prose = false
         }
         // Waiting, with no request open: the working message says for how many.
         while (!mailbox.hasMail && mailbox.waitingFor > 0) {

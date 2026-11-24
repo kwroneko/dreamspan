@@ -45,6 +45,7 @@ declare module "@earendil-works/pi-agent-core" {
       readonly progress?: string
       /** A message the parent sent this subagent (`message_agent`, §4). */
       readonly fromParent?: true
+      readonly parentCall?: { readonly id: string; readonly turn: number }
       /**
        * A fork subagent's task (spec/SUBAGENTS.md §2.3): what comes before it is its parent's
        * conversation, as the parent had it at the call; its own run starts here.

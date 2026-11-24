@@ -29,6 +29,8 @@ describe("whitespace at a moved passage", () => {
     ["First. Secret.", "Secret.", "First."],
     ["First.\n\nSecret.\n\nLast.", "Secret.", "First.\n\nLast."],
     ["Secret.\n\nLast.", "Secret.", "Last."],
+    ["Secret\n    code()", "Secret", "    code()"],
+    ["Secret\r\n\tcode()", "Secret\r\n", "\tcode()"],
     ["First.\n\nSecret.", "Secret.", "First."],
     ["  Unchanged  prose.\n  First. Secret. Last.  ", "Secret.", "  Unchanged  prose.\n  First. Last.  "],
     ["preSECRETfix", "SECRET", "prefix"],

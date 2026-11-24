@@ -20,6 +20,67 @@ test.describe("a workshop made by its first message", () => {
   const server = serverPerFile(withAdmin)
   useSideChatProvider(server)
 
+  test("retrying the first message after a reload opens the same workshop", async ({ page }) => {
+    const story = await makeStory(server, "Harbor retry")
+    const bound = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetChat({ chatId: story.id }))
+    const attached = () =>
+      asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.ListAttachedWorkshops({ chatId: story.id, forkId: bound.currentForkId! })
+      )
+    let failed = false
+    await page.routeWebSocket("**/rpc", (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        const request =
+          typeof data === "string"
+            ? (JSON.parse(data) as {
+                tag?: string
+                id?: string
+                payload?: { chatId?: string }
+              })
+            : null
+        if (!failed && request?.tag === "ReadPath" && request.payload?.chatId && request.payload.chatId !== story.id) {
+          failed = true
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Read interrupted" } }]
+              }
+            })
+          )
+        } else upstream.send(data)
+      })
+    })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=new`)
+    const panel = sidePanel(page)
+    const box = panel.getByLabel("Message", { exact: true })
+    const send = panel.getByRole("button", { name: /^Send( as .+)?$/ })
+    await box.fill(QUESTION)
+    await send.click()
+    await expect(panel.getByRole("alert")).toBeVisible()
+    expect(failed).toBe(true)
+    const before = await attached()
+    expect(before).toHaveLength(1)
+    const workshopId = before[0]!.id
+    const posted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: workshopId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+    )
+    expect(posted.entries.map((entry) => entry.version.content)).toContain(QUESTION)
+    page.on("dialog", (dialog) => void dialog.accept())
+    await page.reload()
+    await expectTextBox(box, QUESTION)
+    await send.click()
+    const saved = panel.locator(`[data-side-chat="${workshopId}"]`)
+    await expect(saved.getByRole("article").filter({ hasText: QUESTION })).toHaveCount(1)
+    await expect(saved.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1)
+    expect((await attached()).map((chat) => chat.id)).toEqual([workshopId])
+  })
+
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
       test(`composer first, made on send, kept on reload at ${width} ${theme}`, async ({ page }, info) => {

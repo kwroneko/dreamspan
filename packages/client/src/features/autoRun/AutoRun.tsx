@@ -5,9 +5,10 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
-import { useEffect, useId, useRef, useSyncExternalStore } from "react"
+import { useContext, useEffect, useId, useRef, useSyncExternalStore } from "react"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "../chat/chatPlace.ts"
+import { CloseChatPanelSheet } from "../chat/panels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -202,15 +203,18 @@ function AutoRunDialog({
   onClose: () => void
 }) {
   const [, store] = useRun(context.session)
+  const closeSheet = useContext(CloseChatPanelSheet)
   const [turns = "5", tokens = ""] = value.split(":")
   const form = useId()
   const bounds = parseBounds(turns, tokens)
   const problem = blocked(context)
   const tools = context.view.cast?.agentEnabled === true
-  const start = () => {
+  const start = async () => {
     if (bounds.turns === null || bounds.tokenLimit === undefined || problem !== null) return
-    store.set(newRun(context.view.forkId, bounds.turns, bounds.tokenLimit, tipOf(context)))
+    const run = newRun(context.view.forkId, bounds.turns, bounds.tokenLimit, tipOf(context))
     onClose()
+    if (closeSheet !== null) await closeSheet()
+    store.set(run)
   }
   return (
     <Dialog
@@ -224,7 +228,7 @@ function AutoRunDialog({
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
-          start()
+          void start()
         }}
       >
         <Field
@@ -306,6 +310,7 @@ export function AutoRunRow(context: ComposerControlContext) {
     current.current = context
   })
   const pendingEvents = useRef<ChatEvent[]>([])
+  const pendingReply = useRef<{ readonly runId: number; stopRequested: boolean } | null>(null)
 
   // Events outside the last message count too: editing an earlier line must end the run.
   // During Generate, buffer events until its returned identities identify its own writes.
@@ -384,6 +389,8 @@ export function AutoRunRow(context: ComposerControlContext) {
       return
     }
     pendingEvents.current = []
+    const replyRequest = { runId: now.id, stopRequested: false }
+    pendingReply.current = replyRequest
     store.update(now.id, starting)
     // Exactly an empty Send's request for one reply: Auto's pick, no round after it.
     void session
@@ -405,6 +412,7 @@ export function AutoRunRow(context: ComposerControlContext) {
         }
       )
       .then((outcome) => {
+        if (pendingReply.current === replyRequest) pendingReply.current = null
         if (!outcome.ok) {
           store.update(now.id, (r) => ({
             ...(outcome.error.tag === "LeafMoved"
@@ -432,12 +440,12 @@ export function AutoRunRow(context: ComposerControlContext) {
         }
         const reply = { slotId: outcome.value.entry.slotId, versionId: outcome.value.entry.version.id }
         const token = outcome.value.auto?.token ?? null
-        const after = store.update(now.id, (r) => {
+        store.update(now.id, (r) => {
           const next = started(r, reply, token)
           return pendingEvents.current.some((event) => externalEvent(event, next)) ? stopped(next, "moved") : next
         })
-        // Stopped (or dismissed) while the request was out: the reply it started is stopped too.
-        if (after === null || after.stop !== null) void session.stop(reply.versionId)
+        // An explicit Stop still applies after Dismiss, once Generate identifies the reply.
+        if (replyRequest.stopRequested) void session.stop(reply.versionId)
       })
   })
   // Leaving the chat's composer ends the run: nothing is started from a tab that isn't showing it.
@@ -465,8 +473,9 @@ export function AutoRunRow(context: ComposerControlContext) {
   if (run === null) return null
   const running = run.stop === null
   const stop = async (now: AutoRun) => {
-    store.update(now.id, (r) => stopped(r, "you"))
-    if (now.waiting !== null) report(await session.stop(now.waiting.versionId))
+    if (pendingReply.current?.runId === now.id) pendingReply.current.stopRequested = true
+    const stoppedRun = store.update(now.id, (r) => stopped(r, "you"))
+    if (stoppedRun?.waiting) report(await session.stop(stoppedRun.waiting.versionId))
   }
   const problem = running ? null : blocked(context)
   const written = run.tokens > 0 ? ` About ${count(run.tokens)} tokens written.` : ""

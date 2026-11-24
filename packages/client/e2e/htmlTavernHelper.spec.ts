@@ -87,9 +87,40 @@ for (const width of [1440, 390])
       const chat = await admin((api) =>
         Effect.map(api.ListChats({ limit: 100, before: null }), (chats) => chats.find((c) => c.title === title)!)
       )
+      const first = await admin((api) =>
+        Effect.map(
+          api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }),
+          (window) => window.entries[0]!.slotId
+        )
+      )
+      const delayReads = width === 1440 && theme === "light"
+      let holdNext = delayReads
+      let held: string | undefined
+      let deliver: (() => void) | undefined
+      if (delayReads)
+        await page.routeWebSocket("**/rpc", (socket) => {
+          const peer = socket.connectToServer()
+          socket.onMessage((message) => {
+            const request = JSON.parse(String(message)) as { tag?: string; id?: string }
+            if (holdNext && request.tag === "GetPanelData") {
+              holdNext = false
+              held = request.id
+            }
+            peer.send(message)
+          })
+          peer.onMessage((message) => {
+            const response = JSON.parse(String(message)) as { requestId?: string }
+            if (held !== undefined && response.requestId === held) {
+              deliver = () => socket.send(message)
+              held = undefined
+            } else socket.send(message)
+          })
+        })
       await page.goto(`${server().url}/chats/${chat.id}`)
       const article = page.locator("article", { hasText: "The board by the hearth." })
       const inside = article.frameLocator('iframe[title="Panel"]')
+      const firstMessage = page.locator(`article[data-slot="${first}"]`)
+      const setHidden = (hidden: boolean) => admin((api) => api.SetMessageHidden({ slotId: first, hidden }))
       await expect(inside.locator("#panel")).toHaveText("Board", { timeout: 60_000 })
       // Scripts off: nothing read, nothing run.
       await expect(inside.locator("#results")).toHaveText("")
@@ -97,6 +128,14 @@ for (const width of [1440, 390])
       const confirm = page.getByRole("alertdialog")
       await expect(confirm).toContainText("can read their message, the ones before it and the chat's variables")
       await confirm.getByRole("button", { name: "Run scripts", exact: true }).click()
+      if (delayReads) {
+        await expect.poll(() => deliver !== undefined).toBe(true)
+        await setHidden(true)
+        await expect(firstMessage).toHaveAttribute("data-hidden", "true")
+        // Let the 300 ms debounce expire before delivering the initial snapshot.
+        await page.waitForTimeout(500)
+        deliver!()
+      }
       await expect(inside.locator("body")).toHaveAttribute("data-ran", "yes", { timeout: 30_000 })
       const results = JSON.parse((await inside.locator("#results").textContent()) ?? "{}") as Record<string, unknown>
       expect(results).toEqual({
@@ -118,12 +157,18 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `html-tavern-${width}-${theme}`, { scope: "[data-testid=messages]" })
 
       // A change before it reaches it: the first message hidden from the model.
-      const first = await admin((api) =>
-        Effect.map(
-          api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }),
-          (window) => window.entries[0]!.slotId
-        )
-      )
-      await admin((api) => api.SetMessageHidden({ slotId: first, hidden: true }))
+      if (!delayReads) await setHidden(true)
       await expect(inside.locator("#updates")).toHaveText("1:2:true", { timeout: 30_000 })
+      if (delayReads) {
+        deliver = undefined
+        holdNext = true
+        await setHidden(false)
+        await expect.poll(() => deliver !== undefined).toBe(true)
+        await setHidden(true)
+        await expect(firstMessage).toHaveAttribute("data-hidden", "true")
+        // The second invalidation outlives the debounce while the earlier snapshot is in flight.
+        await page.waitForTimeout(500)
+        deliver!()
+        await expect(inside.locator("#updates")).toHaveText("3:2:true")
+      }
     })

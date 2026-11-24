@@ -16,7 +16,11 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import { type PreparedRewrite, WorkerAssembler } from "../assembler/assembler.ts"
-import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
+import type { RefId } from "@dreamspan/shared/library.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
+import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
+import { withEndOfRequest } from "@dreamspan/shared/presetConditions.ts"
 import type { ReplySections } from "@dreamspan/shared/replySections.ts"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
 import type { EffectivePreset } from "@dreamspan/shared/inspectorApi.ts"
@@ -42,7 +46,7 @@ import {
   historyLeafOf
 } from "../assembler/types.ts"
 import type { RequestImage } from "../assembler/types.ts"
-import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
+import { builtinPreset, sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousStartIn } from "./historyStart.ts"
 import { historyGap, sentSummaryNotes } from "./historyGap.ts"
 import { displayThrough } from "./displayPath.ts"
@@ -59,6 +63,9 @@ import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
 import { readingOnce } from "./lcmReads.ts"
+import { personaInStory, workshopDefaultsOf, workshopSpeaker } from "./workshopDefaults.ts"
+import { defaultSeed } from "./workshopSeeds.ts"
+import { unchanged } from "../assembler/scriptSources.ts"
 
 /** How many generating replies' prepared rewrites a worker keeps, and for how long unused. */
 const LIVE_MAX = 32
@@ -808,6 +815,70 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           .rewrite({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random }, options, items)
           .pipe(Effect.provide(sources.layer))
       }).pipe(inFork(sql, chatId, forkId, "versionId" in at ? at.slotId : at.leafSlotId), query("RewriteText")),
+    // Prepare the first human message in the same cast and preset while the workshop is still a draft.
+    RewriteWorkshopStart: ({ userId, attachTo, card, persona, preset, speaker, content }) =>
+      Effect.gen(function* () {
+        const defaults = yield* workshopDefaultsOf(sql, userId)
+        const localAssistant = card ?? defaults.card
+        const assistant = (localAssistant ?? "draft-workshop-assistant") as EntityId
+        const virtualCards: Array<{ entity: string; docJson: string; notes: [] }> = []
+        const sources = sqlSources(sql, { userId, chatId: "draft" as ChatId, next: true }).service
+        const assistantDoc = localAssistant
+          ? (yield* sources.cards([assistant], {}))[0]?.doc
+          : (defaultSeed("card")?.doc() as CardDoc | undefined)
+        if (!assistantDoc) return unchanged({ text: content })
+        if (!localAssistant) virtualCards.push({ entity: assistant, docJson: JSON.stringify(assistantDoc), notes: [] })
+
+        let playing = (persona === undefined ? defaults.persona : persona) as EntityId | null
+        if (playing && attachTo && (yield* personaInStory(sql, userId, attachTo, playing))) playing = null
+        if (persona === undefined && defaults.makesPersona) {
+          const [account] = yield* sql<{ display_name: string }>`SELECT display_name FROM users WHERE id = ${userId}`
+          playing = "draft-workshop-persona" as EntityId
+          virtualCards.push({
+            entity: playing,
+            docJson: JSON.stringify(newCardDoc(account?.display_name.trim() || "Me")),
+            notes: []
+          })
+        }
+        const defaultPreset = preset === undefined && defaults.preset === null ? defaultSeed("preset") : undefined
+        const binding = defaultPreset
+          ? {
+              scope: "chat" as const,
+              ref: null,
+              revision: null,
+              doc: withEndOfRequest({ ...builtinPreset, ...defaultPreset.doc() }).doc
+            }
+          : preset?._tag === "Account"
+            ? undefined
+            : ((preset === undefined ? defaults.preset : preset.ref) as RefId | null)
+        const picked = workshopSpeaker(speaker, assistant, playing)
+        const now = Date.now()
+        const draft = yield* draftSources(sql, {
+          userId,
+          cards: [assistant],
+          persona: playing,
+          greeters: [
+            {
+              entityId: assistant,
+              greeting: 0,
+              options: [{ index: 0, text: assistantDoc.first_mes, frozen: null }]
+            }
+          ],
+          first: { _tag: "Generate", direction: "", speakerEntityId: picked },
+          replier: null,
+          remote: virtualCards,
+          now,
+          ...(binding === undefined ? {} : { preset: binding })
+        })
+        const [written] = yield* assembler
+          .rewrite(
+            { now, timeZone: "UTC", frozen: {}, random: Math.random },
+            { edit: false, speaker: picked, writer: "human" },
+            [{ text: content, kind: "message" }]
+          )
+          .pipe(Effect.provide(draft.layer))
+        return written ?? unchanged({ text: content })
+      }).pipe(query("RewriteWorkshopStart")),
     GetCardPromptUse: ({ userId }) => readCardPromptUse(sql, userId).pipe(query("GetCardPromptUse"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers

@@ -43,6 +43,7 @@ import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
+import { markEventsThrough } from "./stateRead.ts"
 import { transaction } from "./tx.ts"
 import { toStorageError } from "./connection.ts"
 import { stImportChatStamp } from "./stImportPlanStamp.ts"
@@ -111,8 +112,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     )
 
   const ownedSlot = (chatId: string, slotId: string) =>
-    sql<{ id: string; depth: number; deleted_at: number | null }>`
-      SELECT id, depth, deleted_at FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
+    sql<{ id: string; depth: number; parent_slot_id: SlotId | null; deleted_at: number | null }>`
+      SELECT id, depth, parent_slot_id, deleted_at FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
     )
 
@@ -710,9 +711,31 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         )
         delete notes[kind]
       }
-      for (const event of input.events)
-        if (!stateTargets(event).some((target) => localTargets.has(target)))
-          yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+      // The parent's import record describes its end. A new branch can split before a
+      // re-import changed those variables, so compare where the placed messages actually split.
+      const inheritedVars = new Map<string, unknown>()
+      if (
+        at !== null &&
+        input.fork !== null &&
+        payload.state === undefined &&
+        input.events.some((e) => e.key === "var.set")
+      ) {
+        for (const row of yield* markEventsThrough(sql, chatId, at.parent_slot_id, fileFork.id, ["var.set"])) {
+          if (row.scope !== null) continue
+          const { name, value } = JSON.parse(row.value_json) as Extract<StateEventData, { key: "var.set" }>["value"]
+          inheritedVars.set(name, value)
+        }
+      }
+      for (const event of input.events) {
+        if (stateTargets(event).some((target) => localTargets.has(target))) continue
+        if (
+          event.key === "var.set" &&
+          inheritedVars.has(event.value.name) &&
+          stStateHash(inheritedVars.get(event.value.name)) === stStateHash(event.value.value)
+        )
+          continue
+        yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+      }
       // ST records a file's cast separately from its versions. Pin that imported cast
       // once; a later re-import or a local cast change must not rewrite old participation.
       const importedCast = stImportedCast(input.events)

@@ -1,7 +1,7 @@
 // HTML in messages, for the chat view (spec/HTML-MESSAGES.md): the viewer's "Show HTML as
 // formatting" for the message renderer, and the chat's card styles in one constructed
 // stylesheet, kept from every message in the loaded window (ui/html/messageHtml.ts).
-import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react"
 import { Switch } from "../../ui/Choice.tsx"
 import {
   HtmlChatContext,
@@ -24,7 +24,8 @@ type Entries = ReadonlyArray<{ readonly key: string; readonly text: string }>
 function useHtml(entries: Entries, mediaRevision = "", panelData?: PanelDataSource) {
   const { htmlFormatting: html, panelDepth } = useViewPrefs().prefs
   const settings = useMemo(() => ({ html, panelDepth }), [html, panelDepth])
-  const [styles] = useState(() => new MessageStyles())
+  const id = useId()
+  const [styles] = useState(() => new MessageStyles(id))
   const [frames] = useState(() => new FrameSlots())
   const chat = useMemo<HtmlChat>(
     () => ({ styles, frames, ...(panelData ? { panelData } : {}) }),

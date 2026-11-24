@@ -171,6 +171,11 @@ export function extractStyles(text: string): ReadonlyArray<string> {
  * that hasn't rendered yet contributes its stored text's.
  */
 export class MessageStyles {
+  private readonly id: string
+  constructor(id: string) {
+    this.id = id
+  }
+
   private readonly mediaReleases = new Map<string, () => void>()
   private readonly reportedMedia = new Map<string, ReadonlyArray<string>>()
   private readonly reported = new Map<string, string>()
@@ -179,6 +184,11 @@ export class MessageStyles {
   private sheet: CSSStyleSheet | null = null
   private applied = ""
   private scheduled = false
+
+  /** The same font namespace for the rendered body and for its stored CSS. */
+  fontKey(slot: string): string {
+    return `${this.id}\0${slot}`
+  }
 
   /** Adopts the sheet while the chat view is open; the returned function takes it away. */
   attach(): () => void {
@@ -239,7 +249,7 @@ export class MessageStyles {
         const cached = this.stored.get(entry.key)
         if (cached?.text === entry.text) return cached.css
         if (!scoper) return ""
-        const css = scoper(extractStyles(entry.text), entry.key)
+        const css = scoper(extractStyles(entry.text), this.fontKey(entry.key))
         this.stored.set(entry.key, { text: entry.text, css })
         return css
       })

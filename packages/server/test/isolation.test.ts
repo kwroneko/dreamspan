@@ -1654,6 +1654,18 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  StartWorkshop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartWorkshop({
+          attachTo: owner.chat.chatId,
+          requestId: "foreign-workshop",
+          first: { _tag: "Send", content: "Synthetic first message" },
+          speaker: null
+        }),
+        "NotFound"
+      )
+  },
   ListNewWorkshopCapabilities: {
     // What a workshop beside another user's story would offer.
     probe: (actor, owner) => refused(actor.api.ListNewWorkshopCapabilities({ attachTo: owner.chat.chatId }), "NotFound")
@@ -1907,8 +1919,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       Effect.gen(function* () {
         const theirs = yield* owner.api.GetMediaHosts()
         yield* actor.api.DecideMediaApproval({
-          refIds: [owner.editor.cardRefId],
-          decisions: [{ host: "isolation.test", choice: "approve" }]
+          decisions: [{ host: "isolation.test", choice: "approve", urls: [] }]
         })
         assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
       })

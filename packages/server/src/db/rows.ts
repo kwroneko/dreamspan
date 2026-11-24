@@ -202,8 +202,13 @@ export const versionExtras = (alias: string) =>
   (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
     WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json,
   (SELECT json_object('transcript', json(p.transcript_json), 'tools', json_extract(p.context_snapshot_json, '$.agent.tools'),
-    'final', r.status NOT IN ('created', 'running')) FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
-    WHERE p.rollout_id = ${alias}.rollout_id AND json_extract(p.context_snapshot_json, '$.agent.contract') = 'several') AS steps_material`
+    'final', r.status NOT IN ('created', 'running'),
+    'perVersion', json_extract(p.context_snapshot_json, '$.agent.contract') = 'several')
+    FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
+    WHERE p.rollout_id = ${alias}.rollout_id AND (
+      json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'
+      OR (r.step_count = 0 AND json_extract(p.context_snapshot_json, '$.agent.contract') IN ('send_message', 'both'))
+    )) AS steps_material`
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -286,11 +291,14 @@ const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonl
   }
   const material = JSON.parse(row.steps_material) as {
     transcript: ReadonlyArray<AgentMessage> | null
-    tools: ReadonlyArray<FrozenTool>
+    tools: ReadonlyArray<FrozenTool> | null
     final: boolean
+    perVersion: boolean
   }
   const count = material.transcript
-    ? counted(stepsOf(material.transcript, material.tools, !!material.final, row.id))
+    ? counted(
+        stepsOf(material.transcript, material.tools ?? [], !!material.final, material.perVersion ? row.id : undefined)
+      )
     : 0
   const summary = row.steps_json ? (JSON.parse(row.steps_json) as StepsSummary) : { ms: null }
   return count ? { steps: { count, ms: summary.ms }, agent: true } : { agent: true }

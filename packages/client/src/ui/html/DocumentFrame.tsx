@@ -274,17 +274,32 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
     let stopped = false
     const read = () => (reader && slotId !== undefined && panelData ? reader.read(panelData, slotId) : null)
     let timer: ReturnType<typeof setTimeout> | null = null
+    let pendingRefresh = false
+    let reading = false
+    const flushRefresh = async () => {
+      if (stopped || port === null || reading || timer !== null || !pendingRefresh) return
+      pendingRefresh = false
+      reading = true
+      try {
+        const data = await read()
+        if (stopped || data === null) return
+        const next = JSON.stringify(data)
+        if (next === shown) return
+        shown = next
+        port.postMessage({ type: "dreamspan:data", tavern: data })
+      } catch {
+        // A later change can try the read again.
+      } finally {
+        reading = false
+        void flushRefresh()
+      }
+    }
     const refresh = () => {
+      pendingRefresh = true
       if (timer !== null) clearTimeout(timer)
       timer = setTimeout(() => {
         timer = null
-        void read()?.then((data) => {
-          if (stopped || port === null || data === null) return
-          const next = JSON.stringify(data)
-          if (next === shown) return
-          shown = next
-          port.postMessage({ type: "dreamspan:data", tavern: data })
-        })
+        void flushRefresh()
       }, PANEL_REFRESH_MS)
     }
     const stopSource = reader && panelData ? panelData.subscribe(refresh) : () => {}
@@ -317,6 +332,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
             },
             [channel.port2]
           )
+          void flushRefresh()
         }
         const pending = read()
         if (pending === null) render(null)

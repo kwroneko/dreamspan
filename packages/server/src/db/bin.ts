@@ -6,6 +6,7 @@ import { readBinLimits } from "./binLimits.ts"
 import { Buffer } from "node:buffer"
 import { BinChanged, BinItem, type BinLimits, CannotDeleteLastFork, RecoveredText } from "@dreamspan/shared/bin.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { composerKey, type DraftKey, excerpt, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Data, Effect } from "effect"
@@ -735,6 +736,20 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       (rows) => rows.map((row) => row.id)
     )
 
+  /** Workshop chats or branch groups binned by this deletion, before eviction can remove them. */
+  const deletedWorkshops = (main: string) =>
+    Effect.gen(function* () {
+      const ids = yield* companionsOf(main)
+      if (ids.length === 0) return []
+      const rows = yield* sql<{ chat_id: ChatId; forks: string | null }>`
+        SELECT chat_id, CASE WHEN kind = 'branch' THEN origin_json -> '$.forkIds' END AS forks
+        FROM bin_items WHERE id IN ${sql.in(ids)} AND chat_id IS NOT NULL AND kind IN ('chat', 'branch')`
+      return rows.map((row) => ({
+        chatId: row.chat_id,
+        forkIds: row.forks === null ? null : (JSON.parse(row.forks) as ReadonlyArray<ForkId>)
+      }))
+    })
+
   /**
    * The workshop branches that go with story fork `forkId` (their own branches included) go to
    * the bin with it, under items that go with `main` (spec/WORKSHOP-BRANCHES.md §6.4). A workshop
@@ -1241,6 +1256,39 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return restored
     })
 
+  /**
+   * A later story-branch deletion may have binned the whole workshop after this companion's
+   * forks went. Reopen the workshop and turn the later deletion into a branch item for the
+   * forks it covered. Keep that item's id, timestamp and relationship to its own story item.
+   */
+  const reopenWorkshop = (userId: UserId, chatId: string, restoredForks: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const [shell] = yield* sql<{ id: string; title: string | null; companion: string }>`
+        SELECT b.id, c.title, main.id AS companion FROM chats c JOIN bin_items b ON b.id = c.bin_item_id
+        JOIN bin_items main ON main.id = b.origin_json ->> '$.companionOf'
+        WHERE c.id = ${chatId} AND c.kind = 'workshop' AND c.deleted_at IS NOT NULL
+          AND b.kind = 'chat' AND main.kind IN ('branch', 'threads')`
+      if (!shell) return
+      const forks = yield* sql<{ id: string }>`SELECT id FROM forks WHERE chat_id = ${chatId}
+        AND deleted_at IS NULL AND purged_at IS NULL AND id NOT IN ${sql.in(restoredForks)} ORDER BY created_at, id`
+      const forkIds = forks.map(({ id }) => id)
+      const forkId = forkIds[0]
+      if (forkId === undefined) return
+      yield* sql`UPDATE chats SET deleted_at = NULL, bin_item_id = NULL WHERE id = ${chatId}`
+      yield* sql`UPDATE bin_items SET kind = 'branch', target_id = ${forkId}, byte_size = 0, excerpt = '',
+        title = ${`${forkIds.length === 1 ? "A branch" : `${forkIds.length} branches`} of ${chatName(shell.title)}`},
+        origin_json = ${JSON.stringify({
+          chatId,
+          chatTitle: shell.title,
+          chatKind: "workshop",
+          forkId,
+          forkIds,
+          companionOf: shell.companion
+        })}
+        WHERE id = ${shell.id}`
+      for (const id of forkIds) yield* removeFork(userId, id, { itemId: shell.id, forkIds })
+    })
+
   const restoreOne = (userId: UserId, itemId: string, recovered?: Map<string, string>) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
@@ -1254,12 +1302,18 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
         return toBinItem(item)
       }
-      const origin = JSON.parse(item.origin_json) as { forkId?: string; forkIds?: ReadonlyArray<string> }
+      const origin = JSON.parse(item.origin_json) as {
+        forkId?: string
+        forkIds?: ReadonlyArray<string>
+        companionOf?: string
+      }
       const forkId = origin.forkId
       if (forkId !== undefined && item.chat_id !== null) {
         yield* discardDeletedQueue(item.chat_id)
-        for (const restored of origin.forkIds ?? [forkId])
-          yield* restoreInFork(item, recovered?.get(restored) ?? restored, recovered)
+        const forks = (origin.forkIds ?? [forkId]).map((id) => recovered?.get(id) ?? id)
+        for (const restored of forks) yield* restoreInFork(item, restored, recovered)
+        if (item.kind === "branch" && origin.companionOf !== undefined)
+          yield* reopenWorkshop(userId, item.chat_id, forks)
         // Undone threads apply in their branch again: its away marks and played-stretch corrections.
         if (item.kind === "threads") {
           const [split] = yield* sql<{ id: string; chat_id: string; fork_id: string }>`
@@ -1772,6 +1826,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   const drafts = makeDraftStore(sql, recover, now)
 
   return {
+    deletedWorkshops,
     drafts,
     insertItem,
     assetRestorers,

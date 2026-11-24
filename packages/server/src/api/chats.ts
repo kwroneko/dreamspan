@@ -12,6 +12,7 @@ import {
   thinkingInSections
 } from "@dreamspan/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { BinItem } from "@dreamspan/shared/bin.ts"
 import {
   Fork,
   PathEntry,
@@ -27,6 +28,7 @@ import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
+import { hasMacroMarker } from "@dreamspan/shared/macros/expand.ts"
 import { foldState, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -37,6 +39,7 @@ import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { rewriteText } from "../chat/rewrites.ts"
 import { DraftTooLarge } from "../db/ops.ts"
+import { notifyWorkshopDeletions } from "./bin.ts"
 import { internal, toServerError } from "./internal.ts"
 
 const userText = (
@@ -139,7 +142,7 @@ export const makeChatHandlers = Effect.gen(function* () {
   // A fork a write returns shows its last message as the branch list does (greeting macros replaced).
   // Only a tip with a macro in it can read differently, so an ordinary fork costs no read.
   const withShownTip = (user: UserId, fork: Fork) =>
-    !fork.tipExcerpt.includes("{{")
+    !hasMacroMarker(fork.tipExcerpt)
       ? Effect.succeed(fork)
       : reader.ListForks({ userId: user, chatId: fork.chatId }).pipe(
           Effect.map((list) => {
@@ -200,6 +203,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly kind: "message" | "generate"
       readonly imageDraftIds?: readonly string[]
       readonly images?: import("@dreamspan/shared/chat.ts").MessageImages
+      readonly library?: import("@dreamspan/shared/chat.ts").MessageLibrary
       readonly content: string
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
@@ -414,6 +418,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       replySpeakerEntityId,
       images,
       imageDraftIds,
+      library,
       reply,
       round,
       autoPick,
@@ -428,6 +433,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           kind: "message",
           ...(images === undefined ? {} : { images }),
           ...(imageDraftIds === undefined ? {} : { imageDraftIds }),
+          ...(library === undefined || library.length === 0 ? {} : { library }),
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
@@ -962,19 +968,20 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.DeleteChat({ userId: id, chatId })
+        yield* notifyWorkshopDeletions(id, item.workshops)
         if (item.kind === "branch") {
           const forks = item.origin.forkIds as ReadonlyArray<ForkId>
           yield* Effect.forEach(generations.runningIn(chatId, forks), (versionId) =>
             Effect.ignore(generations.stop(id, versionId))
           )
           yield* afterDelete(id, chatId)
-          return item
+          return new BinItem(item)
         }
         yield* stopDeleted(id, chatId)
         // After the stopped versions, the subscriptions end.
         hub.close(chatId, { _tag: "Deleted" })
         yield* warmth.refreshUser(id)
-        return item
+        return new BinItem(item)
       }).pipe(Effect.uninterruptible, internal("DeleteChat")),
 
     DeleteMessage: ({ slotId, forkId }) =>
@@ -989,8 +996,9 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.DeleteFork({ userId: id, forkId })
+        yield* notifyWorkshopDeletions(id, item.workshops)
         yield* afterDelete(id, item.origin.chatId as ChatId)
-        return item
+        return new BinItem(item)
       }).pipe(Effect.uninterruptible, internal("DeleteFork")),
 
     DeleteVersion: ({ versionId, forkId }) =>

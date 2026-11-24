@@ -160,6 +160,8 @@ export const previousRun = Effect.fnUntraced(function* (
     return {
       reason: "What the assistant may do here changed, so this request was put together again."
     } as const
+  if (!isDeepStrictEqual(snapshot.inputs.cards, fresh.inputs.cards))
+    return { reason: "The cards changed, so this request was put together again." } as const
   // Loading results belong to this exact catalog and skill material. A new card or edited
   // skill must not acquire the previous run's loads, instructions or cached personality.
   // Every-tool runs offer skills too (load_skill without deferred tools), under the same rule.
@@ -168,12 +170,11 @@ export const previousRun = Effect.fnUntraced(function* (
   if (loads(snapshot) || loads(fresh)) {
     if (
       !isDeepStrictEqual(snapshot.agent?.tools, fresh.agent?.tools) ||
-      !isDeepStrictEqual(snapshot.agent?.cardSkills, fresh.agent?.cardSkills) ||
-      !isDeepStrictEqual(snapshot.inputs.cards, fresh.inputs.cards)
+      !isDeepStrictEqual(snapshot.agent?.cardSkills, fresh.agent?.cardSkills)
     )
       return {
         reason:
-          "The cards, skills or available tools changed, so this request was put together again. A changed tool list may make it read the chat again once at full input cost."
+          "The skills or available tools changed, so this request was put together again. A changed tool list may make it read the chat again once at full input cost."
       } as const
   }
   if (stored.effectsReason) return { reason: stored.effectsReason } as const

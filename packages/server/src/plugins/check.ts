@@ -1,11 +1,12 @@
 import { randomUUID, createHash } from "node:crypto"
+import type { BigIntStats } from "node:fs"
 import { readFile, readdir, rename, rm, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Schema } from "effect"
 import { type PluginReport, PluginManifest } from "@dreamspan/shared/plugins.ts"
 import { runPluginChild } from "./process.ts"
-import { confined, pluginFolder } from "./repo.ts"
+import { boundedPluginEntries, confined, limits, pluginFolder, safeGit } from "./repo.ts"
 
 /**
  * Approved-build repo verifies done by this process, keyed by build folder. The value is a
@@ -14,16 +15,27 @@ import { confined, pluginFolder } from "./repo.ts"
  * Any write, rename, link or rebuild changes ctime or inode, so the next read verifies again.
  */
 const verifiedBuilds = new Map<string, string>()
-const stampTree = async (dir: string, hash: ReturnType<typeof createHash>): Promise<void> => {
-  const info = await lstat(dir, { bigint: true })
-  hash.update(`${dir}\0${info.ino}:${info.mode}:${info.nlink}:${info.size}:${info.mtimeNs}:${info.ctimeNs}\n`)
-  if (!info.isDirectory()) return
-  for (const name of (await readdir(dir)).sort()) await stampTree(join(dir, name), hash)
-}
 const buildStamp = async (dataDir: string, owner: string, id: string, folder: string, report: string) => {
   const hash = createHash("sha256").update(report).update("\0")
-  await stampTree(await confined(dataDir, join(pluginFolder(dataDir, owner, id), ".git")), hash)
-  await stampTree(folder, hash)
+  const stamp = (path: string, info: BigIntStats) =>
+    hash.update(`${path}\0${info.ino}:${info.mode}:${info.nlink}:${info.size}:${info.mtimeNs}:${info.ctimeNs}\n`)
+  await safeGit(await confined(dataDir, pluginFolder(dataDir, owner, id)), stamp)
+  // The build contains the source tree, up to one bundle per test file, four other
+  // generated modules, the check report, and the compiler's network filter.
+  const maxEntries = limits.directories + 2 * limits.files + 6
+  const limitError = "Plugin build directory limit exceeded"
+  let entries = 1
+  let directories = 0
+  const visit = async (path: string, depth: number): Promise<void> => {
+    const info = await lstat(path, { bigint: true })
+    stamp(path, info)
+    if (!info.isDirectory()) return
+    if (++directories > limits.directories || depth >= limits.depth) throw new Error(limitError)
+    const names = await boundedPluginEntries(path, maxEntries - entries, limitError)
+    entries += names.length
+    for (const name of names) await visit(join(path, name), depth + 1)
+  }
+  await visit(folder, 0)
   return hash.digest("hex")
 }
 

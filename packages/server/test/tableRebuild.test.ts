@@ -281,6 +281,38 @@ describe("table rebuilds", () => {
     }).pipe(Effect.provide(layer()))
   )
 
+  it.effect("require refills for quoted FTS columns while allowing changes to unindexed columns", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const create = `CREATE TABLE texts (id INTEGER PRIMARY KEY, "body,text" TEXT, label TEXT)`
+      const definitions = {
+        ...migrationDefinitions,
+        [nextKey("texts")]: {
+          statements: [
+            create,
+            `CREATE VIRTUAL TABLE texts_fts USING fts5("body,text", [label] UNINDEXED, content='texts', content_rowid='id')`,
+            `INSERT INTO texts VALUES (1, 'lantern', 'heading')`,
+            `INSERT INTO texts_fts(rowid, "body,text") SELECT id, "body,text" FROM texts`
+          ]
+        }
+      }
+      yield* migrate(definitions)
+      const rebuild = (columns: NonNullable<TableRebuild["columns"]>) =>
+        migrate({
+          ...definitions,
+          [nextKey("rebuild", 2)]: { outsideTransaction: [{ table: "texts", create, columns }] }
+        })
+      const rejected = yield* Effect.exit(rebuild({ "body,text": "'torch'" }))
+      assert.isTrue(Exit.isFailure(rejected))
+      assert.include(String(rejected), "the full-text index texts_fts reads columns that change")
+      yield* rebuild({ label: "'new heading'" })
+      assert.deepStrictEqual(
+        yield* sql`SELECT "body,text" AS body, label FROM texts_fts WHERE texts_fts MATCH 'lantern'`,
+        [{ body: "lantern", label: "new heading" }]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("refuse to keep a full-text index whose rows would change rowid, its content table named in any case", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -391,6 +423,23 @@ describe("table rebuilds", () => {
         (yield* sql<{ body: string }>`SELECT body FROM notes`).map((row) => row.body),
         ["a."]
       )
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("keeps an unrelated view's insert-only trigger with a single-quoted name", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(
+        withSteps([
+          "CREATE TABLE spare (id INTEGER PRIMARY KEY)",
+          "CREATE TABLE notes (body TEXT)",
+          "CREATE VIEW editable AS SELECT body FROM notes",
+          "CREATE TRIGGER 'keep edit' INSTEAD OF INSERT ON editable BEGIN INSERT INTO notes VALUES (NEW.body); END",
+          { table: "spare", create: "CREATE TABLE spare (id INTEGER PRIMARY KEY, label TEXT)" }
+        ])
+      )
+      yield* sql`INSERT INTO editable VALUES ('made it')`
+      assert.deepStrictEqual(yield* sql`SELECT body FROM notes`, [{ body: "made it" }])
     }).pipe(Effect.provide(layer()))
   )
 

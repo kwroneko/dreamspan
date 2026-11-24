@@ -168,6 +168,10 @@ describe("0002_files", () => {
           "guidance_target",
           "reasoning_stats",
           "native_reasoning",
+          "composer_save_session",
+          "composer_commits",
+          "workshop_starts",
+          "library_attachments",
           "pending_chats"
         ]
       )
@@ -241,11 +245,11 @@ describe("0004_workshop_branches", () => {
   )
 })
 
-describe("0014_pending_chats", () => {
+describe("0018_pending_chats", () => {
   it.effect("files the old new-chat pages' first messages to recovered texts, keeping a card source page's", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* migrate(upTo(13))
+      yield* migrate(upTo(17))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES
         ('card', 'u', 'user_field', 'pending-chat:e1', 'First message', 'Hello, lighthouse keeper.', 5),
@@ -478,7 +482,11 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0011_guidance_target",
       "0012_reasoning_stats",
       "0013_native_reasoning",
-      "0014_pending_chats"
+      "0014_composer_save_session",
+      "0015_composer_commits",
+      "0016_workshop_starts",
+      "0017_library_attachments",
+      "0018_pending_chats"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -544,20 +552,7 @@ describe("0005_preview_macro", () => {
   it.effect("adds the column to a database at 0004; its older summaries are stale by format", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0005_preview_macro": _new,
-        "0006_persona_locks": _later,
-        "0007_contract_records": _latest,
-        "0008_attachment_paths": _newest,
-        "0009_share_invitations": _last,
-        "0010_share_birth": _last10,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(4))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
       yield* sql`INSERT INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
@@ -585,19 +580,7 @@ describe("0006_persona_locks", () => {
   it.effect("adds the table to a database at 0005, keeping its cards, and guards its rows", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0006_persona_locks": _new,
-        "0007_contract_records": _later,
-        "0008_attachment_paths": _latest,
-        "0009_share_invitations": _last,
-        "0010_share_birth": _last10,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(5))
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
       for (const [id, owner] of [
@@ -637,18 +620,7 @@ describe("0007_contract_records", () => {
   it.effect("adds the rollout's contract columns to a database at 0006, keeping its rollouts, and guards them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0007_contract_records": _new,
-        "0008_attachment_paths": _later,
-        "0009_share_invitations": _last,
-        "0010_share_birth": _last10,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(6))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
       yield* sql`INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, created_at, updated_at)
@@ -668,17 +640,7 @@ describe("0008_attachment_paths", () => {
   it.effect("adds the path of a workshop's attachment draft, keeping the drafts before it", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0008_attachment_paths": _new,
-        "0009_share_invitations": _later,
-        "0010_share_birth": _later10,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(7))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
       yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
@@ -696,16 +658,7 @@ describe("0009_share_invitations", () => {
   it.effect("binds a database at 0008's shares to their folder, keeping them, and adds invitations", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0009_share_invitations": _new,
-        "0010_share_birth": _last10,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(8))
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
       yield* sql`INSERT INTO file_shares (id, owner_user_id, path, inode, grantee_user_id, mode, created_at)
@@ -728,15 +681,7 @@ describe("0010_share_birth", () => {
   it.effect("adds birth times to shares and invitations and a declined mark, keeping what's there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0010_share_birth": _new,
-        "0011_guidance_target": _later11,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(9))
       for (const user of ["u", "v"])
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
       yield* sql`INSERT INTO file_shares (id, owner_user_id, path, inode, device, grantee_user_id, mode, created_at)
@@ -759,14 +704,7 @@ describe("0011_guidance_target", () => {
   it.effect("adds the reply a composer's guidance is for, null on the drafts already there", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0011_guidance_target": _new,
-        "0012_reasoning_stats": _later12,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(10))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'chat', 'active', 0)`
       yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
@@ -783,13 +721,7 @@ describe("0012_reasoning_stats", () => {
   it.effect("adds the reasoning estimate mark and first reasoning/reply times, frozen once closed", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const {
-        "0012_reasoning_stats": _new,
-        "0013_native_reasoning": _later13,
-        "0014_pending_chats": _later14,
-        ...before
-      } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(11))
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* Effect.scoped(Layer.build(Migrations))
       const columns = (yield* sql<{ name: string; dflt_value: string | null }>`PRAGMA table_info(llm_requests)`).filter(
@@ -815,8 +747,7 @@ describe("0013_native_reasoning", () => {
   it.effect("adds a reply's provider reasoning record, nullable, JSON only, and outside the version view", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0013_native_reasoning": _new, "0014_pending_chats": _later14, ...before } = migrations
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* migrate(upTo(12))
       yield* Effect.scoped(Layer.build(Migrations))
       const columns = yield* sql<{ name: string; notnull: number }>`PRAGMA table_info(version_texts)`
       assert.deepStrictEqual(
@@ -832,11 +763,11 @@ describe("0013_native_reasoning", () => {
   )
 })
 
-describe("0014_pending_chats", () => {
+describe("0018_pending_chats", () => {
   it.effect("adds the pending chat's entry, NULL on every chat there was, and the index that finds them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0014_pending_chats": _new, ...before } = migrations
+      const { "0018_pending_chats": _new, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at)

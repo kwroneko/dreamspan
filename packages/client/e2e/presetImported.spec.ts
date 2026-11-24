@@ -9,8 +9,10 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { replaceEditorText } from "./support/textbox.ts"
+import { useSideChatProvider } from "./support/workshopSideChat.ts"
 
-const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
+const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
 const base = JSON.parse(
@@ -126,6 +128,40 @@ const choose = async (page: Page, panel: Locator, label: string) => {
 }
 
 test.setTimeout(180_000)
+
+test.describe("first replies", () => {
+  const provider = useSideChatProvider(server)
+  for (const action of ["Generate", "Send"] as const)
+    test(`first ${action} uses unsaved changes to the open preset`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const { entityId } = await setUp(page, `First ${action}`)
+      // Simulate a save still in flight when the first reply is requested.
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          if (typeof data === "string" && JSON.parse(data).tag === "SaveEditorDraft")
+            setTimeout(() => upstream.send(data), 1200)
+          else upstream.send(data)
+        })
+      })
+      await page.goto(`${server().url}/cards/${entityId}/chat`)
+      const composer = page.getByLabel("Message", { exact: true })
+      await expect(composer).toBeEditable()
+      if (action === "Send") await composer.fill("I open the ledger.")
+      const panel = await openPanel(page, "Prompt preset")
+      await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible()
+      const expand = panel.getByRole("button", { name: /^Expand Main Prompt/ }).first()
+      if (await expand.count()) await expand.click()
+      const field = panel.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+      const edited = "Check the tally in the newly updated ledger."
+      await replaceEditorText(field, edited)
+      const before = provider().bodies.length
+      await page.getByRole("button", { name: action === "Send" ? /^Send$/ : /^Generate/ }).click()
+      await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+      await expect.poll(() => provider().bodies.length).toBeGreaterThan(before)
+      expect(JSON.stringify(provider().bodies[before])).toContain(edited)
+    })
+})
 
 for (const width of [1440, 390])
   test(`the Prompt preset tab lists an imported preset's prompts, before and after the first send (${width}px)`, async ({

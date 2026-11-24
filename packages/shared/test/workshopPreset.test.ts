@@ -1,7 +1,7 @@
 // Converting a story preset to a workshop preset (spec/WORKSHOP-CONTEXT.md §4.4): synthetic prompts only.
 import { describe, expect, it } from "vitest"
 import type { PresetPrompt } from "../src/docs/preset.ts"
-import { conversionItems, convertToWorkshop, WORKSHOP_PIECE_IDS } from "../src/workshopPreset.ts"
+import { choiceOf, conversionItems, convertToWorkshop, WORKSHOP_PIECE_IDS } from "../src/workshopPreset.ts"
 
 const prompt = (identifier: string, content = "", marker = false): PresetPrompt => ({
   identifier,
@@ -110,4 +110,17 @@ describe("workshop preset conversion", () => {
     )
     expect(converted.order.map((e) => e.identifier)).toEqual([...WORKSHOP_PIECE_IDS, "chatHistory"])
   })
+})
+
+// Review of 7e301b2d9 (7): a prompt added to the preset after the draft was made has no choice
+// kept; text typed for it keeps its default (Keep) and its identifier.
+it("text typed for a prompt added since the draft keeps its default choice", () => {
+  const added = { identifier: "addedPrompt", kind: "review" as const }
+  expect({ ...choiceOf(added, {}), content: "New text" }).toEqual({
+    identifier: "addedPrompt",
+    keep: true,
+    content: "New text"
+  })
+  const dropped = { identifier: "addedPrompt", keep: false }
+  expect(choiceOf(added, { addedPrompt: dropped })).toBe(dropped)
 })

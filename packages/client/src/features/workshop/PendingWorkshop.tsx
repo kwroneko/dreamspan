@@ -5,19 +5,20 @@
 // model, preset and capability chips. What's chosen there before the first send (the speaker,
 // guidance, the persona, the preset, what the assistant may do) is held here, as a pending story
 // chat holds its choices (`PendingChat`), and the first send makes the workshop with them in one
-// action, as that chat's first send makes it (StartChatPage.tsx): `CreateWorkshop` (with the
-// preset and grants), then the message and its reply or, with Generate, the turn asked for,
+// action: `StartWorkshop` writes its settings and first turn together, then Send can
+// ask for its reply,
 // then the new chat's path and cast seeded (`seedChat`), so it opens on them with nothing
 // loading in between. What's typed is kept as a pending chat's first message is (`useUserDraft`).
 // Used beside a story (`PendingSideChat`, the Workshop tab) and on its own page (StartWorkshopPage.tsx).
 import type { CastCard, Chat, ChatId, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { BUILTIN_PRESET_LABEL } from "@dreamspan/shared/generation.ts"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
 import type { WorkshopPresetChoice } from "@dreamspan/shared/workshopApi.ts"
-import { useAtomValue } from "@effect/atom-react"
+import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import { Effect, Option } from "effect"
-import { AsyncResult } from "effect/reactivity"
-import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
+import { AsyncResult, AtomRegistry } from "effect/reactivity"
+import { type CSSProperties, type ReactNode, useContext, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -47,7 +48,7 @@ import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
 import { BUILTIN, type PresetSelection, usePresetSelection } from "../pickers/presetSelection.ts"
 import { PendingCapabilityChip } from "./CapabilityChip.tsx"
 import { PendingSubagentModelsChip } from "./SubagentModelsChip.tsx"
-import type { PendingGrants } from "./capabilities.ts"
+import { newCapabilitiesAtom, offeredPendingGrants, type PendingGrants } from "./capabilities.ts"
 import { pendingWorkshopCopy, SIDE_CHATS_KEY } from "./sideChat.ts"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
 import { NO_PERSONA } from "./workshopStart.ts"
@@ -201,11 +202,14 @@ export function PendingWorkshop({
   const [presetChoice, setPresetChoice] = useState<PresetChoice>({ _tag: "Default" })
   const preset = usePendingPresetSelection(presetChoice, setPresetChoice)
   const [grants, setGrants] = useState<PendingGrants>(new Map())
+  const registry = useContext(RegistryContext)
+  const capabilityQuery = newCapabilitiesAtom(attachTo ?? "")
   const [guidance, setGuidance] = useState(false)
   // The speaker picked at the chip; none: the persona, as a saved workshop's composer starts.
   const [picked, setPicked] = useState<EntityId | null>(null)
-  // A workshop made by a send whose message didn't go: the next send uses it, not another.
-  const made = useRef<Chat | null>(null)
+  // A retry after reload must identify the same first turn until its draft is committed.
+  const startKey = JSON.stringify(["dreamspan.workshop-start", userId, copyKey])
+  const pendingStart = useRef<{ key: string; id: string } | null>(null)
 
   // Its cast as the saved workshop's will be: the assistant, and the persona the user plays.
   const defaultsResult = useAtomValue(workshopDefaultsAtom)
@@ -229,79 +233,85 @@ export function PendingWorkshop({
   const send = async (first: "send" | "generate") => {
     const submitted = text
     if (busy || !ready || (first === "send" && submitted.trim() === "")) return
-    // Generate with guidance off leaves the text, which goes along to the saved composer.
-    const consumed = first === "send" || guidance
+    const available = registry.get(capabilityQuery)
+    const choices = AsyncResult.isSuccess(available) ? offeredPendingGrants(grants, available.value) : grants
+    if (choices !== grants) setGrants(choices)
+    let requestId = pendingStart.current?.key === startKey ? pendingStart.current.id : null
+    try {
+      requestId ??= sessionStorage.getItem(startKey)
+      requestId ??= uuidv7()
+      sessionStorage.setItem(startKey, requestId)
+    } catch {
+      requestId ??= uuidv7()
+    }
+    pendingStart.current = { key: startKey, id: requestId }
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
-          const chat =
-            made.current ??
-            (yield* client("CreateWorkshop", {
-              ...(attachTo === null ? {} : { attachTo }),
-              ...(attachFork ? { attachFork } : {}),
-              ...(title === undefined || title.trim() === "" ? {} : { title }),
-              ...(start.card === "" ? {} : { card: start.card }),
-              ...(start.persona === "" ? {} : { persona: start.persona === NO_PERSONA ? null : start.persona }),
-              ...(presetChoice._tag === "Default" ? {} : { preset: presetChoice }),
-              ...(grants.size === 0 ? {} : { grants: [...grants.values()] })
-            }))
-          made.current = chat
-          const chatId = chat.id as ChatId
+          const { chat, forkId, slotId, speaker, kind } = yield* client("StartWorkshop", {
+            requestId,
+            first:
+              first === "send"
+                ? { _tag: "Send", content: submitted }
+                : {
+                    _tag: "Generate",
+                    direction: guidance ? submitted : ""
+                  },
+            speaker: picked,
+            ...(attachTo === null ? {} : { attachTo }),
+            ...(attachFork ? { attachFork } : {}),
+            ...(title === undefined || title.trim() === "" ? {} : { title }),
+            ...(start.card === "" ? {} : { card: start.card }),
+            ...(start.persona === "" ? {} : { persona: start.persona === NO_PERSONA ? null : start.persona }),
+            ...(presetChoice._tag === "Default" ? {} : { preset: presetChoice }),
+            ...(choices.size === 0 ? {} : { grants: [...choices.values()] })
+          }).pipe(
+            Effect.tapError((error) =>
+              error._tag === "GrantRefused"
+                ? Effect.gen(function* () {
+                    registry.refresh(capabilityQuery)
+                    const refreshed = yield* AtomRegistry.getResult(registry, capabilityQuery, {
+                      suspendOnWaiting: true
+                    })
+                    setGrants((current) => offeredPendingGrants(current, refreshed))
+                  }).pipe(Effect.ignore)
+                : Effect.void
+            )
+          )
+          const chatId = chat.id
           const opening = yield* client("ReadPath", {
             chatId,
-            forkId: null,
-            leafSlotId: null,
+            forkId,
+            leafSlotId: slotId,
             range: { _tag: "Bottom" },
             limit: 60
           })
-          const madeCast = yield* client("GetCast", { chatId, slotId: opening.leafSlotId })
-          // The speaker picked, if it's in the workshop as made; else its persona, as its composer's default.
-          const inCast = (id: EntityId | null) =>
-            id !== null && (madeCast.participants.includes(id) || madeCast.playedByMe.includes(id))
-          const speaker = inCast(picked) ? picked : (madeCast.playedByMe[0] ?? null)
-          let latest: Chat = chat
-          if (first === "send") {
-            // The message after its greeting, as its composer sends it: to the reply its turn order names.
-            const plan = planReply(madeCast, opening.entries, speaker, null, submitted)
-            const sent = yield* client("SendMessage", {
-              chatId,
-              forkId: opening.forkId,
-              parentSlotId: opening.leafSlotId,
-              branch: false,
-              content: submitted,
-              speakerEntityId: speaker,
-              replySpeakerEntityId: plan.replier,
-              ...(plan.reply ? {} : { reply: false }),
-              ...(plan.reply && plan.round.length > 0 ? { round: plan.round } : {})
-            })
-            if (sent._tag === "Posted") latest = sent.chat
-            // Its reply, as after any send; a server without a generator still keeps the message.
-            if (sent._tag === "Posted" && plan.reply)
-              yield* Effect.ignore(
+          const firstVersion = opening.entries.find((entry) => entry.slotId === slotId)?.version
+          const original = firstVersion?.rewrite?.raw
+            ? ((yield* client("RawVersionText", { versionId: firstVersion.id })).content ?? firstVersion.content)
+            : firstVersion?.content
+          let latest = chat
+          if (kind === "Send" && firstVersion) {
+            const madeCast = yield* client("GetCast", { chatId, forkId, slotId })
+            const plan = planReply(madeCast, opening.entries.slice(0, -1), speaker, null, original)
+            // This parent is fixed even if a retry arrives after the reply has already posted.
+            if (plan.reply) {
+              const generated = yield* Effect.option(
                 client("Generate", {
                   chatId,
-                  forkId: opening.forkId,
-                  parentSlotId: sent.entry.slotId,
+                  forkId,
+                  parentSlotId: slotId,
                   branch: false,
                   speakerEntityId: plan.replier,
                   ...(plan.round.length > 0 ? { round: plan.round } : {})
                 })
               )
-          } else {
-            // Generate: the speaker's turn written by the model, with guidance its one-turn direction.
-            const generated = yield* client("Generate", {
-              chatId,
-              forkId: opening.forkId,
-              parentSlotId: opening.leafSlotId,
-              branch: false,
-              speakerEntityId: speaker,
-              ...(guidance && submitted.trim() !== "" ? { direction: submitted } : {})
-            })
-            if (generated._tag === "Posted") latest = generated.chat
+              if (Option.isSome(generated) && generated.value._tag === "Posted") latest = generated.value.chat
+            }
           }
-          // Its composer goes on as this one was: the speaker picked, guidance on, and text not
-          // used by Generate.
-          const leftover = consumed ? "" : submitted
+          // Keep text still in the box, including edits made to a draft after a lost response.
+          const used = kind === "Send" ? original : firstVersion?.direction
+          const leftover = used === submitted ? "" : submitted
           let composer: Draft | null = null
           if (picked !== null || guidance || leftover.trim() !== "")
             composer = yield* Effect.option(
@@ -351,7 +361,14 @@ export function PendingWorkshop({
     const { chat, composer, leftover } = result.value
     if (composer !== null && leftover.trim() !== "")
       await keepCopy(composerCarryCopy(userId, chat.id, assistantId ?? chat.id, chat.title, leftover, null, composer))
-    await durable.commit(submitted, async () => true)
+    if (await durable.commit(submitted, async () => true)) {
+      pendingStart.current = null
+      try {
+        sessionStorage.removeItem(startKey)
+      } catch {
+        // This browser may have session storage disabled.
+      }
+    }
     await onTitleSent?.()
     await onCreated(chat)
   }

@@ -12,6 +12,7 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider, type Recorded } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { unquoteToolData } from "./support/toolData.ts"
+import { WorkshopFiles } from "../src/files/WorkshopFiles.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 
 interface Body {
@@ -44,6 +45,61 @@ const call = (name: string, args: unknown, id: string) => [
 
 const commands = (await linuxBwrap.available()).ok
 
+it.live("a file tool can replace a file when its retained version and smaller contents fit", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const original = "Original synthetic text.\n".repeat(300)
+    const replacement = "Rewritten synthetic text.\n".repeat(50)
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const messages = (request.body as unknown as Body).messages
+          if (!messages.some((message) => message.content?.includes("REPLACEMENT TASK")))
+            return sse(res, completionChunks(["Ready."], {}))
+          const done = messages.filter((message) => message.role === "tool").length
+          if (done === 0) return sse(res, call("read_file", { path: "plan.md" }, "read-plan"))
+          if (done === 1) return sse(res, call("write_file", { path: "plan.md", content: replacement }, "write-plan"))
+          return sse(res, completionChunks(["Done."], {}))
+        })
+      ),
+      (provider) => Effect.promise(() => provider.close())
+    )
+    const api = yield* client()
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: { context: 100_000 }
+    })
+    const me = yield* api.Whoami()
+    const files = yield* WorkshopFiles
+    yield* files.folderAt(me.id, "/files")
+    const plan = join(config.dataDir, "files", me.id, "plan.md")
+    yield* Effect.promise(() => writeFile(plan, original))
+    const baseline = yield* api.GetFilesUsage({ fresh: true })
+    yield* api.SetFilesQuota({ userId: me.id, quotaBytes: baseline.usedBytes + replacement.length + 100 })
+    const chat = yield* api.CreateWorkshop({ title: "Replacement quota" })
+    const events: Array<ChatEvent> = []
+    yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+      Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+      Effect.forkScoped
+    )
+    yield* eventually(() => events.length > 0)
+    const sent = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "REPLACEMENT TASK"
+      })
+    )
+    const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+    yield* eventually(() => finished(events, reply.entry.version.id) !== undefined)
+    assert.strictEqual(yield* Effect.promise(() => readFile(plan, "utf8")), replacement)
+    const usage = yield* api.GetFilesUsage({ fresh: true })
+    assert.strictEqual(usage.versionsBytes, original.length)
+    assert.isFalse(usage.over)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
 it.live(
   "writes, reads, edits and runs a command in the account's files, with effects and Undo",
   () => {
@@ -62,7 +118,8 @@ it.live(
               ["bash", { command: "cd notes && cat plan.md && echo made > made.txt && wc -l < plan.md" }],
               ["bash", { command: "pwd" }]
             ] as Array<[string, unknown]>)
-          : [])
+          : []),
+        ["write_file", { path: "/files/notes/scratch.md", content: "A separate scratch file." }]
       ]
       const mock = yield* Effect.acquireRelease(
         Effect.promise(() =>
@@ -142,15 +199,15 @@ it.live(
       // Newest first.
       const kinds = effects.map((e) => e.kind)
       assert.deepStrictEqual(
-        kinds.filter((k) => k.startsWith("file.")),
+        effects.filter((e) => e.kind.startsWith("file.") && e.targetId === "/files/notes/plan.md").map((e) => e.kind),
         ["file.write", "file.edit", "file.create"]
       )
       if (commands) assert.strictEqual(kinds.filter((k) => k === "shell.run").length, 2)
       const shell = effects.find((e) => e.kind === "shell.run")
       if (shell) assert.isNull(shell.undo)
       // Undo newest first: the overwrite, then the edit, then the creation.
-      const undo = (kind: string) => {
-        const effect = effects.find((e) => e.kind === kind)!
+      const undo = (kind: string, target = "/files/notes/plan.md") => {
+        const effect = effects.find((e) => e.kind === kind && e.targetId === target)!
         return api.UndoRolloutEffect({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq })
       }
       // Undo never writes through a link swapped in after the change: not for the file, and not
@@ -179,11 +236,12 @@ it.live(
       // The edit can't be undone before the overwrite that came after it: the file changed since.
       const early = yield* Effect.exit(undo("file.edit"))
       assert.isTrue(early._tag === "Failure")
+      const { quota } = yield* WorkshopFiles
+      const beforeOverwrite = yield* quota.measure(me.id)
       yield* undo("file.write")
-      assert.strictEqual(
-        yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")),
-        "Chapter one\nThe lighthouse keeper climbs the stairs.\n"
-      )
+      const edited = "Chapter one\nThe lighthouse keeper climbs the stairs.\n"
+      assert.strictEqual((yield* quota.usage(me.id)).usedBytes, beforeOverwrite.usedBytes + Buffer.byteLength(edited))
+      assert.strictEqual(yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")), edited)
       yield* undo("file.edit")
       assert.strictEqual(
         yield* Effect.promise(() => readFile(join(root, "notes/plan.md"), "utf8")),
@@ -192,6 +250,10 @@ it.live(
       const undone = yield* undo("file.create")
       assert.isNotNull(undone.undoneAt)
       assert.isFalse(existsSync(join(root, "notes/plan.md")))
+      const beforeCreationUndo = yield* quota.measure(me.id)
+      yield* undo("file.create", "/files/notes/scratch.md")
+      assert.isFalse(existsSync(join(root, "notes/scratch.md")))
+      assert.strictEqual((yield* quota.usage(me.id)).usedBytes, beforeCreationUndo.usedBytes)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   120_000
