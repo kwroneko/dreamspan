@@ -342,14 +342,19 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const check = (userId: string, adding: number, what: string): Effect.Effect<Usage, QuotaExceeded> =>
     Effect.gen(function* () {
       let now = yield* usage(userId)
-      // A walk that stopped at its limits counted only part of the files: what it didn't reach
-      // could hold any amount (millions of empty files first, large ones after), so it isn't room.
       if (!now.partial && now.usedBytes + adding <= now.quotaBytes) return now
-      const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
-      if (trimmed > 0 || now.partial || Date.now() - now.measuredAt > 60_000) {
-        yield* measure(userId)
-        // With what landed while it walked, which its figure doesn't hold.
+      if (now.partial || Date.now() - now.measuredAt > 60_000) {
+        yield* measure(userId, true)
         now = yield* usage(userId)
+      }
+      // An incomplete walk can justify pressure retention only from bytes it actually saw.
+      const counted = now.partial ? (usages.get(userId)?.usedBytes ?? 0) - total(frees.get(userId)) : now.usedBytes
+      if (counted + adding > now.quotaBytes) {
+        const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
+        if (trimmed > 0) {
+          yield* measure(userId, true)
+          now = yield* usage(userId)
+        }
       }
       if (now.partial) return yield* Effect.fail(new QuotaExceeded(PARTIAL_TEXT(what)))
       if (now.usedBytes + adding <= now.quotaBytes) return now

@@ -52,18 +52,26 @@ describe("a walk that stops at its limits", () => {
         await mkdir(join(root, "files"), { recursive: true })
         for (let i = 0; i < 20; i++) await writeFile(join(root, "files", `f${i}`), "")
       })
+      let prunes = 0
       const quota = makeFilesQuota({
         reader: {
           GetAppSetting: () => Effect.succeed(null),
           FileVersionBytes: () => Effect.succeed(0)
         } as never,
-        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, attachments: 0, media: 0 }) } as never,
+        writer: {
+          PruneFileVersions: () =>
+            Effect.sync(() => {
+              prunes++
+              return { versions: 0, attachments: 0, media: 0 }
+            })
+        } as never,
         folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
         defaultBytes: 10 * 2 ** 30,
         walkMaxEntries: 5
       })
       const refused = yield* Effect.exit(quota.check("u", 1, "write files"))
       assert.strictEqual(refused._tag, "Failure")
+      assert.strictEqual(prunes, 0)
       assert.match(String(yield* quota.afterCommand("u")), /couldn't be fully counted/)
     })
   )
