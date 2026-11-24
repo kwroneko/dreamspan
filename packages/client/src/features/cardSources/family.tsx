@@ -37,8 +37,7 @@ const detailsOf = (item: RemoteRelative) =>
 
 function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: string }) {
   const params = { sourceId, remoteId: item.remoteId }
-  const actionSize = "h-8 px-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
-  const actionClass = `${buttonClass("ghost")} ${actionSize}`
+  const actionClass = `${buttonClass("secondary")} h-8 px-2 pointer-coarse:h-11 pointer-coarse:min-w-11`
   return (
     <li data-family-card={item.remoteId} className="flex min-w-0 items-center gap-3 py-2">
       <Avatar
@@ -70,7 +69,7 @@ function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: strin
             <Link
               to="/library/$refId"
               params={{ refId: remoteEntityId(sourceId, item.remoteId) }}
-              className={`${buttonClass()} ${actionSize}`}
+              className={actionClass}
             >
               Open in editor
             </Link>

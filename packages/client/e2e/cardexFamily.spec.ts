@@ -110,11 +110,28 @@ for (const [width, height] of [
           const from = family.locator(`[data-family-card="${parent}"]`)
           await expect(from).toContainText("Forked from", { timeout: 30_000 })
           await expect(from.locator("[data-family-held]")).toHaveText("Yours")
-          await expect(from.getByRole("link", { name: "Open yours", exact: true })).toHaveAttribute(
-            "href",
-            `/cards/${added.entityId}`
-          )
-          await expect(family.locator("[data-family-card]").filter({ hasText: "Earlier listing" })).toHaveCount(1)
+          const editor = from.getByRole("link", { name: "Open in editor", exact: true })
+          const yours = from.getByRole("link", { name: "Open yours", exact: true })
+          await expect(yours).toHaveAttribute("href", `/cards/${added.entityId}`)
+          const earlier = family.locator("[data-family-card]").filter({ hasText: "Earlier listing" })
+          await expect(earlier).toHaveCount(1)
+          const chat = earlier.getByRole("link", { name: "Chat", exact: true })
+          const tooltip = page.locator('[data-layout-overlay="Tooltip floats above the page"][data-open]')
+          for (const [action, hint] of [
+            [editor, /^Opens your copy of .+ in the editor\.$/],
+            [yours, /^Opens your .+ character page\.$/],
+            [chat, /^Opens a new chat with .+ when you send\.$/]
+          ] as const) {
+            await expect(action).toHaveCSS("border-top-width", "1px")
+            if (width === 390) await expect(action).toHaveCSS("height", "44px")
+            else {
+              const bounds = await action.boundingBox()
+              await action.hover()
+              await expect(tooltip).toHaveText(hint)
+              await expect(tooltip).toBeVisible()
+              expect(await action.boundingBox()).toEqual(bounds)
+            }
+          }
           await expect(family.getByRole("link", { name: /^(View(?: beside)?|Inspect)$/ })).toHaveCount(0)
           expect(await name.boundingBox()).toEqual(initial)
           await page.mouse.move(0, 0)
@@ -124,7 +141,7 @@ for (const [width, height] of [
           await listingTab.click()
           await expect(listingTab).toHaveAttribute("aria-selected", "true")
           await familyTab.click()
-          await from.getByRole("link", { name: "Open in editor", exact: true }).click()
+          await editor.click()
           await expect(page).toHaveURL(new RegExp(`/library/${added.refId}(?:\\?|$)`))
 
           // The library card's Metadata offers the same editor destinations.
