@@ -17,7 +17,7 @@
 // a plugin can replace or remove either.
 import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
 import { editableThinking, thinkingInSections } from "@dreamspan/shared/replySections.ts"
-import { useCallback, useState, useSyncExternalStore } from "react"
+import { useCallback, useRef, useState, useSyncExternalStore } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -95,42 +95,46 @@ export function ThinkingEditor({
   })
   const chatModel = useSyncExternalStore(session.subscribe, () => session.snapshot().cast?.model ?? undefined)
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const base = editableThinking(version)
 
   const save = async () => {
-    if (busy) return
+    if (saving.current) return
     const entry = entryOf(session, version)
     if (!entry) return setError("This swipe isn't shown any more.")
+    saving.current = true
     setBusy(true)
     setError(null)
-    // Its revision must be fresh: another tab may have changed the version since it was read.
-    const listed = await session.listVersions(entry.slotId)
-    const source = listed.ok ? listed.value.find((candidate) => candidate.id === version.id) : undefined
-    const thought = await editor.ready()
-    if (source === undefined) {
+    try {
+      // Its revision must be fresh: another tab may have changed the version since it was read.
+      const listed = await session.listVersions(entry.slotId)
+      const source = listed.ok ? listed.value.find((candidate) => candidate.id === version.id) : undefined
+      const thought = await editor.ready()
+      if (source === undefined) {
+        return setError(listed.ok ? "This swipe isn't there any more." : listed.error.message)
+      }
+      // Unchanged: nothing to save, no version made.
+      if (thought.text === editableThinking(source)) {
+        const ended = await editor.discard()
+        if (!ended.ok) return setError(ended.error.message)
+        return session.closeEditor(editor)
+      }
+      const outcome = await session.edit({ ...entry, version: source }, undefined, null, undefined, {
+        text: thought.text,
+        draft: thought.draft
+      })
+      if (!outcome.ok) return setError(outcome.error.message)
+      if (!editor.committed(thought)) return
+      if (thought.draft === null) await editor.discard()
+      session.closeEditor(editor)
+    } finally {
+      saving.current = false
       setBusy(false)
-      return setError(listed.ok ? "This swipe isn't there any more." : listed.error.message)
     }
-    // Unchanged: nothing to save, no version made.
-    if (thought.text === editableThinking(source)) {
-      const ended = await editor.discard()
-      setBusy(false)
-      if (!ended.ok) return setError(ended.error.message)
-      return session.closeEditor(editor)
-    }
-    const outcome = await session.edit({ ...entry, version: source }, undefined, null, undefined, {
-      text: thought.text,
-      draft: thought.draft
-    })
-    setBusy(false)
-    if (!outcome.ok) return setError(outcome.error.message)
-    // Text typed while it was being saved stays in the editor, which stays open.
-    if (!editor.committed(thought)) return
-    if (thought.draft === null) await editor.discard()
-    session.closeEditor(editor)
   }
   const cancel = async () => {
+    if (saving.current) return
     // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
     const outcome = await editor.discard()
     if (!outcome.ok) return setError(outcome.error.message)
@@ -139,7 +143,9 @@ export function ThinkingEditor({
   // Ctrl+Enter and Escape save and cancel this editor only, not a message edit around it.
   const keys = editKeys(
     session,
+    // eslint-disable-next-line react-hooks/refs -- editKeys calls these only from keyboard events
     () => void save(),
+    // eslint-disable-next-line react-hooks/refs -- editKeys calls these only from keyboard events
     () => void cancel()
   )
 
@@ -166,6 +172,7 @@ export function ThinkingEditor({
             caretTop: opening.caret?.top,
             quietMarkers: true,
             rows: 3,
+            readOnly: busy,
             // The strip inside the box, as a note's or a card field's (ui/FieldFrame.tsx): its
             // token count at the start, its buttons over the box's lower right corner.
             status: (
@@ -180,13 +187,17 @@ export function ThinkingEditor({
                   label="Delete thinking"
                   hint="Empties the box: saving then takes the thinking off this message."
                   className={chromeButton}
-                  onClick={() => editor.setText("")}
+                  disabled={busy}
+                  onClick={() => {
+                    if (!saving.current) editor.setText("")
+                  }}
                 />
                 <IconButton
                   icon="close"
                   label="Cancel"
                   hint="Closes the thinking editor without saving (Escape)."
                   className={chromeButton}
+                  disabled={busy}
                   onClick={() => void cancel()}
                 />
                 <IconButton
@@ -199,7 +210,9 @@ export function ThinkingEditor({
                 />
               </>
             ),
-            onChange: (value) => editor.setText(value)
+            onChange: (value) => {
+              if (!saving.current) editor.setText(value)
+            }
           }}
         />
       )}
