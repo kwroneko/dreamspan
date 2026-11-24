@@ -176,6 +176,11 @@ const sourceTarget = (
   return { to: "library", ref, search: {}, hint: "Opens this context source." }
 }
 
+/** A box whose text isn't its source's text verbatim: a transform changed it after assembly. */
+const CHANGED = "(changed before sending)"
+const CHANGED_HINT =
+  "This text was changed after the prompt was assembled, for example by a regex script or prompt post-processing."
+
 /** What the source is, where it's from: the inspector's own words, never prompt text. */
 function SourceTitle({
   source,
@@ -191,7 +196,6 @@ function SourceTitle({
     <>
       {source.label}
       {source.version !== undefined && `, swipe ${source.version}`}
-      {rewritten && " (rewritten)"}
     </>
   )
   const target = sourceTarget(source, chatId, viewed)
@@ -222,6 +226,16 @@ function SourceTitle({
               </Link>
             )}
           </Tooltip>
+        )}
+        {rewritten && (
+          <>
+            {" "}
+            <Tooltip label={CHANGED_HINT}>
+              <span tabIndex={0} className="font-normal text-muted">
+                {CHANGED}
+              </span>
+            </Tooltip>
+          </>
         )}
       </span>
       {source.summary?.stale && <span className="text-warning">Stale when this reply was generated.</span>}
@@ -255,13 +269,13 @@ function Box({
   chatId: ChatId
   children: ReactNode
   group?: boolean
-  /** Its text is where the sources' text was, rewritten after assembly. */
+  /** Its text is where the sources' text was, changed after assembly. */
   rewritten?: boolean
 }) {
   return (
     <section
       aria-label={
-        sources.map((source) => (rewritten ? `${source.label} (rewritten)` : source.label)).join(", ") ||
+        sources.map((source) => (rewritten ? `${source.label} ${CHANGED}` : source.label)).join(", ") ||
         "No recorded source"
       }
       className="overflow-hidden rounded-md border border-border"

@@ -889,9 +889,9 @@ test("a namespaced provenance source renders its title and library link", async 
 })
 
 // A provider transform rewrote a piece after assembly: its text keeps a box naming its source,
-// marked rewritten, rather than reading as the assembler's own text (inv A1). The worker
+// marked "changed before sending", rather than reading as the assembler's own text (inv A1). The worker
 // integration test (`inspectorCapture.test.ts`) covers locating it; this pins the UI.
-test("a rewritten piece shows in its source's box, labelled rewritten", async ({ page }) => {
+test("a rewritten piece shows in its source's box, labelled changed before sending", async ({ page }) => {
   const [rows] = await Effect.runPromise(
     fixtureSql(
       server().dataDir,
@@ -942,9 +942,14 @@ test("a rewritten piece shows in its source's box, labelled rewritten", async ({
         await page.emulateMedia({ colorScheme: theme })
         await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
         const messages = page.getByRole("region", { name: "Messages" })
-        const box = messages.getByRole("region", { name: "Card “Mira”: description (rewritten)" })
+        const box = messages.getByRole("region", { name: "Card “Mira”: description (changed before sending)" })
         await expect(box.getByText(after, { exact: true })).toBeVisible()
-        await expect(box.getByRole("link", { name: "Card “Mira”: description (rewritten)" })).toBeVisible()
+        await expect(box.getByRole("link", { name: "Card “Mira”: description", exact: true })).toBeVisible()
+        // The mark says what happened, and its hover says how.
+        const mark = box.getByText("(changed before sending)", { exact: true })
+        await mark.hover()
+        await expect(page.getByText("This text was changed after the prompt was assembled", { exact: false })).toBeVisible()
+        await page.mouse.move(0, 0)
         await expect(messages.getByText("Added by the assembler").filter({ hasText: after })).toHaveCount(0)
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
         await box.scrollIntoViewIfNeeded()

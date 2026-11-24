@@ -468,4 +468,42 @@ describe("a chat not sent yet", () => {
       assert.isBelow(Date.now() - started, 10_000)
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
+
+  // Owner, 2026-11-24: an imported card's greeting, unchanged, was boxed "rewritten" in the
+  // first request. Its CRLF line breaks go out as LF; that isn't a change to the text.
+  it.live("finds an unchanged CRLF greeting with macros in its message, not marked changed", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const { tobin } = yield* setup(api, mock.url)
+      const me = yield* api.Whoami()
+      const card = yield* (yield* Writer).CreateEntity({
+        userId: me.id as UserId,
+        kind: "card",
+        label: "Ilse",
+        subtitle: "",
+        doc: cardDoc("Ilse", {
+          description: "{{char}} keeps the lighthouse.",
+          first_mes: '*{{char}} looks up from the lamp.* "You\'re late, {{user}}."\r\n\r\n*She sets down the oil can.* "Sit."'
+        }) as never,
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const ilse = card.entityId as EntityId
+      const preview = yield* api.PreviewChat({
+        cards: [ilse],
+        persona: tobin,
+        greeting: null,
+        greeters: [{ entityId: ilse, greeting: 0 }],
+        first: { _tag: "Generate", speakerEntityId: ilse, direction: "" }
+      })
+      const message = preview.request!.messages.find((m) => m.role === "assistant")!
+      assert.strictEqual(
+        message.content,
+        '*Ilse looks up from the lamp.* "You\'re late, Tobin."\n\n*She sets down the oil can.* "Sit."'
+      )
+      assert.deepStrictEqual(message.parts, [{ start: 0, end: message.content.length, source: 0 }])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 })

@@ -69,7 +69,11 @@ export const locate = (
     const unlocated: Array<PartNode> = []
     let cursor = from
     for (const node of nodes) {
-      const { text } = node
+      // A message goes out without carriage returns (ST's setOpenAIMessages) while its piece
+      // keeps the text as stored, CRLF from an imported card's greeting say: that removal
+      // isn't a rewrite, so a piece not there as recorded is searched without them.
+      const text =
+        node.text.includes("\r") && !content.includes(node.text) ? node.text.replace(/\r/g, "") : node.text
       if (text.trim() === "") continue
       let at = content.indexOf(text, cursor)
       if (at === -1 || !free(at, at + text.length)) {
