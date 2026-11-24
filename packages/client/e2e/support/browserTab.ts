@@ -6,7 +6,8 @@ import { expect, type Page } from "@playwright/test"
 
 /**
  * Runs `click`, waits for the browser tab it opens next to `page`, closes that tab and returns
- * the address it had loaded. A test then opens that address itself to check what the tab shows.
+ * the first address it loaded (before the app could rewrite it). A test then opens that address
+ * itself to check what the tab shows.
  */
 export const urlOpenedInNewTab = async (page: Page, click: () => Promise<unknown>): Promise<string> => {
   const context = page.context()
@@ -15,19 +16,26 @@ export const urlOpenedInNewTab = async (page: Page, click: () => Promise<unknown
   await own.detach()
   const cdp = await context.browser()!.newBrowserCDPSession()
   try {
-    const tabs = async () =>
-      (await cdp.send("Target.getTargets")).targetInfos.filter(
-        (t) => t.type === "page" && t.browserContextId === targetInfo.browserContextId
-      )
-    const before = new Set((await tabs()).map((t) => t.targetId))
-    await click()
+    const known = new Set<string>()
     let opened: { targetId: string; url: string } | undefined
-    await expect
-      .poll(async () => {
-        opened = (await tabs()).find((t) => !before.has(t.targetId) && t.url !== "" && t.url !== "about:blank")
-        return opened !== undefined
-      }, "a new browser tab opens")
-      .toBe(true)
+    let armed = false
+    const seen = ({
+      targetInfo: t
+    }: {
+      targetInfo: { targetId: string; type: string; url: string; browserContextId?: string }
+    }) => {
+      if (t.type !== "page" || t.browserContextId !== targetInfo.browserContextId) return
+      if (!armed) return void known.add(t.targetId)
+      if (known.has(t.targetId) || opened || t.url === "" || t.url === "about:blank") return
+      opened = { targetId: t.targetId, url: t.url }
+    }
+    cdp.on("Target.targetCreated", seen)
+    cdp.on("Target.targetInfoChanged", seen)
+    // Reports every existing tab first, as created.
+    await cdp.send("Target.setDiscoverTargets", { discover: true })
+    armed = true
+    await click()
+    await expect.poll(() => opened !== undefined, "a new browser tab opens").toBe(true)
     await cdp.send("Target.closeTarget", { targetId: opened!.targetId })
     return opened!.url
   } finally {

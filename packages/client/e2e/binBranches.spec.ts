@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { urlOpenedInNewTab } from "./support/browserTab.ts"
 
 const server = serverPerFile({ ...withAdmin, DB_WORKERS: "bundle" })
 type Api = Parameters<Parameters<typeof asUser>[3]>[0]
@@ -107,19 +108,15 @@ for (const width of [1440, 390]) {
     // A new tab loads the whole app cold, which took over 10 s on a loaded host: it gets 30.
     const loading = { timeout: 30_000 }
     await recordFlashes(context)
-    const opened = context.waitForEvent("page")
-    await sideLink.click()
-    const tab = await opened
-    await tab.waitForLoadState()
+    const tab = await context.newPage()
+    await tab.goto(await urlOpenedInNewTab(page, () => sideLink.click()))
     const article = tab.locator(`article[data-slot="${shared}"]`)
     await expect(article).toBeVisible(loading)
     await expectFlashedThenUnmarked(tab, article)
     await expect(tab.getByTestId("messages").getByText("Down the side road")).toBeVisible()
     await tab.close()
-    const above = context.waitForEvent("page")
-    await firstEntry.getByRole("link").click()
-    const firstTab = await above
-    await firstTab.waitForLoadState()
+    const firstTab = await context.newPage()
+    await firstTab.goto(await urlOpenedInNewTab(page, () => firstEntry.getByRole("link").click()))
     const rootArticle = firstTab.locator(`article[data-slot="${root}"]`)
     await expect(rootArticle).toBeVisible(loading)
     await expectFlashedThenUnmarked(firstTab, rootArticle)
