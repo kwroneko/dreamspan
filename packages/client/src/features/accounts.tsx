@@ -136,7 +136,7 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
     })
   }
   return (
-    <Dialog open onOpenChange={(open) => !open && close()} title="New user">
+    <Dialog open onOpenChange={(open) => !open && close()} title="New user" placement="top-on-phone">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="Handle" about="The sign-in name: letters, digits, '.', '_' and '-'.">
           <Input
