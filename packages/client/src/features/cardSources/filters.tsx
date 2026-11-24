@@ -642,7 +642,7 @@ const summaryOf = (browse: SourceBrowse, panel: Panel): string => {
       return value && value !== "both" ? labelOf(value) : "All kinds"
     }
     case "NSFW": {
-      const value = text(first.id) || caps.ratings?.default || "include"
+      const value = (browse.query?.filters ?? filters)[first.id] ?? caps.ratings?.default ?? "include"
       return value === "exclude" ? "NSFW hidden" : value === "only" ? "NSFW only" : "NSFW included"
     }
     case "Tokens": {
@@ -845,9 +845,9 @@ function ChoicePanel({
   browse: SourceBrowse
 }) {
   const id = useId()
-  const value = filters[filter.id]
   const first = filter.options[0]?.value ?? ""
   const ratings = browse.caps?.ratings
+  const value = (ratings?.filterId === filter.id ? (browse.query?.filters ?? filters) : filters)[filter.id]
   const current =
     typeof value === "string" ? value : ratings?.filterId === filter.id && ratings.default ? ratings.default : first
   return (

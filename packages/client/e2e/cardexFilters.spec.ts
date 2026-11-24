@@ -20,6 +20,34 @@ const freePort = () =>
     })
   })
 
+test("the NSFW controls show the account rating in a fresh tab", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url).href
+    await page.goto(url)
+    const main = page.getByRole("main")
+    await expect(main.locator("[data-filter-panels]")).toBeVisible()
+    const panel = await openPanel(page, main, "NSFW")
+    await panel.getByRole("radio", { name: "Only NSFW", exact: true }).click()
+    await closePanel(page, "NSFW")
+    await expect.poll(() => new URL(page.url()).searchParams.has("sf")).toBe(true)
+    await expect(page.locator("[data-source-chip]").filter({ hasText: "Only NSFW" })).toBeVisible()
+
+    const fresh = await page.context().newPage()
+    await fresh.setViewportSize({ width: 1440, height: 900 })
+    await fresh.goto(url)
+    const freshMain = fresh.getByRole("main")
+    await expect(freshMain.locator("[data-source-chip]").filter({ hasText: "Only NSFW" })).toBeVisible()
+    await expect(await panelSummary(fresh, freshMain, "NSFW")).toHaveAccessibleName("NSFW only")
+    const freshPanel = await openPanel(fresh, freshMain, "NSFW")
+    await expect(freshPanel.getByRole("radio", { name: "Only NSFW", exact: true })).toBeChecked()
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)
