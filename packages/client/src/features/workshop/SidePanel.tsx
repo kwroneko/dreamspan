@@ -169,8 +169,11 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       setCreated({ chat, moving: true })
       setFocusMade(chat.id)
       setWanted(chat.id, true)
+      // Read again, so the list has it and keeps the one made before it (only the newest is
+      // shown ahead of the list).
+      refresh()
     },
-    [setWanted]
+    [setWanted, refresh]
   )
 
   if (AsyncResult.isFailure(result) && list === null)
