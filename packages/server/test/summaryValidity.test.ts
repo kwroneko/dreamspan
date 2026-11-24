@@ -4,13 +4,12 @@
 // tip), y under b (Y's tip). Main is the chat's first fork (its id is the chat's); X and Y
 // were made from it at its sequence number 5.
 import { join } from "node:path"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { storeSummaries } from "../src/db/forkSummaries.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import {
   FORK_SUMMARY_FORMAT,
   settleSummaries,
@@ -24,7 +23,7 @@ const FORKS = ["main", "X", "Y"] as const
 
 const setup = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+  yield* migrate(migrationDefinitions)
   yield* trackSummaryTouches(sql)
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   for (const chat of ["main", "other"])

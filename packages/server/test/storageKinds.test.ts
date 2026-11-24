@@ -7,15 +7,14 @@ import * as Database from "../src/db/Database.ts"
 import { StateModules } from "../src/db/stateModules.ts"
 import { storageKinds, installStorageKindValidation } from "../src/db/storageKinds.ts"
 import { writerConnection } from "../src/db/connection.ts"
-import { migrations } from "../src/db/migrations.ts"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { transaction } from "../src/db/tx.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 it.effect("validates extensible draft targets on insert and update, with scoped replacement and disablement", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     yield* installStorageKindValidation
     yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES ('u','u','U','user',1)`
     const insertDraft = (kind: string, id = "d") =>

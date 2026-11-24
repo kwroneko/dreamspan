@@ -5,7 +5,6 @@
 // insertions, forks (lineage compaction included) and deletions run on the real schema, and
 // `pathPieces` must give each fork's list, positions and membership.
 import { join } from "node:path"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect } from "effect"
@@ -22,7 +21,7 @@ import {
   type SlotPlace
 } from "../src/db/displayPath.ts"
 import { insertFork, slotDeletedIn, writeInsert, writeOverride } from "../src/db/forkState.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import type { ForkRow } from "../src/db/rows.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -46,7 +45,7 @@ interface Model {
 
 const world = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+  yield* migrate(migrationDefinitions)
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   let chats = 0
 

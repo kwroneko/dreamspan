@@ -1,12 +1,11 @@
 import { join } from "node:path"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { assert, it } from "@effect/vitest"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { rolloutUsage } from "../src/db/inspectorReads.ts"
 import { layer, Reader } from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
@@ -16,7 +15,7 @@ import { testWorkers } from "./support/bundles.ts"
 it.effect("the inspector query searches the rollout index before ordering its attempts", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     const [text, params] = rolloutUsage(sql, "u" as UserId, "r").compile()
     const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params)
     assert.isTrue(
@@ -31,7 +30,7 @@ it.effect("a legacy version with a rollout but no snapshot has no Context link",
   return Effect.gen(function* () {
     yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+      yield* migrate(migrationDefinitions)
       yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES('u','u','u','admin',1)`
       yield* sql`INSERT INTO chats(id,owner_user_id,kind,status,created_at) VALUES('c','u','rp','active',1)`
       yield* sql`INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES('r','c','generation','completed','narrator','interactive',1,1)`

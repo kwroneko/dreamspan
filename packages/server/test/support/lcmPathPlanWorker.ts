@@ -1,18 +1,17 @@
 // Compile and execute the real LCM path reader against the complete synthetic schema.
 // The performance contract is an indexed override lookup, not a wall-clock budget.
 import { parentPort } from "node:worker_threads"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { writerConnection } from "../../src/db/connection.ts"
-import { migrations } from "../../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../../src/db/migrations.ts"
 import { lcmPath } from "../../src/db/lcmPath.ts"
 
 const result = await Effect.runPromise(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+    yield* migrate(migrationDefinitions)
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`INSERT INTO users(id,handle,display_name,role,created_at) VALUES ('u','synthetic','Synthetic','admin',1)`

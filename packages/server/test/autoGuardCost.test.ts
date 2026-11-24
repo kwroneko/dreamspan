@@ -1,13 +1,12 @@
 // Writer-only guard overhead on synthetic transactions; a rollback restores each sample.
 import { appendFileSync } from "node:fs"
 import { join } from "node:path"
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { claimAutoTurn, settleAutoRuns, trackAutoRuns } from "../src/db/autoGuard.ts"
 import { writerConnection } from "../src/db/connection.ts"
-import { migrations } from "../src/db/migrations.ts"
+import { migrate, migrationDefinitions } from "../src/db/migrations.ts"
 import { settleSummaries, trackSummaryTouches } from "../src/db/summaryValidity.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -18,7 +17,7 @@ it.live(
       for (const mode of ["baseline", "idle", "same-chat", "other-chat"] as const) {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+          yield* migrate(migrationDefinitions)
           yield* trackSummaryTouches(sql)
           if (mode !== "baseline") yield* trackAutoRuns(sql)
           yield* sql`INSERT INTO users (id,handle,display_name,role,created_at) VALUES ('u','u','U','admin',1)`
