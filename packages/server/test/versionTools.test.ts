@@ -8,12 +8,13 @@ import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newLorebookEntry } from "@dreamspan/shared/docs/lorebook.ts"
 import { newCardDoc, textField } from "@dreamspan/shared/editing.ts"
-import type { Doc, RefId } from "@dreamspan/shared/library.ts"
+import type { Doc, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import { unifiedDiff } from "@dreamspan/shared/unifiedDiff.ts"
 import { builtinSkills } from "../src/agent/skills.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
+import { findRevision } from "../src/agent/tools/versions.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
@@ -21,17 +22,22 @@ type Api = Effect.Success<ReturnType<typeof client>>
 
 const ORIGINAL = "Mara keeps the lighthouse.\nShe counts ships at night.\nShe writes to no one."
 
+const runningRollout = (dataDir: string, chatId: string, suffix = "") =>
+  Effect.as(
+    fixtureSql(dataDir, [
+      {
+        sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+        params: [`r-${chatId}${suffix}`, chatId]
+      }
+    ]),
+    `r-${chatId}${suffix}`
+  )
+
 const fixture = (dataDir: string, api: Api) =>
   Effect.gen(function* () {
     const user = yield* api.Whoami()
     const chat = yield* api.CreateWorkshop({})
-    const rolloutId = `r-${chat.id}`
-    yield* fixtureSql(dataDir, [
-      {
-        sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
-        params: [rolloutId, chat.id]
-      }
-    ])
+    const rolloutId = yield* runningRollout(dataDir, chat.id)
     const registry = yield* ExecutionRegistry
     const context: ToolContext = {
       userId: user.id,
@@ -47,9 +53,10 @@ const fixture = (dataDir: string, api: Api) =>
       viewers: null,
       cache: new Map()
     }
-    const call = (name: string, args: unknown, id: string, options?: Pick<ToolContext, "countTokens" | "window">) =>
+    type Options = Partial<Pick<ToolContext, "chatId" | "rolloutId" | "countTokens" | "window">>
+    const call = (name: string, args: unknown, id: string, options?: Options) =>
       toolForKind(registry, "workshop", name)!.execute({ ...context, ...options, toolCallId: id }, args as never)
-    const run = (name: string, args: unknown, id: string, options?: Pick<ToolContext, "countTokens" | "window">) =>
+    const run = (name: string, args: unknown, id: string, options?: Options) =>
       Effect.map(call(name, args, id, options), (out) => {
         assert.isUndefined(out.isError, out.text)
         return out.text
@@ -69,7 +76,7 @@ const fixture = (dataDir: string, api: Api) =>
     const doc = () => Effect.map(api.OpenEditor({ refId: card }), (s) => s.doc)
     const save = (refId: RefId, changes: Doc) =>
       Effect.gen(function* () {
-        const { ref, doc } = yield* api.OpenEditor({ refId })
+        const { ref, doc } = yield* context.reader.GetRef({ userId: user.id, refId })
         return yield* context.writer.EditRef({
           userId: user.id,
           refId,
@@ -137,6 +144,48 @@ describe("version tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("finds a revision by number or id beyond the twentieth history page", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const [template] = yield* f.revisions()
+      const { ref } = yield* api.OpenEditor({ refId: f.card })
+      const history = Array.from({ length: 10_001 }, (_, i) => ({
+        ...template!,
+        number: 10_001 - i,
+        id: `fixture-revision-${10_001 - i}` as RevisionId
+      }))
+      type RefHistory = ToolContext["reader"]["RefHistory"]
+      const readPage = ({ before, limit }: Parameters<RefHistory>[0]) => {
+        const start = before === undefined ? 0 : history.findIndex((row) => row.id === before) + 1
+        return Effect.succeed(history.slice(start, start + limit))
+      }
+      const context: ToolContext = {
+        ...f.context,
+        reader: { ...f.context.reader, RefHistory: readPage as RefHistory }
+      }
+      const first = history.at(-1)!
+      for (const target of ["1", first.id])
+        assert.deepStrictEqual(yield* findRevision(context, ref, target), { revision: first })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("includes the revision message on explicit and automatic pages", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* editDescription(f, "edit", 'A "quoted" message')
+      const args = { kind: "card", item: f.card, revision: "2" }
+      const summary = yield* f.run("read_revision", { ...args, view: "summary" }, "summary")
+      const fallback = yield* f.run("read_revision", args, "fallback", { window: 1 })
+      const field = yield* f.run("read_revision", { ...args, view: "field", field: "description" }, "field")
+      for (const page of [summary, fallback, field]) assert.include(page, 'message "A \\"quoted\\" message"')
+      assert.include(fallback, "Too long to read whole")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("diff two revisions as a unified diff, by field, and give a continuation cursor", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -162,6 +211,17 @@ describe("version tools", () => {
       assert.match(paged, /\[Continue with cursor=".*"\]/)
       const same = yield* f.run("diff_revisions", { kind: "card", item: f.card, from: "latest" }, "d5")
       assert.include(same, "No differences")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("treats the literal text (absent) as content", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* userEdit(api, f.card, "personality", "(absent)")
+      const diff = yield* f.run("diff_revisions", { kind: "card", item: f.card, from: "1" }, "literal")
+      assert.include(diff, "personality: Quiet. → (absent)")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -270,6 +330,189 @@ describe("version tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("keeps unapproved card skill bodies out of both conflict values and the replay", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      for (const visible of ["before", "changed", "now"]) {
+        yield* f.save(f.card, {
+          extensions: {
+            dreamspan: { skills: [{ name: "synthetic", instructions: `secret-${visible}` }] },
+            visible
+          }
+        })
+      }
+      const args = { kind: "card", item: f.card, revision: "3" }
+      const response = yield* f.run("revert_change", args, "conflict")
+      assert.notInclude(response, "secret-")
+      assert.deepStrictEqual(JSON.parse(response).conflicts, [
+        {
+          field: "extensions",
+          now: { dreamspan: {}, visible: "now" },
+          before_the_change: { dreamspan: {}, visible: "before" }
+        }
+      ])
+      assert.strictEqual(yield* f.run("revert_change", args, "conflict"), response)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("changes the shared card without marking another workshop's edit reverted", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* editDescription(f, "edit")
+      const other = yield* api.CreateWorkshop({})
+      const rolloutId = yield* runningRollout(config.dataDir, other.id)
+      yield* f.run("revert_change", { kind: "card", item: f.card, revision: "2" }, "revert", {
+        chatId: other.id,
+        rolloutId
+      })
+      assert.strictEqual((yield* f.doc()).description, ORIGINAL)
+      const [edit] = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+      assert.isUndefined(edit!.reversion)
+      const [revert] = yield* api.ListRolloutEffects({ chatId: other.id })
+      const [rows] = yield* fixtureSql(
+        config.dataDir,
+        [{ sql: "SELECT chat_id FROM change_reversals WHERE id = ?", params: [String(revert!.undo!.reversalId)] }],
+        { readOnly: true }
+      )
+      assert.deepStrictEqual(rows, [{ chat_id: other.id }])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("undoes an assistant revert while preserving typing and making the original reply revertible again", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* editDescription(f, "edit")
+      const rolloutId = yield* runningRollout(config.dataDir, f.chat.id, "-second")
+      yield* f.run("revert_change", { kind: "card", item: f.card, revision: "2" }, "revert", { rolloutId })
+      const before = yield* api.OpenEditor({ refId: f.card })
+      const draft = yield* api.SaveEditorDraft({
+        refId: f.card,
+        field: textField(["scenario"]),
+        content: "Still typing this scenario.",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: before.ref.headRevisionId
+      })
+      const key = { rolloutId, toolCallId: "revert", seq: 0 }
+      const first = yield* api.UndoRolloutEffect(key)
+      const repeated = yield* api.UndoRolloutEffect(key)
+      assert.strictEqual(first.undoneAt, repeated.undoneAt)
+      const after = yield* api.OpenEditor({ refId: f.card })
+      assert.include(String(after.doc.description), "gulls at dawn")
+      assert.deepStrictEqual(
+        after.drafts.find((row) => row.id === draft.id),
+        draft
+      )
+      const original = (yield* api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "edit")!
+      assert.deepStrictEqual(original.reversion?.fields, [])
+      const note = yield* f.context.reader.ChatReversalsSince({ userId: f.context.userId, chatId: f.chat.id })
+      assert.lengthOf(note.reversals, 1)
+      assert.strictEqual(note.reversals[0]!.action, "redo")
+      const reply = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.context.rolloutId })
+      assert.lengthOf(reply.undone, 1)
+      assert.strictEqual((yield* f.doc()).description, ORIGINAL)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("an already restored value produces no reversal record or turn note", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* editDescription(f, "edit")
+      yield* userEdit(api, f.card, "description", ORIGINAL)
+      const response = yield* f.run("revert_change", { kind: "card", item: f.card, revision: "2" }, "no-change")
+      assert.isFalse(JSON.parse(response).reverted)
+      assert.lengthOf(yield* f.revisions(), 3)
+      const [edit] = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+      assert.isUndefined(edit!.reversion)
+      const note = yield* f.context.reader.ChatReversalsSince({ userId: f.context.userId, chatId: f.chat.id })
+      assert.isEmpty(note.reversals)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("previews and records the saved change to an executable lorebook entry", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const book = yield* api.CreateLorebook({ label: "HTML lore" })
+      const old = { ...newLorebookEntry(1), content: "<b>Before</b>" }
+      const changed = { ...old, content: "<b>After</b>" }
+      yield* f.save(book.id, { entries: [old] })
+      yield* f.save(book.id, { entries: [changed] })
+      const args = { kind: "lorebook", item: book.id, revision: "3" }
+      const tool = toolForKind(f.registry, "workshop", "revert_change")!
+      const approval = yield* tool.describe!(f.context, args as never)
+      assert.deepInclude(approval.changes ?? [], { field: "entries[1].enabled", before: "true", after: "false" })
+      yield* f.run("revert_change", args, "revert")
+      const saved = yield* api.OpenEditor({ refId: book.id })
+      const [rows] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT before_json, after_json FROM change_reversals WHERE head_after = ?",
+            params: [saved.ref.headRevisionId]
+          }
+        ],
+        { readOnly: true }
+      )
+      const field = unitKey(["entries", "uid=1"])
+      assert.deepStrictEqual(JSON.parse(String(rows![0]!.before_json))[field], changed)
+      assert.deepStrictEqual(JSON.parse(String(rows![0]!.after_json))[field], { ...old, enabled: false })
+      assert.deepStrictEqual(saved.doc.entries, [{ ...old, enabled: false }])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("reverts a fork's inherited revision on the fork alone", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* editDescription(f, "edit")
+      const { id } = JSON.parse(yield* f.run("clone_card", { card: f.card, name: "Forked Mara" }, "fork")) as {
+        id: RefId
+      }
+      const sourceOnly = yield* f.save(f.card, { personality: "A later edit to the source" })
+      const missing = yield* f.context.writer
+        .AgentRevertRevision({
+          userId: f.context.userId,
+          rolloutId: f.context.rolloutId,
+          toolCallId: "off-line",
+          refId: id,
+          revisionId: sourceOnly.ref.headRevisionId
+        })
+        .pipe(Effect.flip)
+      assert.strictEqual(missing._tag, "NotFound")
+      const result = yield* f.run("revert_change", { kind: "card", item: id, revision: "2" }, "revert-fork")
+      assert.isTrue(JSON.parse(result).reverted)
+      assert.strictEqual((yield* api.OpenEditor({ refId: id })).doc.description, ORIGINAL)
+      assert.include(String((yield* f.doc()).description), "gulls at dawn")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses to revert to a document beyond the workshop byte limit", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* f.save(f.card, { description: "🪶".repeat(66_000) })
+      yield* f.save(f.card, { description: ORIGINAL })
+      const response = yield* f.call("revert_change", { kind: "card", item: f.card, revision: "3" }, "large")
+      assert.isTrue(response.isError)
+      assert.include(response.text, "262144 bytes")
+      assert.lengthOf(yield* f.revisions(), 3)
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("every write takes a message for its revision", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -303,6 +546,33 @@ describe("version tools", () => {
         "v9"
       )
       assert.isTrue(long.isError)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("workshop preset and lorebook restores save a normalized message or the default", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const preset = yield* api.CreatePreset({ label: "Old preset" })
+      const book = yield* api.CreateLorebook({ label: "Old lorebook" })
+      const old = yield* f.context.reader.GetRef({ userId: f.context.userId, refId: preset.id })
+      for (const [ref, changes] of [
+        [preset, { prefill: { ...(old.doc.prefill as Doc), assistant: "New prefill" } }],
+        [book, { description: "New lorebook details" }]
+      ] as const) {
+        const args = { kind: ref.kind, item: ref.id, revision: ref.headRevisionId }
+        const changed = yield* f.save(ref.id, changes)
+        assert.notStrictEqual(changed.ref.headRevisionId, ref.headRevisionId, ref.kind)
+        yield* f.run("restore_revision", { ...args, message: "  Back to\nthe original  " }, `restore-${ref.kind}`)
+        const history = () => api.ListRevisions({ refId: ref.id, limit: 1 })
+        const [latest] = yield* history()
+        assert.notStrictEqual(latest!.id, changed.ref.headRevisionId, ref.kind)
+        assert.strictEqual(latest!.message, "Back to the original", ref.kind)
+        yield* f.save(ref.id, changes)
+        yield* f.run("restore_revision", { ...args, message: "   " }, `default-${ref.kind}`)
+        assert.strictEqual((yield* history())[0]!.message, "Restored in the workshop", ref.kind)
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
