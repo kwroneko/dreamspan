@@ -144,6 +144,7 @@ const diffRevisions: RolloutTool<{
   readonly to?: string
   readonly fields?: ReadonlyArray<string>
   readonly max_tokens?: number
+  readonly cursor?: string
 }> = {
   source: import.meta.url,
   id: "diff_revisions",
@@ -153,14 +154,15 @@ const diffRevisions: RolloutTool<{
   effect: "read",
   capability: "library.read",
   description:
-    "Shows what changed in a card, preset or lorebook between two revisions (as git diff): from, and to (default: the saved item now; unsaved drafts aren't included), each a number from list_revisions, an id, or latest. Prose comes as a unified diff (- taken out, + put in), lorebook entries and preset prompts by their uid or identifier, settings as before → after. fields limits it to some fields. Long diffs end with the fields left to ask for.",
+    "Shows what changed in a card, preset or lorebook between two revisions (as git diff): from, and to (default: the saved item now; unsaved drafts aren't included), each a number from list_revisions, an id, or latest. Prose comes as a unified diff (- taken out, + put in), lorebook entries and preset prompts by their uid or identifier, settings as before → after. fields limits it to some fields. If the result ends with a cursor, repeat the request with that cursor and the same fields to read on.",
   parameters: Type.Object({
     kind: KINDS,
     item,
     from: revisionArg("The earlier revision: number, id or latest."),
     to: Type.Optional(revisionArg("The later revision; the saved item now when left out.")),
     fields: Type.Optional(Type.Array(Type.String())),
-    max_tokens: Type.Optional(Type.Integer({ minimum: 200, maximum: 8000 }))
+    max_tokens: Type.Optional(Type.Integer({ minimum: 200, maximum: 8000 })),
+    cursor: Type.Optional(Type.String({ maxLength: 224, description: "The cursor returned on the previous page." }))
   }),
   summarize: (args) => `${args.item}: ${args.from} → ${args.to ?? "now"}`,
   execute: (ctx, args) =>
@@ -168,45 +170,54 @@ const diffRevisions: RolloutTool<{
       const resolved = yield* resolveLibrary(ctx, args.kind, args.item)
       if ("error" in resolved) return { text: resolved.error, isError: true }
       const ref = resolved.ref
-      const from = yield* findRevision(ctx, ref, args.from)
+      const invalidCursor = { text: "Use the cursor from the previous diff page with the same fields.", isError: true }
+      const cursor = /^([\w-]{1,100}):([\w-]{1,100}):(\d{1,9}):(\d{1,9})$/.exec(args.cursor ?? "")
+      if (args.cursor !== undefined && cursor === null) return invalidCursor
+      const from = yield* findRevision(ctx, ref, cursor?.[1] ?? args.from)
       if ("error" in from) return { text: from.error, isError: true }
-      const to = args.to === undefined ? null : yield* findRevision(ctx, ref, args.to)
+      const wantedTo = cursor?.[2] ?? args.to
+      const to = wantedTo === undefined ? null : yield* findRevision(ctx, ref, wantedTo)
       if (to !== null && "error" in to) return { text: to.error, isError: true }
+      const toId = to?.revision.id ?? ref.headRevisionId
       const read = (revisionId: RevisionId) =>
         ctx.reader.GetRevisionDoc({ userId: ctx.userId, refId: ref.id, revisionId })
       const before = visibleDoc(args.kind, yield* read(from.revision.id))
-      const after = visibleDoc(args.kind, yield* read(to === null ? ref.headRevisionId : to.revision.id))
+      const after = visibleDoc(args.kind, yield* read(toId))
       const changes = documentDiff(before, after).filter(
         (c) => args.fields === undefined || args.fields.includes(topField(c.field))
       )
       const head = `${args.kind} "${ref.label}" (id ${ref.id}): revision ${from.revision.number ?? from.revision.id} → ${to === null ? "now" : (to.revision.number ?? to.revision.id)}`
+      let at = Number(cursor?.[3] ?? 0)
+      let offset = Number(cursor?.[4] ?? 0)
+      if (cursor && at >= changes.length) return invalidCursor
       if (changes.length === 0) return { text: `${head}\nNo differences${args.fields ? " in those fields" : ""}.` }
       const budget = pageTokens(args.max_tokens)
       const counter = count(ctx)
       const shown: Array<string> = [head]
       let used = yield* counter(head)
-      let at = 0
       for (; at < changes.length; at++) {
-        const text = section(changes[at]!)
+        const current = section(changes[at]!)
+        if (offset >= current.length) return invalidCursor
+        const text = current.slice(offset)
         const cost = yield* counter(text)
         if (used + cost > budget) {
           // A first field too long for the page is cut, never left out.
-          if (at === 0) {
-            shown.push(
-              `${text.slice(0, Math.max(0, (budget - used) * 4))}\n[cut: ask for fewer fields or a larger max_tokens]`
-            )
-            at++
+          if (shown.length === 1) {
+            const size = Math.max(1, (budget - used) * 4)
+            shown.push(text.slice(0, size))
+            if (size < text.length) offset += size
+            else {
+              at++
+              offset = 0
+            }
           }
           break
         }
         shown.push(text)
         used += cost
+        offset = 0
       }
-      const left = [...new Set(changes.slice(at).map((c) => topField(c.field)))]
-      if (left.length > 0)
-        shown.push(
-          `[${left.length} more field${left.length === 1 ? "" : "s"}: diff_revisions with fields=${left.join(",")}]`
-        )
+      if (at < changes.length) shown.push(`[Continue with cursor="${from.revision.id}:${toId}:${at}:${offset}"]`)
       return { text: shown.join("\n\n") }
     }).pipe(Effect.catch(failRead))
 }

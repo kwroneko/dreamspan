@@ -124,7 +124,7 @@ describe("version tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("diff two revisions as a unified diff, by field, and say which fields are left", () => {
+  it.live("diff two revisions as a unified diff, by field, and give a continuation cursor", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
@@ -143,10 +143,10 @@ describe("version tools", () => {
         "d3"
       )
       assert.notInclude(only, "gulls")
-      // A page too small for both: the rest is named, to ask for.
+      // A page too small for all changes gives a cursor for the rest.
       yield* userEdit(api, f.card, "scenario", "Fog. ".repeat(400))
       const paged = yield* f.run("diff_revisions", { kind: "card", item: f.card, from: "1", max_tokens: 200 }, "d4")
-      assert.match(paged, /\[\d more fields?: diff_revisions with fields=/)
+      assert.match(paged, /\[Continue with cursor=".*"\]/)
       const same = yield* f.run("diff_revisions", { kind: "card", item: f.card, from: "latest" }, "d5")
       assert.include(same, "No differences")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
