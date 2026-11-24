@@ -15,6 +15,8 @@ interface Subscriber {
 const BATCH_MS = 16
 /** Batches a subscriber may fall behind by, about eight seconds of a busy chat, before it starts over. */
 const BACKLOG = 512
+/** The longest grace `held` is asked for: when each chat was last left is forgotten after this. */
+export const HELD_MAX_MS = 10 * 60_000
 
 /**
  * Queues a batch for a subscriber. One that has fallen a whole backlog behind (a stalled
@@ -80,8 +82,9 @@ export class ChatHub extends Context.Service<
     readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
     /**
      * Whether a tab may still have the chat open: someone is subscribed, or the last one left
-     * less than `graceMs` ago (or the server started less than that ago, as after a deploy,
-     * while tabs reconnect). A pending chat is swept only when nobody has it (db/pendingChats.ts).
+     * less than `graceMs` ago, at most HELD_MAX_MS (or the server started less than that ago, as
+     * after a deploy, while tabs reconnect). A pending chat is swept only when nobody has it
+     * (db/pendingChats.ts).
      */
     readonly held: (chatId: ChatId, graceMs: number) => boolean
   }
@@ -96,9 +99,19 @@ export class ChatHub extends Context.Service<
         const subscribers = new Map<ChatId, Set<Subscriber>>()
         const listeners = new Set<(chatId: ChatId, event?: ChatEvent) => void>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
-        // When each chat's last subscriber left, for `held`: kept a while, then forgotten.
+        // When each chat's last subscriber left, for `held`, oldest first: kept HELD_MAX_MS, then
+        // forgotten, so a long-running server holds only the chats left lately.
         const left = new Map<ChatId, number>()
         const startedAt = Date.now()
+        const leave = (chatId: ChatId) => {
+          const now = Date.now()
+          left.delete(chatId)
+          left.set(chatId, now)
+          for (const [id, at] of left) {
+            if (now - at < HELD_MAX_MS) break
+            left.delete(id)
+          }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined
 
         const flush = () => {
@@ -136,12 +149,9 @@ export class ChatHub extends Context.Service<
             }
             subscribers.delete(chatId)
           },
-          held: (chatId, graceMs) => {
-            if ((subscribers.get(chatId)?.size ?? 0) > 0) return true
-            const now = Date.now()
-            for (const [id, at] of left) if (now - at >= graceMs) left.delete(id)
-            return now - Math.max(startedAt, left.get(chatId) ?? 0) < graceMs
-          },
+          held: (chatId, graceMs) =>
+            (subscribers.get(chatId)?.size ?? 0) > 0 ||
+            Date.now() - Math.max(startedAt, left.get(chatId) ?? 0) < Math.min(graceMs, HELD_MAX_MS),
           listen: (listener) =>
             Effect.acquireRelease(
               Effect.sync(() => listeners.add(listener)),
@@ -165,7 +175,7 @@ export class ChatHub extends Context.Service<
                     if (set?.size === 0) {
                       subscribers.delete(chatId)
                       pending.delete(chatId)
-                      left.set(chatId, Date.now())
+                      leave(chatId)
                     }
                   })
               )
