@@ -677,3 +677,35 @@ test("a rename retried after a reload leaves a newer rename alone (rev-dd3 #9)",
   await page.waitForTimeout(2000)
   expect(await titleOf()).toBe("Beta")
 })
+
+test("a rename another tab's came before leaves the start card's title on the card (rev-dd4a #4)", async ({ page }) => {
+  await start(page)
+  // The rename never reaches the server on the first load.
+  let held = true
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (held && typeof data === "string" && data.includes('"RenameChat"')) return
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.goto(`${server().url}/chats`)
+  const card = page.getByRole("textbox", { name: "Title of the new chat", exact: true })
+  await card.fill("Alpha")
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect.poll(() => draftOf(page)).not.toBeNull()
+  const draft = draftOf(page)!
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(1000)
+  // Another tab names it meanwhile; then this one reloads, its rename still meant.
+  await admin((api) => api.RenameChat({ chatId: draft as never, name: "Beta" }))
+  held = false
+  await page.reload()
+  await expect(composer(page)).toBeEditable()
+  await page.waitForTimeout(2000)
+  expect((await admin((api) => api.GetChat({ chatId: draft as never }))).title).toBe("Beta")
+  // Alpha wasn't applied, so it's still the start card's.
+  await page.goto(`${server().url}/chats`)
+  await expect(card).toHaveValue("Alpha")
+})

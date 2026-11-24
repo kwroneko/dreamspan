@@ -26,6 +26,8 @@ import {
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@dreamspan/shared/chatApi.ts"
 import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
+import { EditRefused } from "@dreamspan/shared/editorApi.ts"
+import { renamedTitle } from "@dreamspan/shared/chatName.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
 import { hasMacroMarker } from "@dreamspan/shared/macros/expand.ts"
@@ -391,7 +393,13 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const [chat] = yield* writer.RenameChats({ userId: id, chats: [{ chatId, from: from ?? null }], name })
-        if (chat === undefined) return yield* reader.GetChat({ userId: id, chatId })
+        if (chat === undefined) {
+          // Left undone, its title no longer `from`: done already if it has the name (a retry of
+          // one applied), else another rename came first, which stays (rev-dd4a #4).
+          const current = yield* reader.GetChat({ userId: id, chatId })
+          if (current.title === renamedTitle(current.title, name)) return current
+          return yield* new EditRefused({ message: "The chat was renamed meanwhile." })
+        }
         hub.publish(chatId, { _tag: "Chat", chat })
         return chat
       }).pipe(internal("RenameChat")),

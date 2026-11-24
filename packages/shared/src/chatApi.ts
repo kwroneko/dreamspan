@@ -22,6 +22,7 @@ import {
 } from "./chat.ts"
 import { AutoRefused, LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
+import { EditRefused } from "./editorApi.ts"
 import {
   ObservedDeletion,
   Draft,
@@ -586,12 +587,13 @@ export class ChatApi extends RpcGroup.make(
    * the day ST started it. An empty name gives back the automatic one. Open tabs get `Chat`.
    * A chat of a group leaves it for a group of its own name (RenameGroup renames them all).
    * With `from`, only while its title is still that: a rename retried after another one is left
-   * undone (the chat comes back as it is).
+   * undone, `EditRefused` (rev-dd4a #4); one the title already has (a retry of one applied, its
+   * answer lost) comes back as done.
    */
   Rpc.make("RenameChat", {
     payload: { chatId: ChatId, name: ChatNameInput, from: Schema.optionalKey(Schema.String) },
     success: Chat,
-    error: Schema.Union([...Errors])
+    error: Schema.Union([...Errors, EditRefused])
   }),
   Rpc.make("GetChat", { payload: { chatId: ChatId }, success: Chat, error: Schema.Union([...Errors]) }),
   /**

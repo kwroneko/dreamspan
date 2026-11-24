@@ -304,10 +304,13 @@ export function TitledDraftChatPage({
     if (name === "") return void meantTitle(chat.id, null)
     meantTitle(chat.id, { name, from })
     void call((client) => client("RenameChat", { chatId: chat.id, name, from })).then((result) => {
-      if (!result.ok) return
+      // Not reached (offline, say): kept for a reload.
+      if (!result.ok && result.error.tag !== "EditRefused") return
       meantTitle(chat.id, null)
-      // The start card's title ends once it's this chat's, and only then.
-      if (first || (title.ready && title.text.trim() === name)) void title.commit(title.text, async () => true)
+      // The start card's title ends once it's this chat's, and only then: refused (another rename
+      // came first, which stays), it stays on the card for the next new chat (rev-dd4a #4).
+      if (result.ok && (first || (title.ready && title.text.trim() === name)))
+        void title.commit(title.text, async () => true)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chat opened, when the title is read
   }, [opened, title.ready])
