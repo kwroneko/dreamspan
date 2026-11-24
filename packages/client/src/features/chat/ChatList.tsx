@@ -3,11 +3,13 @@
 // started, how long it is and how it ends. It's the sidebar on wide screens, the chats page
 // on phones, a card's chats on its page and a group's on its own. It reads a page at a time, with Load more for
 // older chats; finding a chat asks the server, so it finds chats not loaded yet.
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import type { Chat, ChatId, ChatSummary, EntityId } from "@dreamspan/shared/chat.ts"
-import { chatCursor } from "@dreamspan/shared/chatApi.ts"
+import { useAtomValue } from "@effect/atom-react"
+import type { CastCard, Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
+import { SHELL_SECTION_LIMIT } from "@dreamspan/shared/chatSetupApi.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { importState } from "@dreamspan/shared/stImportApi.ts"
-import { Link, useRouterState, useSearch } from "@tanstack/react-router"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
+import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -28,37 +30,9 @@ import { SlotOutlet } from "../../slots.tsx"
 import { KindBadge } from "./KindBadge.tsx"
 import { TextThenBadges } from "./RowBadges.tsx"
 import { kindRowProps, useChatKindLook } from "./kindLooks.ts"
+import { useSplitChats } from "./splitChats.ts"
 
 const PAGE = 50
-
-/** Which chats a list shows: a card's (`entityId`), those found by `search`, or all. */
-interface Query {
-  readonly entityId?: EntityId
-  readonly search?: string
-}
-
-const firstPage = (query: Query) =>
-  AppClient.query(
-    "ListChats",
-    { limit: PAGE, before: null, ...query },
-    { reactivityKeys: ["chats", "chat-lists", "library"] }
-  )
-
-/** All the chats' first page: the sidebar's, refreshed on its own. */
-const chatsAtom = firstPage({})
-
-/**
- * Where a chat sits in the server's order (ListChats), newest first: a card's chats put
- * those with a message first. Compared as the server compares the cursor.
- */
-type Key = readonly [number, number, string]
-const keyOf = (chat: Chat, query: Query): Key => [
-  query.entityId !== undefined && chat.lastMessageAt !== null ? 1 : 0,
-  chat.lastMessageAt ?? chat.createdAt,
-  chat.id
-]
-/** Whether `a` comes after (is older than) `b`. */
-const after = (a: Key, b: Key) => (a[0] !== b[0] ? a[0] < b[0] : a[1] !== b[1] ? a[1] < b[1] : a[2] < b[2])
 
 /** Shows a clipped text in full on hover. */
 const titleIfClipped = (text: string) => (event: MouseEvent<HTMLElement>) => {
@@ -70,15 +44,30 @@ const plural = (n: number, one: string) => `${n.toLocaleString()} ${one}${n === 
 
 function Row({
   chat,
-  summary,
+  createdAt,
+  lastAt,
+  characters,
+  picture,
+  messages,
+  preview,
+  speaker,
   fork,
+  group,
   active,
   onDelete
 }: {
-  chat: Chat
-  summary: ChatSummary | undefined
+  chat: Pick<Chat, "id" | "kind" | "title">
+  createdAt: number
+  lastAt: number | null
+  characters: ReadonlyArray<CastCard>
+  picture: string | null
+  messages: number | undefined
+  preview: string | undefined
+  speaker?: string | undefined
   /** Its current fork's shell row, for the pin. */
-  fork: ShellFork | undefined
+  fork?: ShellFork | undefined
+  /** The visible chat group when this row comes from the shell list. */
+  group?: ShellFork
   active: boolean
   onDelete: () => void
 }) {
@@ -86,11 +75,11 @@ function Row({
   const kindLook = useChatKindLook(chat.kind)
   const search = useSearch({ strict: false }) as { panel?: string }
   const { title, unfinished } = importState(chat.title)
-  const characters = (summary?.cast ?? []).filter((card) => !card.persona)
-  const name = chatName(title, characters, chat.createdAt)
-  const speaker = summary?.last?.speaker
-    ? summary.cast.find((card) => card.entityId === summary.last!.speaker)?.name
-    : null
+  const baseName = chatName(title, characters, createdAt)
+  const name = group
+    ? { name: group.chatName || "…", started: chat.id === group.chat.id ? baseName.started : null }
+    : baseName
+  const pin = group ?? fork
   const others = characters.filter((card) => card.name !== name.name).map((card) => card.name)
   return (
     <li {...kindRowProps(kindLook)} className="tile-toggle-surface group relative rounded-lg">
@@ -98,7 +87,7 @@ function Row({
         <Link
           to="/chats/$chatId"
           params={{ chatId: chat.id }}
-          search={search.panel ? { panel: search.panel } : {}}
+          search={{ ...(search.panel ? { panel: search.panel } : {}), ...(group ? { fork: group.forkId } : {}) }}
           // Dropped on a frame, the chat opens there, as a click does (owner, 2026-11-07).
           onDragStart={carryLink(CHAT_DRAG.id)}
           aria-current={active ? "page" : undefined}
@@ -106,8 +95,8 @@ function Row({
             active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
           }`}
         >
-          {chat.pictureMediaId ? (
-            <Avatar id={chat.id} name={name.name} mediaId={chat.pictureMediaId} size="lg" />
+          {picture ? (
+            <Avatar id={group?.chat.id ?? chat.id} name={name.name} mediaId={picture} size="lg" />
           ) : (
             <AvatarStack
               faces={characters.map((card) => ({
@@ -128,23 +117,21 @@ function Row({
                 {name.name}
               </span>
               <SlotOutlet slot={chatRowAbout} props={{ chat }} />
-              <span className="ml-auto shrink-0 text-xs text-muted">
-                {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
-              </span>
+              <span className="ml-auto shrink-0 text-xs text-muted">{formatWhen(lastAt ?? createdAt)}</span>
             </span>
             {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
             {/* A workshop's badge beside it, out of the title's line (owner, 2026-11-18). */}
             <span data-chat-meta className="block text-xs text-muted">
-              {summary ? (
+              {messages !== undefined ? (
                 <>
-                  <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
+                  <span>started {formatDay(name.started ?? new Date(createdAt))}</span>
                   {" · "}
-                  <TextThenBadges text={plural(summary.messages, "message")} whole>
+                  <TextThenBadges text={plural(messages, "message")} whole>
                     <KindBadge kind={chat.kind} inLink size="sm" />
                   </TextThenBadges>
                 </>
               ) : (
-                <TextThenBadges text={`started ${formatDay(name.started ?? new Date(chat.createdAt))}`}>
+                <TextThenBadges text={`started ${formatDay(name.started ?? new Date(createdAt))}`}>
                   <KindBadge kind={chat.kind} inLink size="sm" />
                 </TextThenBadges>
               )}
@@ -160,7 +147,7 @@ function Row({
             )}
             <span className="line-clamp-2 min-h-10 text-sm text-muted">
               {speaker ? <span className="text-text">{speaker}: </span> : null}
-              {summary?.last?.text.replace(/\s+/g, " ") || "No messages yet"}
+              {preview?.replace(/\s+/g, " ") || (group?.pending ? "…" : "No messages yet")}
             </span>
             {(unseen > 0 || unfinished) && (
               <span className="mt-0.5 flex gap-1.5 text-xs">
@@ -175,9 +162,9 @@ function Row({
           </span>
         </Link>
       </Tooltip>
-      {fork && (
+      {pin && (
         <span data-layout-overlay="Pin action sits over the chat row" className="absolute right-2.5 bottom-2">
-          <PinButton fork={fork} className="tile-toggle" />
+          <PinButton fork={pin} className="tile-toggle" />
         </span>
       )}
       <Tooltip label="Moves this chat and all its branches to the bin, from which it can be restored later.">
@@ -221,141 +208,111 @@ function Rows({ chats, onDelete }: { chats: ReadonlyArray<Chat>; onDelete: (chat
     sort: "recent",
     sections: [{ id: "current", limit: chats.length }]
   }).section("current").rows
-  const pathname = useRouterState({ select: (state) => state.location.pathname })
-  return chats.map((chat) => (
-    <Row
-      key={chat.id}
-      chat={chat}
-      summary={byId.get(chat.id)}
-      fork={forks.find((f) => f.chat.id === chat.id)}
-      active={pathname.startsWith(`/chats/${chat.id}`)}
-      onDelete={() => onDelete(chat)}
-    />
-  ))
+  const { chatId: selected } = useParams({ strict: false }) as { chatId?: string }
+  return chats.map((chat) => {
+    const summary = byId.get(chat.id)
+    return (
+      <Row
+        key={chat.id}
+        chat={chat}
+        createdAt={chat.createdAt}
+        lastAt={chat.lastMessageAt}
+        characters={(summary?.cast ?? []).filter((card) => !card.persona)}
+        picture={chat.pictureMediaId ?? null}
+        messages={summary?.messages}
+        preview={summary?.last?.text}
+        speaker={summary?.cast.find((card) => card.entityId === summary.last?.speaker)?.name}
+        fork={forks.find((f) => f.chat.id === chat.id)}
+        active={chat.id === selected}
+        onDelete={() => onDelete(chat)}
+      />
+    )
+  })
 }
 
-/**
- * The first page as the server has it now, and the older pages loaded since. A refreshed
- * first page is right up to its last chat: older pages' chats above that are gone or have
- * moved up into it. Chats it pushed out are read again from its end.
- */
-function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) {
-  const [older, setOlder] = useState<ReadonlyArray<Chat>>([])
-  const [end, setEnd] = useState(false)
-  /**
-   * Chats deleted here, hidden until the list they were in is read again from the server:
-   * each with the first page and the older pages as they were when it was deleted.
-   */
-  const [gone, setGone] = useState<ReadonlyMap<string, readonly [ReadonlyArray<Chat>, ReadonlyArray<Chat>]>>(new Map())
-  const more = useAction()
-  const fill = useAction()
+/** One row per live chat group, from the same list as the sidebar. */
+function Pages({ search, offset = 0 }: { search: string; offset?: number }) {
+  const [limit, setLimit] = useState(PAGE)
+  const [next, setNext] = useState(false)
+  const forks = useShellForks({
+    entity: null,
+    chat: null,
+    search,
+    sort: "recent",
+    sections: [{ id: "chats", limit, ...(offset ? { offset } : {}) }]
+  })
+  const { rows, total } = forks.section("chats")
+  const { chatId: selected } = useParams({ strict: false }) as { chatId?: ChatId }
+  const { fork: shown } = useSearch({ strict: false }) as { fork?: ForkId }
+  const selectedGroup = useSplitChats(selected ?? null, shown)?.group.id ?? selected
+  const [gone, setGone] = useState<ReadonlyMap<string, ReadonlyArray<ShellFork>>>(new Map())
   const action = useAction()
   const deleted = useDeletedToast()
-  const firstEnd = first.length < PAGE
-  const last = first.at(-1)
-  const inFirst = new Set(first.map((chat) => chat.id))
-  const chats = [
-    ...first,
-    ...(firstEnd || last === undefined
-      ? []
-      : older.filter((chat) => !inFirst.has(chat.id) && after(keyOf(chat, query), keyOf(last, query))))
-  ].filter((chat) => {
-    const at = gone.get(chat.id)
-    return at === undefined || (inFirst.has(chat.id) ? at[0] !== first : at[1] !== older)
-  })
-
-  /** The page after `from`. */
-  const pageAfter = (from: Chat) => (client: AppClient["Service"]) =>
-    client("ListChats", { limit: PAGE, before: chatCursor(from), ...query })
-  /** The page read after `from` replaces what was loaded between `from` and its end. */
-  const cover = (from: Chat, rows: ReadonlyArray<Chat>) => {
-    const complete = rows.length < PAGE
-    const start = keyOf(from, query)
-    const stop = rows.at(-1)
-    const ids = new Set(rows.map((chat) => chat.id))
-    setOlder((current) =>
-      [
-        ...current.filter(
-          (chat) =>
-            !ids.has(chat.id) &&
-            (!after(keyOf(chat, query), start) ||
-              (!complete && stop !== undefined && after(keyOf(chat, query), keyOf(stop, query))))
-        ),
-        ...rows
-      ].sort((a, b) => (after(keyOf(a, query), keyOf(b, query)) ? 1 : -1))
+  const remove = async (row: ShellFork) => {
+    const chatId = row.sourceChatId ?? row.chat.id
+    const forkId = row.forkId as ForkId
+    const result = await action.run(
+      (client) =>
+        Effect.gen(function* () {
+          const split = yield* client("GetSplitChats", { chatId, forkId })
+          if (split.group.id !== row.chat.id) return yield* new NotFound({ entity: "chat group", id: row.chat.id })
+          if (!split.hasSplits && split.group.id === chatId) return yield* client("DeleteChat", { chatId })
+          const removed = yield* client("DeleteChatGroup", { chatId, forkId, expectedForkIds: split.forkIds })
+          return removed.item
+        }),
+      ["chats", "pins", "bin"]
     )
-    if (complete) setEnd(true)
-  }
-  const loadMore = async () => {
-    const from = chats.at(-1)
-    if (from === undefined) return
-    const result = await more.run(pageAfter(from))
-    if (result.ok) cover(from, result.value)
-  }
-  // The first page read again (a chat deleted, restored or added, here or elsewhere): the
-  // older pages loaded are read again as far as they went, so they agree with the server.
-  useEffect(() => {
-    if (older.length === 0 || firstEnd || last === undefined) return
-    const target = older.length
-    let live = true
-    void (async () => {
-      const rows: Array<Chat> = []
-      let from = last
-      let complete = false
-      while (rows.length < target) {
-        const result = await fill.run(pageAfter(from))
-        if (!live || !result.ok) return
-        rows.push(...result.value)
-        const next = result.value.at(-1)
-        if (result.value.length < PAGE || next === undefined) {
-          complete = true
-          break
-        }
-        from = next
-      }
-      setOlder(rows)
-      setEnd(complete)
-    })()
-    return () => {
-      live = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- when the first page is read again
-  }, [first])
-
-  const remove = async (chat: Chat) => {
-    const result = await action.run((client) => client("DeleteChat", { chatId: chat.id }), ["chats"])
     if (!result.ok) return
-    setGone(new Map([...gone, [chat.id, [first, older] as const]]))
+    setGone((current) => new Map(current).set(row.chat.id, rows))
     deleted(result.value)
   }
-  const pages = Array.from({ length: Math.ceil(chats.length / PAGE) }, (_, i) => chats.slice(i * PAGE, (i + 1) * PAGE))
+  if (forks.loading && forks.failure) return <p className="px-2 text-sm text-danger">The chats couldn't be loaded.</p>
+  if (forks.loading) return <Spinner />
+  const visible = rows.filter((row) => gone.get(row.chat.id) !== rows)
   return (
     <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-      {chats.length === 0 ? (
+      {visible.length === 0 && offset === 0 ? (
         <p className="px-2 py-4 text-sm text-muted">
-          {query.search
-            ? `No chat's title or characters have “${query.search}”.`
-            : "No chats yet. Pick a character to start one."}
+          {search ? `No chat's title or characters have “${search}”.` : "No chats yet. Pick a character to start one."}
         </p>
       ) : (
-        <ul aria-label="Chats" className="flex flex-col gap-0.5">
-          {pages.map((page, i) => (
-            <Rows key={i} chats={page} onDelete={(chat) => void remove(chat)} />
+        <ul aria-label={offset === 0 ? "Chats" : "More chats"} className="flex flex-col gap-0.5">
+          {visible.map((row) => (
+            <Row
+              key={row.chat.id}
+              chat={{ ...row.chat, id: row.sourceChatId ?? row.chat.id }}
+              createdAt={row.chat.createdAt ?? row.createdAt}
+              lastAt={row.endAt}
+              characters={row.cast}
+              picture={row.chat.picture ?? null}
+              messages={row.pending ? undefined : row.messages}
+              preview={row.preview}
+              group={row}
+              active={row.chat.id === selectedGroup}
+              onDelete={() => void remove(row)}
+            />
           ))}
         </ul>
       )}
-      {!firstEnd && !end && last !== undefined && (
-        <Button
-          hint="Loads more chats."
-          variant="ghost"
-          className="self-center"
-          pending={more.pending}
-          onClick={() => void loadMore()}
-        >
-          Load more
-        </Button>
+      {next ? (
+        <Pages search={search} offset={offset + SHELL_SECTION_LIMIT} />
+      ) : (
+        offset + rows.length < total && (
+          <Button
+            hint="Loads more chats."
+            variant="ghost"
+            className="self-center"
+            pending={forks.waiting}
+            onClick={() => {
+              if (limit === SHELL_SECTION_LIMIT) setNext(true)
+              else setLimit(Math.min(SHELL_SECTION_LIMIT, limit + PAGE))
+            }}
+          >
+            Load more
+          </Button>
+        )
       )}
-      <ErrorAlert error={more.error ?? action.error} />
+      <ErrorAlert error={action.error} />
     </div>
   )
 }
@@ -393,21 +350,6 @@ function Given({ chats, onDeleted }: { chats: ReadonlyArray<Chat>; onDeleted?: (
   )
 }
 
-function Pages({ entityId, search }: { entityId: EntityId | undefined; search: string }) {
-  const query = useMemo<Query>(
-    () => ({ ...(entityId === undefined ? {} : { entityId }), ...(search === "" ? {} : { search }) }),
-    [entityId, search]
-  )
-  const atom = useMemo(
-    () => (entityId === undefined && search === "" ? chatsAtom : firstPage(query)),
-    [entityId, search, query]
-  )
-  const result = useAtomValue(atom)
-  if (AsyncResult.isSuccess(result)) return <Loaded first={result.value} query={query} />
-  if (AsyncResult.isFailure(result)) return <p className="px-2 text-sm text-danger">The chats couldn't be loaded.</p>
-  return <Spinner />
-}
-
 /** What's typed, once typing pauses. */
 const useSettled = (value: string, ms: number) => {
   const [settled, setSettled] = useState(value)
@@ -419,17 +361,15 @@ const useSettled = (value: string, ms: number) => {
 }
 
 /**
- * A list of chats: all of them, a card's (`entityId`), or those given (`chats`, a group's,
+ * A list of chats: all of them, or those given (`chats`, a group's,
  * with `onDeleted` told of each deleted here). `findable` adds a box to find one by title or
  * character, among all of them, loaded or not.
  */
 export function ChatList({
-  entityId,
   chats,
   onDeleted,
   findable = true
 }: {
-  entityId?: EntityId
   chats?: ReadonlyArray<Chat>
   onDeleted?: (chat: Chat) => void
   findable?: boolean
@@ -447,10 +387,7 @@ export function ChatList({
           onChange={(event) => setFilter(event.currentTarget.value)}
         />
       )}
-      <Pages key={`${entityId ?? ""}\n${search}`} entityId={entityId} search={search} />
+      <Pages key={search} search={search} />
     </div>
   )
 }
-
-/** Reads the chats again: a chat deleted or made in another tab isn't announced to the list. */
-export const useRefreshChats = () => useAtomRefresh(chatsAtom)

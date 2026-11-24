@@ -257,9 +257,9 @@ export const cardsView = (state: ShellState) => ({
   fresh: state.fresh
 })
 export const sectionsOf = (state: ShellState, view: ShellForksView) =>
-  view.sections.map(({ id, limit }) => {
+  view.sections.map(({ id, limit, offset = 0 }) => {
     const rows = sectionRows(state, view, id)
-    return { id, rows: rows.slice(0, limit), total: rows.length }
+    return { id, rows: rows.slice(offset, offset + limit), total: rows.length }
   })
 
 export const forksView = (state: ShellState, view: ShellForksView, availableLabels: ThreadLabels) => {
