@@ -246,14 +246,35 @@ it("a stale lorebook bulk tick keeps a value changed since", () => {
 })
 
 it("a stale model bulk edit keeps a field and its tick added since", () => {
-  const start = { ids: ["m1", "m2"], ticked: [], draft: { context: "", maxOutput: "" } }
-  const fromA = { ...start, ticked: ["context"], draft: { context: "50000", maxOutput: "" } }
-  const fromB = { ...start, ticked: ["maxOutput"], draft: { context: "", maxOutput: "900" } }
+  const start = { ids: ["m1", "m2"], ticked: {}, draft: { context: "", maxOutput: "" } }
+  const fromA = { ...start, ticked: { context: true }, draft: { context: "50000", maxOutput: "" } }
+  const fromB = { ...start, ticked: { maxOutput: true }, draft: { context: "", maxOutput: "900" } }
   expect(staleMerge(fromA, fromB, start)).toEqual({
     ids: ["m1", "m2"],
-    ticked: ["context", "maxOutput"],
+    ticked: { context: true, maxOutput: true },
     draft: { context: "50000", maxOutput: "900" }
   })
+})
+
+// Review of 15a906b99 (3): ticks kept by name merge one by one: an untick in one tab and a tick
+// or untick in another both stand.
+it("a stale bulk tick or untick keeps an untick made since", () => {
+  const start = { ticked: { context: true, maxOutput: true }, draft: {} }
+  const fromA = { ...start, ticked: { maxOutput: true } }
+  const ticking = { ...start, ticked: { context: true, maxOutput: true, temperature: true } }
+  expect(staleMerge(fromA, ticking, start)).toEqual({ ticked: { maxOutput: true, temperature: true }, draft: {} })
+  expect(staleMerge(fromA, { ...start, ticked: { context: true } }, start)).toEqual({ ticked: {}, draft: {} })
+})
+
+// Review of 15a906b99 (5): a list both changed is taken whole, as the text shown for it is.
+it("a stale reorder of a provider list takes that order, as its text does", () => {
+  const start = { settings: { routing: { order: ["Fireworks", "Together"] } }, drafts: {} }
+  const fromA = { settings: { routing: { order: ["Fireworks", "Together", "DeepInfra"] } }, drafts: {} }
+  const fromB = {
+    settings: { routing: { order: ["Together", "Fireworks"] } },
+    drafts: { "settings.routing.order": "Together,Fireworks" }
+  }
+  expect(staleMerge(fromA, fromB, start)).toEqual(fromB)
 })
 
 // Review of 15a906b99 (1, P1): a keyed list merges to its items only, never a hole.
@@ -279,10 +300,11 @@ it("a stale edit of one script keeps another script's deletion, with no empty sl
 
 // Review of 15a906b99 (2, P1): a bulk draft kept as text before it became an object.
 it("a stale bulk edit from a draft kept as text keeps a field changed since", () => {
-  const start = { ids: ["m1"], ticked: ["context"], draft: JSON.stringify({ context: "24000", maxOutput: "" }) }
+  const start = { ids: ["m1"], ticked: { context: true }, draft: JSON.stringify({ context: "24000", maxOutput: "" }) }
   const fromA = { ...start, draft: { context: "50000", maxOutput: "" } }
-  const want = { ids: ["m1"], ticked: ["context", "maxOutput"], draft: { context: "50000", maxOutput: "900" } }
-  const fromB = { ...start, ticked: ["context", "maxOutput"], draft: { context: "24000", maxOutput: "900" } }
+  const ticked = { context: true, maxOutput: true }
+  const want = { ids: ["m1"], ticked, draft: { context: "50000", maxOutput: "900" } }
+  const fromB = { ...start, ticked, draft: { context: "24000", maxOutput: "900" } }
   expect(staleMerge(fromA, fromB, start)).toEqual(want)
   // A save queued before the change, still as text, merges the same way.
   const queued = { ...fromB, draft: JSON.stringify(fromB.draft) }

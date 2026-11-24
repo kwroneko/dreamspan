@@ -46,10 +46,18 @@ export const selectionDigest = (ids: ReadonlyArray<string>) => {
   return `${ids.length}-${hash.toString(36)}`
 }
 
+const ticks = (ids: ReadonlyArray<FieldId>): Partial<Record<FieldId, true>> =>
+  Object.fromEntries(ids.map((id) => [id, true]))
+const isTickList = (value: unknown): value is ReadonlyArray<FieldId> => Array.isArray(value)
+
 /** What the dialog keeps as typed: the models it edits, the ticked fields, and the form's draft. */
 interface MassForm {
   readonly ids: ReadonlyArray<ModelId>
-  readonly ticked: ReadonlyArray<FieldId>
+  /**
+   * The ticked fields, each `true`: kept by name, so ticks from two tabs merge one by one (a
+   * list: a draft kept before that change).
+   */
+  readonly ticked: Readonly<Partial<Record<FieldId, true>>> | ReadonlyArray<FieldId>
   /**
    * The form's draft, once edited; until then, what the models share. Kept as an object, so a
    * save from another tab merges field by field (text: a draft kept before that change).
@@ -113,7 +121,7 @@ export function ModelMassEditDialog({
 }) {
   const form = useDurableForm<MassForm>(`model-mass-edit:${place}`, "Edit models", {
     ids: ids ?? [],
-    ticked: [],
+    ticked: {},
     draft: null
   })
   const chosen = ids ?? form.values.ids
@@ -126,7 +134,10 @@ export function ModelMassEditDialog({
   const kept = form.values.draft
   const values =
     kept === null ? common.draft : readDraft(typeof kept === "string" ? kept : JSON.stringify(kept), common.draft)
-  const ticked = new Set(form.values.ticked)
+  const keptTicks = form.values.ticked
+  const ticked = new Set(
+    isTickList(keptTicks) ? keptTicks : FIELD_IDS.filter((id) => (keptTicks as Partial<Record<FieldId, true>>)[id])
+  )
   const [submitted, setSubmitted] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const save = useAction()
@@ -143,13 +154,15 @@ export function ModelMassEditDialog({
     form.edit({
       ids: chosen,
       draft: next,
-      ticked: FIELD_IDS.filter((id) => ticked.has(id) || edited.has(id))
+      ticked: ticks(FIELD_IDS.filter((id) => ticked.has(id) || edited.has(id)))
     })
   }
   const tick = (field: FieldId, on: boolean) =>
     form.edit({
       ids: chosen,
-      ticked: FIELD_IDS.filter((id) => (id === field ? on : ticked.has(id)))
+      // The values the tick starts from, so a later edit in another tab merges against them.
+      draft: kept ?? values,
+      ticked: ticks(FIELD_IDS.filter((id) => (id === field ? on : ticked.has(id))))
     })
 
   // Each model's limits as Context and Reply length keep within, with the new ones when ticked.
