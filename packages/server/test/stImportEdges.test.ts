@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite"
 import { currentForkSql, selectedInSql } from "../src/db/forkState.ts"
 import { Worker } from "node:worker_threads"
 import { assert, layer } from "@effect/vitest"
+import { vi } from "vitest"
 import type { ChatId, SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
@@ -15,7 +16,7 @@ import { Deferred, Effect, Fiber } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Formats } from "../src/importer/Formats.ts"
-import { removeOldStaging } from "../src/importer/StImports.ts"
+import { removeOldStaging, StImports } from "../src/importer/StImports.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { importStFolder, sendFile, sendStFile } from "./support/stUpload.ts"
@@ -714,7 +715,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
-  it.effect("an upload admitted before the user started another import writes nothing after it", () =>
+  it.effect("an upload admitted before the user started another import finishes first, and nothing after it", () =>
     Effect.gen(function* () {
       const path = "chats/Bot/stale-upload.jsonl"
       const lines = [message("su-g", 0), message("su-u", 1)]
@@ -722,31 +723,55 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       yield* sendStFile(seed.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none" })
       const stale = yield* begin
       const formats = yield* Formats
+      const imports = yield* StImports
       const st = formats.st as { chatPart: typeof formats.st.chatPart }
       const original = st.chatPart
       const entered = Deferred.makeUnsafe<void>()
       const release = Deferred.makeUnsafe<void>()
-      try {
-        // The stale run's part is parsed, and waits, while the user starts another import.
-        st.chatPart = (input) =>
-          original(input).pipe(
-            Effect.tap(() => Deferred.succeed(entered, undefined)),
-            Effect.tap(() => Deferred.await(release))
-          )
-        const pending = yield* Effect.forkChild(
-          sendFile(stale.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("su-stale", 2)), {
-            card: "none"
-          }).pipe(Effect.flatMap(answer))
+      const pause = vi.spyOn(imports, "withFilesPaused")
+      // Released however the test ends: a file left waiting would hold up every later start.
+      yield* Effect.addFinalizer(() =>
+        Effect.andThen(
+          Deferred.succeed(release, undefined),
+          Effect.sync(() => {
+            st.chatPart = original
+            pause.mockRestore()
+          })
         )
-        yield* Deferred.await(entered)
-        yield* stale.api.StartStImport({ unsupported: [] })
-        yield* Deferred.succeed(release, undefined)
-        assert.strictEqual((yield* Fiber.join(pending)).outcome, "failed")
-        assert.strictEqual(present("su-stale"), 0)
-      } finally {
-        st.chatPart = original
-      }
-    })
+      )
+      // The stale run's part is parsed, and waits, while the user starts another import.
+      st.chatPart = (input) =>
+        original(input).pipe(
+          Effect.tap(() => Deferred.succeed(entered, undefined)),
+          Effect.tap(() => Deferred.await(release))
+        )
+      const pending = yield* Effect.forkChild(
+        sendFile(stale.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("su-stale", 2)), {
+          card: "none"
+        }).pipe(Effect.flatMap(answer))
+      )
+      yield* Deferred.await(entered)
+      pause.mockClear()
+      // The new import waits for the admitted file before it takes the lease (ARCHITECTURE.md §13).
+      const next = yield* Effect.forkChild(stale.api.StartStImport({ unsupported: [] }))
+      yield* Effect.promise(() =>
+        vi.waitFor(() => assert.isTrue(pause.mock.calls.some(([, id]) => id === stale.importId)))
+      )
+      assert.isUndefined(next.pollUnsafe())
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual((yield* Fiber.join(pending)).outcome, "updated")
+      yield* Fiber.join(next)
+      assert.strictEqual(present("su-stale"), 1)
+      // Once replaced, the stale run takes no more files.
+      const late = yield* sendFile(
+        stale.importId,
+        path,
+        jsonl({ chat_metadata: {} }, ...lines, message("su-stale", 2), message("su-late", 3)),
+        { card: "none" }
+      )
+      assert.strictEqual(late.status, 404)
+      assert.strictEqual(present("su-late"), 0)
+    }).pipe(Effect.scoped)
   )
 
   it.effect("a greeting-only branch is skipped without writing anything into its parent's chat", () =>
