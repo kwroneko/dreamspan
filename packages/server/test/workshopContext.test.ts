@@ -178,13 +178,14 @@ describe("workshop context", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  // 44.25k: the combined workshop toolset (presets, lorebooks, chat rewrites, load_skill with its
-  // index, wsb3's notes, sandbox1's file and command tools, and files4a's background-command tools
-  // bash_output and bash_stop) leaves turn two room to carry, and turn three still has to leave a
-  // result out. Measured with every tool sent, each once: 43.5k rebuilds, 43.75k to 44.5k behave
-  // so, 45k leaves nothing out. The window is the mock model's own context size, not a product
-  // limit — it is re-measured whenever the toolset grows (36k, 37k, 41k, 43.5k, 44.25k).
-  for (const window of [24_000, 44_250])
+  // 46k: the combined workshop toolset (presets, lorebooks, chat rewrites, load_skill with its
+  // index, wsb3's notes, sandbox1's file and command tools, files4a's background-command tools
+  // bash_output and bash_stop, and the paged and attached-revision library reads of 07d7c202a and
+  // 192199691) leaves turn two room to carry, and turn three still has to leave a result out.
+  // Measured with every tool sent, each once: 45.75k rebuilds, 45.875k to 46.25k behave so,
+  // 46.375k leaves nothing out. The window is the mock model's own context size, not a product
+  // limit — it is re-measured whenever the toolset grows (36k, 37k, 41k, 43.5k, 44.25k, 46k).
+  for (const window of [24_000, 46_000])
     it.live(`elision and protected newest results with a ${window} window`, () => {
       const config = testConfig()
       return Effect.gen(function* () {
