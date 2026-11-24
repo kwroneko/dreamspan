@@ -31,6 +31,7 @@ import {
   usePanelTabs
 } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
+import { chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 import { isPendingChat, NOT_STARTED } from "./chatStarted.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
@@ -165,6 +166,20 @@ export function PanelToggles({
   )
 }
 
+/**
+ * The header's panel toggle isn't there: a plugin or setting disabled `chat.panel` in the
+ * header's slot. Disabling leaves out only that button (as for any other part); the panel still
+ * opens from the chat (a portrait, a link), so it then carries its own Hide panel.
+ */
+function useHeaderToggleGone(pending: boolean) {
+  const slot = pending ? pendingChatHeaderActions : chatHeaderActions
+  return useSyncExternalStore(
+    slot.subscribe,
+    () => !slot.snapshot().entries.some((entry) => entry.id === "chat.panel"),
+    () => false
+  )
+}
+
 /** What the panel's tabs show: a saved chat's session, or a chat not made yet (pendingChat.ts). */
 export type SidePanelContent =
   | {
@@ -245,40 +260,55 @@ export function ChatSidePanel({
   const tools = inOrder(usualTools, tabOrder)
   const reordered = tools.some((t, index) => t.value !== usualTools[index]!.value)
   const cast = all.filter((t) => t.descriptor.placement === "cast")
+  // A phone's sheet has its own Close.
+  const ownClose = useHeaderToggleGone("pending" in content) && wide
   const nav = (
     <div ref={navRef} data-chat-panel-tabs className="flex shrink-0 flex-col">
-      <div className="flex h-shell-header shrink-0 items-center border-b border-border px-2 py-2 *:min-w-0 *:flex-1">
-        <ToolTabs
-          tabs={tools.map((t) => ({
-            value: t.value,
-            dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
-            label: t.label,
-            icon: t.descriptor.icon,
-            savedOnly: t.descriptor.savedOnly,
-            // A tab with nothing to show before the first send says so where it's described.
-            description:
-              "pending" in content && !t.descriptor.pending
-                ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
-                : t.descriptor.savedOnly && isPendingChat(content.view.chat)
-                  ? `${t.descriptor.description ?? t.label} ${NOT_STARTED}`
-                  : t.descriptor.description
-          }))}
-          value={tab}
-          onValueChange={onTab}
-          label="Chat panel"
-          focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
-          moreLabel="More tools"
-          onReorder={(values) => {
-            const order = storedOrder(tabOrder, values)
-            if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {
-              showToast({ title: `This tab order can't be saved. Only ${MAX_STORED} positions can be stored.` })
-              return
-            }
-            viewPrefs.change({ panelTabOrder: order })
-          }}
-          onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
-          reordered={reordered}
-        />
+      <div className="flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-2 py-2">
+        <div className="min-w-0 flex-1">
+          <ToolTabs
+            tabs={tools.map((t) => ({
+              value: t.value,
+              dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
+              label: t.label,
+              icon: t.descriptor.icon,
+              savedOnly: t.descriptor.savedOnly,
+              // A tab with nothing to show before the first send says so where it's described.
+              description:
+                "pending" in content && !t.descriptor.pending
+                  ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
+                  : t.descriptor.savedOnly && isPendingChat(content.view.chat)
+                    ? `${t.descriptor.description ?? t.label} ${NOT_STARTED}`
+                    : t.descriptor.description
+            }))}
+            value={tab}
+            onValueChange={onTab}
+            label="Chat panel"
+            focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
+            moreLabel="More tools"
+            onReorder={(values) => {
+              const order = storedOrder(tabOrder, values)
+              if (inOrder(usualTools, order).some((tool, index) => tool.value !== values[index])) {
+                showToast({ title: `This tab order can't be saved. Only ${MAX_STORED} positions can be stored.` })
+                return
+              }
+              viewPrefs.change({ panelTabOrder: order })
+            }}
+            onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
+            reordered={reordered}
+          />
+        </div>
+        {ownClose && (
+          <IconButton
+            label="Hide panel"
+            hint="Click to hide the chat panel"
+            icon="panel"
+            aria-expanded
+            aria-pressed
+            className="shrink-0 bg-surface-raised text-text"
+            onClick={() => void onClose()}
+          />
+        )}
       </div>
       <div className="border-b border-border px-2 pt-1">
         <SubjectTabs
