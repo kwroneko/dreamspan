@@ -20,6 +20,7 @@ import { startWorkshopProvider } from "./support/workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 const ANSWER = "I tightened Mara and made Ove to go with her."
+const OVE_DESCRIPTION = "A synthetic ferryman who owes Mara a favour."
 /** The card the latest task names: "Work on <name>." */
 const named = (body: { messages: ReadonlyArray<{ role: string; content?: unknown }> }) =>
   [...JSON.stringify(body.messages).matchAll(/Work on (Mara \d+ [a-z]+)\./g)].at(-1)?.[1] ?? ""
@@ -48,8 +49,12 @@ test.describe("workshop change rows", () => {
           name: "create_card",
           arguments: (body) => ({
             name: `Ove for ${named(body)}`,
-            description: "A synthetic ferryman who owes Mara a favour."
+            description: OVE_DESCRIPTION
           })
+        },
+        {
+          name: "read_card",
+          arguments: (body) => ({ card: `Ove for ${named(body)}`, fields: ["description"] })
         }
       ]
     })
@@ -138,7 +143,6 @@ test.describe("workshop change rows", () => {
         await page.addInitScript((value) => localStorage.setItem("dreamspan.theme", value), theme)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         const card = await importCard(page, name)
-        const workshop = await admin((api) => api.CreateWorkshop({ title: `Changes ${width} ${theme}` }))
         const shot = async (label: string) => {
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
           if (!shots) return
@@ -147,10 +151,22 @@ test.describe("workshop change rows", () => {
           await page.screenshot({ path: resolve(shots, `change-rows-${label}-${width}-${theme}.png`) })
         }
 
-        await page.goto(`${server().url}/chats/${workshop.id}`)
+        await page.goto(`${server().url}/library`)
+        await page.getByRole("button", { name: `More actions for ${name}`, exact: true }).click()
+        await page.getByRole("menuitem", { name: "Work on in a workshop" }).click()
+        await page
+          .getByRole("menu", { name: "Work on in a workshop" })
+          .getByRole("menuitem", { name: "A new workshop" })
+          .click()
+        const tile = `[data-library-tile="${card.id}"]`
+        await expect(page.getByLabel("Attachments", { exact: true }).locator(tile)).toBeVisible()
+        await expect(page).not.toHaveURL(/workshopAttach=/)
         await page.getByLabel("Message", { exact: true }).fill(`Work on ${name}.`)
         await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+        const task = page.getByRole("article").filter({ hasText: `Work on ${name}.` })
+        await expect(task.getByLabel("Attached from your library").locator(tile)).toBeVisible()
         await expect(page.getByRole("article").filter({ hasText: ANSWER })).toHaveCount(1, { timeout: 30_000 })
+        expect(provider.toolResults().at(-1)).toContain(OVE_DESCRIPTION)
 
         // One row per item, in the order the turn changed them, under the turn's last message.
         const rows = page.locator("[data-change-rows]")
