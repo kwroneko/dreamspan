@@ -194,6 +194,7 @@ describe("card files", () => {
         const folder = "/files/cards/Attachments"
         const wren = yield* attachUpload(folder, "wren.png", png(cardChunk("ccv3", v3Card("Wren Hollow"))))
         const other = yield* attachUpload(folder, "data.json", jsonBytes({ hello: "world" }))
+        const lorebook = yield* attachUpload(folder, "lore.json", jsonBytes({ name: "Harbor Lore", entries: {} }))
         const copy = `/attachments/${wren.mediaId}`
         steps = [
           ["edit_card_file", { path: wren.path, changes: [{ field: "description", text: "Too soon." }] }],
@@ -205,7 +206,8 @@ describe("card files", () => {
           ],
           ["edit_card_file", { path: copy, changes: [{ field: "description", text: "No." }] }],
           ["read_card_file", { path: other.path }],
-          ["import_card_file", { path: wren.path }]
+          ["import_card_file", { path: wren.path }],
+          ["import_card_file", { path: lorebook.path }]
         ]
         const events: Array<ChatEvent> = []
         yield* api.SubscribeChat({ chatId: chat.id }).pipe(
@@ -239,6 +241,8 @@ describe("card files", () => {
         assert.include(results[4], "can't be changed")
         assert.include(results[5], "isn't a character card")
         assert.include(results[6], 'as the card "Wren Hollow"')
+        assert.include(results[7], "could not be imported as a card")
+        assert.isFalse((yield* api.ListLibrary({ kind: "lorebook" })).some((ref) => ref.label === "Harbor Lore"))
 
         // The file is still a PNG card, with the change.
         const me = yield* api.Whoami()

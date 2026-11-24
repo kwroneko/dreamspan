@@ -253,7 +253,8 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
         const parsed = yield* formats()
           .parse(bytes, fileName)
           .pipe(Effect.mapError(() => new FilePathRefused("The card file could not be read. Check that it is whole.")))
-        if (parsed.library === null) return { text: `${place.full} could not be imported as a card.`, isError: true }
+        if (parsed.library?.kind !== "card")
+          return { text: `${place.full} could not be imported as a card.`, isError: true }
         // Where the card says it came from stays unread: no card source is linked here.
         const { links: _links, ...library } = parsed.library
         const saved = yield* deps.holding(
