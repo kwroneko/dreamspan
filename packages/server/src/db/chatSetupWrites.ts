@@ -1,6 +1,6 @@
 import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
-import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
+import { fileTyped, noteDroppedReply, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
 import { composerKey, Draft, DraftKey } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
@@ -785,6 +785,17 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               !wanted.options.some((option) => cardIndex(characters[keep]!, option) === index)
             )
               break
+            // None drawn (its card in the bin): made with a group-only greeting and alone now, it
+            // is made again from its ordinary greetings, or goes if it has none (rev-dfu1 #3).
+            const greeter = byId.get(characters[keep]!)
+            if (
+              wanted === undefined &&
+              characters.length === 1 &&
+              index !== null &&
+              greeter !== undefined &&
+              greeter.greetingIndexes.slice(greeter.greetings.length).includes(index)
+            )
+              break
             keep++
           }
           // What a message made again keeps: by speaker, the greeting it showed, each greeting's
@@ -887,15 +898,19 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             gone.delete(entity)
             const drawn = wantedOf.get(entity)
             // Another change's character, drawn there: its message as it was.
+            // A chat of one character keeps none of its group-only greetings.
+            const groupOnly = new Set(greeter?.greetingIndexes.slice(greeter.greetings.length) ?? [])
             const options =
               drawn?.options.map((option) => ({ ...option, card: cardIndex(entity, option) })) ??
-              [...(before?.versions ?? new Map<number, Row>()).entries()].map(([card, version]) => ({
-                index: greeter?.greetingIndexes.indexOf(card) ?? -1,
-                text: version.content,
-                frozen:
-                  version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
-                card
-              }))
+              [...(before?.versions ?? new Map<number, Row>()).entries()]
+                .filter(([card]) => characters.length > 1 || !groupOnly.has(card))
+                .map(([card, version]) => ({
+                  index: greeter?.greetingIndexes.indexOf(card) ?? -1,
+                  text: version.content,
+                  frozen:
+                    version.frozen === null ? null : (JSON.parse(version.frozen) as { readonly [x: string]: string }),
+                  card
+                }))
             if (greeter === undefined || options.length === 0) {
               if (before !== undefined) lost.push(...[...before.edits.values()].flat(), ...before.scratchpads)
               continue
@@ -1291,7 +1306,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               yield* sql`UPDATE rollouts SET slot_id = ${safe.parent_slot_id} WHERE slot_id = ${row.slot_id}`
               yield* sql`UPDATE queued_messages SET reply_slot_id = ${safe.parent_slot_id} WHERE reply_slot_id = ${row.slot_id}`
               // Its drafts go with it (a swipe of one's own typed while it was written, an edit
-              // of it): what each holds and its history protects goes to recovered texts first.
+              // of it, a message to insert below it): what each holds and its history protects
+              // goes to recovered texts first.
               const typed = yield* sql<{
                 id: string
                 target_kind: DraftKey["targetKind"]
@@ -1301,7 +1317,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               }>`SELECT id, target_kind, target_id, field, content FROM drafts
                 WHERE user_id = ${userId} AND status IN ('active', 'discarded') AND (
                   (target_kind = 'scratchpad' AND target_id = ${row.slot_id})
-                  OR (target_kind = 'version_edit' AND target_id = ${versionId}))`
+                  OR (target_kind = 'version_edit' AND target_id = ${versionId})
+                  OR (target_kind = 'insert' AND target_id = ${slot!.chat_id}
+                    AND substr(field, instr(field, ':') + 1) = ${row.slot_id}))`
               for (const draft of typed) {
                 const lost = yield* bin.drafts.unsaved(draft.id, draft.content, [])
                 if (lost.length > 0)
@@ -1311,7 +1329,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                     lost,
                     "discard"
                   )
+                // An insertion below it has no anchor left to show at: it goes (the slot's own
+                // drafts go with the slot).
+                if (draft.target_kind === "insert") yield* sql`DELETE FROM drafts WHERE id = ${draft.id}`
               }
+              // A save of its swipe or edit still on its way is filed when it comes (writes.ts).
+              yield* noteDroppedReply(sql, userId, [row.slot_id, versionId])
               yield* sql`DELETE FROM slots WHERE id = ${row.slot_id}`
               const queue = safe.parent_slot_id ? yield* afterReply(safe.parent_slot_id, "reply") : nothing
               const [parent] = safe.parent_slot_id

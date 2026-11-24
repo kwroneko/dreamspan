@@ -1831,7 +1831,7 @@ const WriteOpsChatOwn = RpcGroup.make(
 
   Rpc.make("UndoThreads", {
     payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
-    success: BinItem,
+    success: DeletedChatItem,
     error: Schema.Union([NotFound, StorageError])
   }),
   /**

@@ -17,10 +17,10 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@dreamspan/shared/chatName.ts"
 import { remoteOf } from "@dreamspan/shared/cardSources.ts"
-import { composerKey, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { composerKey, Draft, DraftHistoryPolicy, DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
 import { heldRemoteCards } from "./cardOrigins.ts"
 import { legacyPendingDraft } from "./migrationPendingChats.ts"
-import { legacyWorkshopDraft, legacyWorkshopLabel } from "./pendingChats.ts"
+import { droppedReplyLabel, legacyWorkshopDraft, legacyWorkshopLabel } from "./pendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
@@ -198,6 +198,32 @@ export const makeWriteHandlers = (bin: Bin) =>
               baseRevision = ref?.head_revision_id ?? null
             }
           } else baseRevision = null
+        }
+        // A swipe of one's own, or an edit, of a reply that finished empty and was removed
+        // meanwhile (its first save, or a browser's retry): the text goes to recovered texts,
+        // once, and the answer is a discarded draft with nothing in it.
+        if (key.targetKind === "scratchpad" || key.targetKind === "version_edit") {
+          const dropped = yield* droppedReplyLabel(sql, userId, key.targetId)
+          if (dropped !== null) {
+            if (content.length > DraftHistoryPolicy.maxContentChars)
+              return yield* new DraftTooLarge({ length: content.length, max: DraftHistoryPolicy.maxContentChars })
+            const filed = yield* fileLate(userId, key, content, dropped)
+            const now = Date.now()
+            return new Draft({
+              id: draftId ?? "",
+              key,
+              content: "",
+              status: "discarded",
+              baseRevision: null,
+              rowVersion: (expectedRowVersion ?? 0) + 1,
+              session: (expectedSession ?? 0) + 1,
+              createdAt: now,
+              updatedAt: now,
+              recovered: filed ? 1 : 0,
+              displaced: null,
+              historyLength: 0
+            })
+          }
         }
         if (images !== undefined) yield* checkImages(userId, images)
         // An edit of a new chat's greeting that was made again (its cast changed in another tab):

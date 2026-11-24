@@ -10,13 +10,24 @@ import type { ChatSession } from "../src/features/chat/session.ts"
 import type { Copy } from "../src/features/editor/backup.ts"
 vi.hoisted(() => vi.stubGlobal("location", { protocol: "http:", host: "localhost" }))
 const copies = vi.hoisted(() => new Map<string, Copy>())
+/**
+ * Each transaction that puts a copy aborts (storage full, say): nothing it would put or delete
+ * happens. One that only deletes still goes through.
+ */
+const aborting = vi.hoisted(() => ({ on: false }))
 vi.mock("../src/features/editor/backup.ts", async (original) => ({
   ...(await original<typeof import("../src/features/editor/backup.ts")>()),
   copiesOf: async () => [...copies.values()],
   copiesOfUser: async () => [...copies.values()],
   keepCopy: async (c: Copy, p?: Copy | null) => {
+    if (aborting.on) return
     copies.set(c.key, c)
     if (p) copies.delete(p.key)
+  },
+  replaceCopies: async (c: Copy, replaced: ReadonlyArray<Copy>) => {
+    if (aborting.on) return
+    copies.set(c.key, c)
+    for (const p of replaced) copies.delete(p.key)
   },
   dropCopy: async (c: Copy) => {
     copies.delete(c.key)
@@ -49,7 +60,10 @@ const chat = (
   chatId: string,
   calls: Array<Call>,
   swept: () => boolean,
-  keepalive: (path: string, body: string) => Promise<boolean> = async () => false
+  keepalive: (path: string, body: string) => Promise<boolean> = async () => false,
+  saveFails: () => boolean = () => false,
+  /** Awaited before a save's answer comes back: the save is on its way meanwhile. */
+  answer: () => Promise<void> = async () => {}
 ) => {
   const session = {
     id: chatId as ChatId,
@@ -59,6 +73,7 @@ const chat = (
         fn((tag, payload) => {
           calls.push({ tag, payload })
           if (tag === "OpenComposer") return swept() ? Effect.fail("NotFound") : Effect.succeed(draftOf(chatId))
+          if (tag === "SaveComposer" && saveFails()) return Effect.fail("offline")
           if (tag === "SaveComposer")
             return Effect.succeed(
               swept()
@@ -72,6 +87,7 @@ const chat = (
           return Effect.fail("unexpected")
         })
       )
+      if (calls.at(-1)?.tag === "SaveComposer") await answer()
       return Exit.isSuccess(result)
         ? { ok: true, value: result.value }
         : { ok: false, error: { tag: "NotFound", message: "gone", problems: [], reason: null } }
@@ -107,6 +123,7 @@ const stopped = async (calls: Array<Call>) => {
 
 beforeEach(() => {
   copies.clear()
+  aborting.on = false
   takeLeftover("old")
 })
 
@@ -135,21 +152,22 @@ it("what's typed after the stop starts the fresh chat's composer, and is saved t
   expect(saves(freshCalls).map((call) => call.payload.content)).toEqual([
     "Typed before the sweep was known. And after it."
   ])
-  expect(takeLeftover("old")).toBeNull()
+  expect(takeLeftover("old")).toEqual([])
 })
 
 it("what's typed after the stop is there to file once as the tab leaves", async () => {
   const old = await stopped([])
   old.type("Typed after the stop, then the tab closed.")
-  const left = takeLeftover("old")
+  const [left, ...more] = takeLeftover("old")
   expect(left?.content).toBe("Typed after the stop, then the tab closed.")
   expect(left?.save.chatId).toBe("old")
-  expect(takeLeftover("old")).toBeNull()
+  expect(more).toEqual([])
+  expect(takeLeftover("old")).toEqual([])
 })
 
 it("nothing is left when the box holds only what the sweep filed", async () => {
   await stopped([])
-  expect(takeLeftover("old")).toBeNull()
+  expect(takeLeftover("old")).toEqual([])
 })
 
 const keptFor = (chatId: string) => [...copies.values()].filter((copy) => copy.refId === `composer:${chatId}`)
@@ -234,4 +252,99 @@ it("what's carried into the fresh chat leaves the swept chat's copy only once th
   expect(keptFor("old")).toEqual([])
   // The fresh box saved it on its own draft.
   expect(saves(freshCalls).map((call) => call.payload.content)).toEqual(["Typed after the stop, carried."])
+})
+
+it("carrying keeps the swept chat's copy when the fresh box's copy and save both fail (rev-dv1 #1)", async () => {
+  const old = await stopped([])
+  old.type("Typed after the stop, carried while storage and server fail.")
+  await settle()
+  carryLeftover("old", "fresh")
+  aborting.on = true
+  const fresh = chat(
+    "fresh",
+    [],
+    () => false,
+    undefined,
+    () => true
+  )
+  fresh.setFork("fork" as ForkId, false)
+  await vi.waitFor(() =>
+    expect(fresh.snapshot().text).toBe("Typed after the stop, carried while storage and server fail.")
+  )
+  await settle()
+  aborting.on = false
+  expect(keptFor("old").map((copy) => copy.content)).toEqual([
+    "Typed after the stop, carried while storage and server fail."
+  ])
+})
+
+it("two panes of one swept chat each keep their own text (rev-dv1 #2)", async () => {
+  const sent: Array<string> = []
+  const keepalive = async (_path: string, body: string) => {
+    sent.push((JSON.parse(body) as { composers: Array<{ content: string }> }).composers[0]!.content)
+    return false
+  }
+  const pane = async () => {
+    let swept = false
+    const store = chat("old", [], () => swept, keepalive)
+    store.setFork("fork" as ForkId, false)
+    await vi.waitFor(() => expect(store.snapshot().ready).toBe(true))
+    swept = true
+    store.type("Typed before the sweep was known.")
+    await store.flush()
+    await settle()
+    return store
+  }
+  const first = await pane()
+  const second = await pane()
+  first.type("Typed in the first pane.")
+  second.type("Typed in the second pane.")
+  await settle()
+  expect(
+    keptFor("old")
+      .map((copy) => copy.content)
+      .sort()
+  ).toEqual(["Typed in the first pane.", "Typed in the second pane."])
+  // Each pane's page going sends its own text.
+  first.beacon()
+  second.beacon()
+  expect(sent.sort()).toEqual(["Typed in the first pane.", "Typed in the second pane."])
+  // Leaving files both, each under its own operation.
+  const filed: Array<string> = []
+  fileLeftover("old", async (save) => {
+    filed.push(save.content)
+    return { ok: true }
+  })
+  expect(filed.sort()).toEqual(["Typed in the first pane.", "Typed in the second pane."])
+})
+
+it("text cleared after the sweep leaves no copy to file later (rev-dv1 #3)", async () => {
+  let swept = false
+  let release = () => {}
+  let held = false
+  const store = chat(
+    "old",
+    [],
+    () => swept,
+    undefined,
+    undefined,
+    () => (held ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve())
+  )
+  store.setFork("fork" as ForkId, false)
+  await vi.waitFor(() => expect(store.snapshot().ready).toBe(true))
+  swept = true
+  held = true
+  store.type("Saved as the sweep came.")
+  const saving = store.flush()
+  await settle()
+  // Typed while that save is on its way.
+  store.type("Saved as the sweep came. Typed while it was out.")
+  await settle()
+  held = false
+  release()
+  await saving
+  await settle()
+  store.type("")
+  await settle()
+  expect(keptFor("old")).toEqual([])
 })

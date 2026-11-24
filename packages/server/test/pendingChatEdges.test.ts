@@ -110,6 +110,24 @@ describe("a pending chat's edges", () => {
     )
   )
 
+  it.live("a binned card with only a group greeting loses its message once left alone in the draft (rev-dfu1 #3)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira", { first_mes: "", group_only_greetings: ["Mira greets everyone."] })
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${tobin}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: mira } })
+        const shown = () => Effect.map(path(api, draft.id), (entries) => entries.map((entry) => entry.version.content))
+        assert.include(yield* shown(), "Mira greets everyone.")
+        yield* writer.DeleteEntity({ userId, entityId: mira })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        assert.notInclude(yield* shown(), "Mira greets everyone.")
+      })
+    )
+  )
+
   it.live("a send racing a join starts the chat with the greetings of the cast it starts with", () =>
     run(
       Effect.gen(function* () {
@@ -350,6 +368,49 @@ describe("a pending chat's edges", () => {
           field: "First message"
         })
         assert.isNull(yield* (yield* Reader).GetDraft({ userId, key }))
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+    })
+  })
+  it.live("the startup filing keeps every old workshop text, whatever the recovered texts' limit (rev-dfu1 #2)", () => {
+    const config = testConfig()
+    const layer = () => serverLayer(config, Generator.none)
+    const texts = ["The new workshop's first words.", "The story's workshop, first take.", "Its second take."]
+    return Effect.gen(function* () {
+      const story = yield* Effect.gen(function* () {
+        const { api, writer, userId } = yield* setup
+        yield* writer.ChangeBinLimit({ userId, key: "recoveredTexts", value: 1 })
+        const story = yield* api.CreateChat({ title: "Harbor" })
+        const save = (targetId: string, contents: ReadonlyArray<string>) =>
+          Effect.gen(function* () {
+            const key = new DraftKey({ targetKind: "user_field", targetId, field: "First message" })
+            let draft = null as { id: string; rowVersion: number; session: number } | null
+            for (const content of contents)
+              draft = yield* writer.SaveDraft({
+                userId,
+                key,
+                draftId: draft?.id ?? null,
+                content,
+                expectedRowVersion: draft?.rowVersion ?? null,
+                expectedSession: draft?.session ?? null,
+                baseRevision: null
+              })
+          })
+        yield* save("before-new", [texts[0]!])
+        // Two states of its own: the first replaced by a cut to the second.
+        yield* save(`before-${story.id}`, [texts[1]!, "", texts[2]!])
+        return story
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+      const db = new DatabaseSync(databaseFile(config.dataDir))
+      db.prepare(`UPDATE drafts SET target_id = 'pending-workshop:new' WHERE target_id = 'before-new'`).run()
+      db.prepare(`UPDATE drafts SET target_id = ? WHERE target_id = ?`).run(
+        `pending-workshop:${story.id}`,
+        `before-${story.id}`
+      )
+      db.close()
+      yield* Effect.gen(function* () {
+        const api = yield* client()
+        const recovered = (yield* api.ListRecoveredTexts({ limit: 50, before: null })).map((text) => text.content)
+        for (const text of texts) assert.include(recovered, text)
       }).pipe(Effect.scoped, Effect.provide(layer()))
     })
   })

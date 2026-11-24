@@ -56,17 +56,12 @@ export const adoptImages = async (from: string, to: string) => {
   for (const entry of await readImages(from)) await keepImage({ ...entry, scope: to })
 }
 /**
- * A group's old new-chat page kept its attachments under `<prefix>pending-group-chat:<sorted
- * character ids>:<group name>`: one whose characters are all in `cast` is that group's.
+ * Where a group's old new-chat page kept its attachments: `<prefix>pending-group-chat:<sorted
+ * character ids>:<group name>`, the group's characters being those it has (not the ones the user
+ * plays). Only that group's new chat takes them: another group of the same characters, or of
+ * more, has another key (rev-dfu1 #1).
  */
-export const isGroupCopyOf = (prefix: string, scope: string, cast: ReadonlySet<string>) => {
-  const head = `${prefix}pending-group-chat:`
-  if (!scope.startsWith(head)) return false
-  const ids = scope.slice(head.length).split(":")[0]!.split(",").filter(Boolean)
-  return ids.length > 0 && ids.every((id) => cast.has(id))
-}
-/** Moves what every scope `from` picks holds to `to`, as `adoptImages` does. */
-export const adoptImagesWhere = async (from: (scope: string) => boolean, to: string) => {
-  const all = (await transaction("readonly", (store) => store.getAll())) as ImageDraftEntry[]
-  for (const entry of all) if (entry.scope !== to && from(entry.scope)) await keepImage({ ...entry, scope: to })
-}
+export const legacyGroupScope = (
+  prefix: string,
+  group: { readonly name: string; readonly members: ReadonlyArray<string> }
+) => `${prefix}pending-group-chat:${[...group.members].sort().join(",")}:${group.name}`
