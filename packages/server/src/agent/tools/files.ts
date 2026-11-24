@@ -2068,6 +2068,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
       }
     })
 
+  /** Digest of the copied tree's names, bytes, types and modes, ignoring times and ownership. */
+  const copyFingerprint = (path: string) =>
+    `( cd -- ${q(path)} || exit 1; sockets=$(find . -type s -print -quit) || exit 1; [ -z "$sockets" ] || exit 1; LC_ALL=C tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 -cf - . ) | sha256sum`
+
   /** A git repository's files at a commit, in bytes: what a worktree of it takes. */
   const treeBytes = (rev: string) =>
     `${GIT} -C "$top" ls-tree -r -l ${rev} | awk '{ if ($4 ~ /^[0-9]+$/) s += $4 } END { print s + 0 }'`
@@ -2138,7 +2142,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
               `if ${GIT} -C "$top" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then echo taken; exit 1; fi`,
               `mkdir -p ${q(`${FILES_MOUNT}/${COPIES}`)} && ${GIT} -C "$top" worktree add --quiet -b "$branch" ${q(path)} ${q(base)}`
             ].join("\n")
-          : `set -o pipefail && mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf -`,
+          : [
+              "set -o pipefail",
+              `mkdir -p ${q(path)} && tar -C ${q(source)} --exclude=./${COPIES} -cf - . | tar -C ${q(path)} -xf - || exit 1`,
+              `fingerprint=$(${copyFingerprint(path)}) && printf 'fingerprint:%s\\n' "\${fingerprint%% *}" || :`
+            ].join("\n"),
         600_000,
         ctx.chatId
       )
@@ -2153,9 +2161,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         })
         return yield* Effect.fail(new ToolInputRefused("The copy couldn't be made."))
       }
+      const fingerprint = made.lines.find((line) => /^fingerprint:[0-9a-f]{64}$/.test(line))?.slice(12)
       const copy: SubagentCopyRecord = isGit
         ? { path, from: source, kind: "git", top, branch, base }
-        : { path, from: source, kind: "files" }
+        : { path, from: source, kind: "files", ...(fingerprint ? { fingerprint } : {}) }
       yield* madeCopy(env, copy)
       // It starts where the reply is, inside the copy.
       const start = yield* copyStart(env, path, posix.join(path, prefix).replace(/\/$/, ""))
@@ -2180,7 +2189,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   /**
    * At a subagent's end: a copy with no changes is removed (a worktree whose status, ignored
-   * files included, is clean and whose branch didn't move; a file copy the same as its source);
+   * files included, is clean and whose branch didn't move; a file copy the same as when it was made);
    * one with changes stays. Returns whether it stays. A copy that can't be checked stays.
    */
   const finishCopy = (userId: string, copy: SubagentCopyRecord) =>
@@ -2195,7 +2204,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
           copy.kind === "git"
             ? // Ignored files count: a fresh worktree has none, so any is the subagent's output.
               `safe_git "$dest"\nst=$(${GIT} -C "$dest" status --porcelain --untracked-files=all --ignored) || { echo changed; exit 0; }\nhead=$(${GIT} -C "$dest" rev-parse HEAD) || { echo changed; exit 0; }\nif [ -z "$st" ] && [ "$head" = ${q(copy.base ?? "")} ]; then echo same; else echo changed; fi`
-            : `if diff -rq --no-dereference -x ${COPIES} ${q(copy.from)} "$dest" >/dev/null 2>&1; then echo same; else echo changed; fi`
+            : copy.fingerprint === undefined
+              ? "echo changed"
+              : `set -o pipefail\nfingerprint=$(${copyFingerprint(copy.path)}) || exit 1\nif [ "$fingerprint" = ${q(`${copy.fingerprint}  -`)} ]; then echo same; else echo changed; fi`
         ].join("\n"),
         300_000,
         null
