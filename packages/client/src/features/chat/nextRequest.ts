@@ -39,6 +39,8 @@ export interface NextRequestAt {
   readonly fork: ForkId | null
   /** The estimate's revision: a change builds the request again. */
   readonly revision: number
+  /** The chat is pending until its first turn (a new chat): the request is its first. */
+  readonly pending: boolean
 }
 
 const published = new Map<symbol, { readonly chat: ChatId; readonly tab: string | null; readonly at: NextRequestAt }>()
@@ -63,7 +65,8 @@ export const nextRequests = {
       before.tab === tab &&
       before.at.leaf === at.leaf &&
       before.at.fork === at.fork &&
-      before.at.revision === at.revision
+      before.at.revision === at.revision &&
+      before.at.pending === at.pending
     )
       return
     published.set(token, { chat, tab, at })

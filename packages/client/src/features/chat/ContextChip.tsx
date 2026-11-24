@@ -4,8 +4,9 @@
 // (`/request/next`, NextRequestPage.tsx). The server works the size out with each pushed
 // estimate, from the request view the tab shows (`NextContext.size`, `GetNextRequest`), counted
 // locally: nothing is sent. What's typed is added once typing pauses (`restedText.ts`), so
-// keystrokes neither render this chip nor count anything. A chat not sent yet's chip
-// (draftRequest.tsx) shows the same popover for its first request.
+// keystrokes neither render this chip nor count anything. A new chat, pending until its first
+// turn, names its first request instead; the card-source start's chip (draftRequest.tsx) shows
+// the same popover for its first request.
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import type { TokenizerInfo } from "@dreamspan/shared/generation.ts"
 import { useNavigate } from "@tanstack/react-router"
@@ -54,6 +55,8 @@ export const ContextChip = memo(function ContextChip({
   const size = view.history?.size
   const budget = view.history?.budget ?? null
   const chatId = (view.chat?.id ?? null) as ChatId | null
+  // A chat pending until its first turn (a new chat, DraftChatPage.tsx) has sent nothing yet.
+  const pending = view.chat?.status === "pending"
   // Where this view stands, for the next request's tab (nextRequest.ts).
   const [token] = useState(() => Symbol("next request"))
   useEffect(() => {
@@ -62,9 +65,10 @@ export const ContextChip = memo(function ContextChip({
       nextRequests.publish(token, chatId, tabId, {
         leaf: view.leafSlotId,
         fork: view.forkId,
-        revision: view.contextRevision
+        revision: view.contextRevision,
+        pending
       })
-  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision])
+  }, [token, chatId, tabId, view.leafSlotId, view.forkId, view.contextRevision, pending])
   useEffect(() => () => nextRequests.withdraw(token), [token])
   if (view.loading || size === undefined || chatId === null) return null
   // The typed text as the request would hold it: its tokens, and 3 for its message.
@@ -82,7 +86,7 @@ export const ContextChip = memo(function ContextChip({
     <ContextPopover
       open={open}
       onOpenChange={setOpen}
-      request="next"
+      request={pending ? "first" : "next"}
       tokens={tokens}
       maximum={maximum}
       reserve={reserve}
