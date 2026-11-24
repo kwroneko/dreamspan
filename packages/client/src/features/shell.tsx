@@ -171,7 +171,7 @@ export const openAppMenu = () => {
 // Wide enough for the desktop sidebar (Tailwind's `lg`). Below it the sidebar is the phone's
 // menu, so only one of the two is ever mounted: a hidden desktop one ran its own queries (a card
 // source's search went out twice on a phone). Read during render, so the first frame is right.
-const DESKTOP = "(min-width: 1024px)"
+const DESKTOP = "(min-width: 64rem)"
 const subscribeDesktop = (listener: () => void) => {
   const query = matchMedia(DESKTOP)
   query.addEventListener("change", listener)
