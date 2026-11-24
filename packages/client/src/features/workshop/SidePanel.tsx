@@ -330,19 +330,17 @@ function SideChat({
   const [urlFork, setUrlFork] = usePlaceParam(forkKey, "")
   // The URL's branch while it goes with the story branch shown, else the one of those chatted in
   // last (spec/WORKSHOP-BRANCHES.md §8.1).
-  const branches = useWorkshopBranches(chat.id, (urlFork || null) as ForkId | null)
-  const beside = branches === null ? null : pairedWith(branches, storyFork)
-  const fork =
-    beside === null ? null : ((beside.find((branch) => branch.forkId === urlFork) ?? beside[0])?.forkId ?? null)
-  const known = beside !== null
+  const branches = useWorkshopBranches(chat.id, storyFork, "story")
+  const beside = branches === null ? [] : pairedWith(branches, storyFork)
+  const fork = (beside.find((branch) => branch.forkId === urlFork) ?? beside[0])?.forkId
   // Opened once on that branch; later the branch shown moves this session (Back, Forward, a story
   // branch switch) rather than starting another.
-  const [opening, setOpening] = useState<{ readonly fork: ForkId | null } | null>(null)
-  if (opening === null && known) setOpening({ fork })
+  const [opening, setOpening] = useState<ForkId | null>(null)
+  if (opening === null && fork !== undefined) setOpening(fork)
   const [session, setSession] = useState<ChatSession | null>(null)
   useLayoutEffect(() => {
     if (opening === null) return
-    const next = new ChatSession(chat.id, opening.fork, registry, userId, (title) => showToast({ title }))
+    const next = new ChatSession(chat.id, opening, registry, userId, (title) => showToast({ title }))
     // Shown once its first page is read, as a chat page's is (ChatPage.tsx).
     let shown = false
     const ready = () => {
@@ -358,7 +356,7 @@ function SideChat({
       next.dispose()
     }
   }, [chat.id, opening, registry, userId])
-  if (session === null || session.id !== chat.id)
+  if (session === null || session.id !== chat.id || fork === undefined)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {header}
@@ -369,7 +367,7 @@ function SideChat({
     <SideChatSurface
       session={session}
       fork={fork}
-      beside={beside ?? []}
+      beside={beside}
       onFork={setUrlFork}
       header={header}
       focusComposer={focusComposer}
@@ -388,7 +386,7 @@ function SideChatSurface({
   onGone
 }: {
   session: ChatSession
-  fork: ForkId | null
+  fork: ForkId
   /** Its branches going with the story branch shown, last chatted in first. */
   beside: ReadonlyArray<WorkshopBranch>
   onFork: (fork: string) => void
@@ -402,7 +400,7 @@ function SideChatSurface({
   const cast = useMemo(() => castView(view.cast), [view.cast])
   const kindRoot = kindRootProps(useChatKindLook(view.chat?.kind))
   // Back and Forward move the branch shown; a switch made here has moved it already.
-  const shownFork = useRef(fork)
+  const shownFork = useRef(view.forkId)
   useEffect(() => {
     if (shownFork.current === fork) return
     shownFork.current = fork
@@ -418,9 +416,9 @@ function SideChatSurface({
       if (!result.ok) return setBranchError(result.error.message)
       setBranchError(null)
       const target = result.value.fork.id
-      shownFork.current = target === result.value.chat.currentForkId ? null : target
+      shownFork.current = target
       session.showFork(target, result.value.slotId)
-      onFork(shownFork.current ?? "")
+      onFork(target)
     },
     [session, onFork]
   )
@@ -488,7 +486,7 @@ function SideChatSurface({
                 onOpenSummaries={noSummaries}
               />
             )}
-            {!changes && (
+            {!changes && !view.loading && view.forkId === fork && (
               <>
                 <SlotOutlet slot={chatComposerNotes} props={{ view, session }} />
                 <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: openPanel }} />

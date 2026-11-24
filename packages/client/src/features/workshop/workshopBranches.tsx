@@ -24,20 +24,27 @@ export const storyBranchName = (story: NonNullable<WorkshopBranch["story"]>) =>
 
 /**
  * The workshop's live branches, last chatted in first; null while first read. A fork the list
- * doesn't have yet (made by branching the story since) has it read again, once per fork.
+ * or story pairing it doesn't have yet has it read again, once per expected branch.
  */
-export const useWorkshopBranches = (chatId: ChatId, expect?: ForkId | null) => {
+export const useWorkshopBranches = (chatId: ChatId, expect: ForkId | null, kind: "workshop" | "story" = "workshop") => {
   const atom = branchesOf(chatId)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
   const list = AsyncResult.isSuccess(result) ? result.value : null
   const asked = useRef<string | null>(null)
-  const unknown = list !== null && expect != null && !list.some((branch) => branch.forkId === expect)
+  const missing =
+    list !== null &&
+    expect !== null &&
+    !list.some((branch) => (kind === "story" ? branch.story?.forkId : branch.forkId) === expect)
   useEffect(() => {
-    if (!unknown || asked.current === expect || result.waiting) return
-    asked.current = expect ?? null
+    if (!missing) {
+      asked.current = null
+      return
+    }
+    if (asked.current === expect || result.waiting) return
+    asked.current = expect
     refresh()
-  }, [unknown, expect, refresh, result.waiting])
+  }, [missing, expect, refresh, result.waiting])
   return list
 }
 
