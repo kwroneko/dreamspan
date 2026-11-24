@@ -253,19 +253,34 @@ const SORTS: ReadonlyArray<{
   readonly id: string
   readonly label: string
   readonly needs: ReadonlyArray<string>
+  /** The order in a notice's words: "cardex couldn't use name order". */
+  readonly order: string
   readonly defaultOrder: string
 }> = [
-  { id: "popular", label: "Popular", needs: ["popular"], defaultOrder: "popular cards" },
-  { id: "newest", label: "Newest added", needs: ["newest", "oldest"], defaultOrder: "newest first" },
+  { id: "popular", label: "Popular", needs: ["popular"], order: "popular", defaultOrder: "popular cards" },
+  {
+    id: "newest",
+    label: "Newest added",
+    needs: ["newest", "oldest"],
+    order: "newest added",
+    defaultOrder: "newest first"
+  },
   {
     id: "created",
     label: "Newest created",
     needs: ["created_desc", "created_asc"],
+    order: "newest created",
     defaultOrder: "newest created first"
   },
-  { id: "name", label: "Name, A to Z", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
-  { id: "tokens", label: "Most tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
-  { id: "relevance", label: "Relevance", needs: ["relevance"], defaultOrder: "best matches" }
+  { id: "name", label: "Name, A to Z", needs: ["name", "name_desc"], order: "name", defaultOrder: "A to Z" },
+  {
+    id: "tokens",
+    label: "Most tokens",
+    needs: ["tokens_desc", "tokens_asc"],
+    order: "most tokens",
+    defaultOrder: "most tokens first"
+  },
+  { id: "relevance", label: "Relevance", needs: ["relevance"], order: "relevance", defaultOrder: "best matches" }
 ]
 /** Our sort and direction as cardex's sort; null leaves it to cardex. */
 const sortParam = (query: SourceQuery) => {
@@ -1119,7 +1134,7 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
           next,
           ...(substituted
             ? {
-                notice: `cardex couldn't use ${SORTS.find((sort) => sort.id === query.sort)?.label.toLowerCase() ?? "the requested"} order just now. Showing ${params.get("sort") === defaultSort ? (query.text.trim() ? "best matches" : "popular cards") : (SORTS.find((sort) => sort.needs.includes(params.get("sort") ?? ""))?.defaultOrder ?? "another order")}.`
+                notice: `cardex couldn't use ${SORTS.find((sort) => sort.id === query.sort)?.order ?? "the requested"} order just now. Showing ${params.get("sort") === defaultSort ? (query.text.trim() ? "best matches" : "popular cards") : (SORTS.find((sort) => sort.needs.includes(params.get("sort") ?? ""))?.defaultOrder ?? "another order")}.`
               }
             : {}),
           ...(restarted ? { reset: true } : {}),
