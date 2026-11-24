@@ -1,6 +1,9 @@
 import type { ChatId, ForkSplit } from "@dreamspan/shared/chat.ts"
+import { SHELL_CHAT_IDS_LIMIT } from "@dreamspan/shared/chatSetupApi.ts"
 import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
+import { useAtomValue } from "@effect/atom-react"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
+import { AsyncResult, Atom } from "effect/reactivity"
 import { useState } from "react"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -8,7 +11,7 @@ import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ForkRow } from "../characters/ShellBrowser.tsx"
 import { useBranchHeight } from "../characters/useBranchHeight.tsx"
-import { sidebarCleared, useShellForks, useShellNavigation } from "../characters/shellData.tsx"
+import { shellForksQuery, sidebarCleared, useShellNavigation } from "../characters/shellData.tsx"
 import { formatMoment } from "./forks.ts"
 import { useSplitChats } from "./splitChats.ts"
 import { requestSplitReveal } from "./splitReveal.ts"
@@ -54,6 +57,31 @@ const splitRelation = (split: ForkSplit | null | undefined, now = Date.now()) =>
   return [shared, `split ${formatMoment(split.at, now)}`] as const
 }
 
+const relatedChatRows = Atom.family((key: string) => {
+  const ids = JSON.parse(key) as Array<ChatId>
+  const requests: Array<ReturnType<typeof shellForksQuery>> = []
+  for (let from = 0; from < ids.length; from += SHELL_CHAT_IDS_LIMIT) {
+    const chats = ids.slice(from, from + SHELL_CHAT_IDS_LIMIT)
+    requests.push(
+      shellForksQuery({
+        entity: null,
+        chat: null,
+        chats,
+        search: "",
+        sort: "recent",
+        sections: [{ id: "chats", limit: chats.length }]
+      })
+    )
+  }
+  return Atom.mapResult(
+    Atom.readable((get) => AsyncResult.all(requests.map((request) => get(request)))),
+    (batches) =>
+      batches
+        .flatMap((batch) => batch.rows.get("chats")?.rows ?? [])
+        .sort((a, b) => b.chatRecentAt - a.chatRecentAt || a.chat.id.localeCompare(b.chat.id))
+  )
+})
+
 /**
  * Related chats (splitsection, 2026-11-05): the chat this one was split from and the chats split
  * off from it, each under its own caption, as ordinary chat rows with a line saying what they share.
@@ -62,19 +90,13 @@ export function SplitChatSection() {
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const nextSplit = useSplitChats((params.chatId ?? null) as ChatId | null, shown)
-  const forks = useShellForks({
-    entity: null,
-    chat: null,
-    chats: nextSplit
-      ? [...(nextSplit.parent ? [nextSplit.parent.id] : []), ...nextSplit.children.map((c) => c.id)]
-      : [],
-    search: "",
-    sort: "recent",
-    sections: [{ id: "chats", limit: 5000 }]
-  })
-  const nextRows = forks.section("chats").rows
+  const ids = nextSplit
+    ? [...(nextSplit.parent ? [nextSplit.parent.id] : []), ...nextSplit.children.map((c) => c.id)]
+    : []
+  const result = useAtomValue(relatedChatRows(JSON.stringify(ids)))
+  const nextRows = AsyncResult.isSuccess(result) ? result.value : null
   const [last, setLast] = useState<{ split: typeof nextSplit; rows: typeof nextRows } | null>(null)
-  const ready = nextSplit !== null && !forks.loading
+  const ready = nextSplit !== null && nextRows !== null
   if (ready && (last?.split !== nextSplit || last?.rows !== nextRows)) setLast({ split: nextSplit, rows: nextRows })
   const split = ready ? nextSplit : last?.split
   const rows = ready ? nextRows : (last?.rows ?? [])
