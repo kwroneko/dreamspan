@@ -30,6 +30,7 @@ import { NotFound, type StaleWrite } from "@dreamspan/shared/errors.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import {
   MCP_LISTING_BYTES_LIMIT,
+  MCP_LISTING_PAGES_LIMIT,
   MCP_OAUTH_CALLBACK,
   MCP_TIMEOUT_MAX_S,
   MCP_TIMEOUT_MIN_S,
@@ -1153,6 +1154,7 @@ export const layer = Layer.effect(
     const listOn = (userId: UserId, prepared: McpPrepared, session: McpSession) =>
       Effect.gen(function* () {
         const tools: Array<unknown> = []
+        const cursors = new Set<string>()
         let bytes = 0
         let truncated = false
         let cursor: string | undefined
@@ -1178,6 +1180,12 @@ export const layer = Layer.effect(
             tools.push(tool)
           }
           cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined
+          if (cursor !== undefined && !truncated) {
+            if (cursors.has(cursor))
+              return yield* Effect.fail(new McpRequestFailed("error", "The server repeated a tool-list cursor.", false))
+            cursors.add(cursor)
+            truncated = cursors.size >= MCP_LISTING_PAGES_LIMIT
+          }
         } while (cursor !== undefined && !truncated)
         const server = serverInfoOf(
           session.client.getServerVersion(),

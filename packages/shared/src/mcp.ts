@@ -31,6 +31,7 @@ export const MCP_DESCRIPTION_LIMIT = 4000
 export const MCP_SCHEMA_LIMIT = 64 * 1024
 /** A listing stops here: the first this many tools, at most this many bytes. */
 export const MCP_TOOLS_LIMIT = 1000
+export const MCP_LISTING_PAGES_LIMIT = 100
 export const MCP_LISTING_BYTES_LIMIT = 2 * 1024 * 1024
 /** The longest a model-facing tool name may be (OpenAI's function-name limit, the strictest wire). */
 export const MCP_TOOL_NAME_LIMIT = 64
@@ -67,7 +68,7 @@ export const McpServerInfo = Schema.Struct({
   protocolVersion: Schema.String,
   instructions: Schema.NullOr(Schema.String),
   capabilities: Schema.Record(Schema.String, Schema.Unknown),
-  /** The listing stopped at MCP_TOOLS_LIMIT tools or MCP_LISTING_BYTES_LIMIT bytes. */
+  /** The listing stopped at its tool, page or byte limit. */
   truncated: Schema.Boolean
 })
 export type McpServerInfo = typeof McpServerInfo.Type
