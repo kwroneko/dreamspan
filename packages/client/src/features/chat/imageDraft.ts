@@ -12,6 +12,8 @@ export interface ImageDraftEntry {
   readonly kind?: "file"
   /** Where it is in Files: saved there by its upload, or attached from there. */
   readonly path?: string
+  /** A character card file (spec/WORKSHOP-CARDS.md §4.5), as the server read it. */
+  readonly card?: { readonly name: string; readonly format: "png" | "json" | "charx" }
   readonly saved?: boolean
   readonly sending?: {
     readonly draftId: string

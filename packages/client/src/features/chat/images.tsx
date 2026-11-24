@@ -270,10 +270,10 @@ function AttachedThumbnail({
   /** The remove X straddling the top-right corner. */
   corner: ReactNode
 }) {
-  if (item.kind === "file")
+  if (item.kind === "file" || item.card)
     return (
       <div className="tile-toggle-surface relative">
-        <FileTile name={item.name} href={item.fileHref ?? null} view={item.fileView ?? null} />
+        <FileTile name={item.name} href={item.fileHref ?? null} view={item.fileView ?? null} card={item.card ?? null} />
         {corner}
       </div>
     )
@@ -311,44 +311,69 @@ function AttachedThumbnail({
   )
 }
 
+/** A character card attached as a file (spec/WORKSHOP-CARDS.md §4.5): its name, and its picture when it's a PNG. */
+interface CardFace {
+  readonly name: string
+  readonly picture: string | null
+}
+
 /**
  * A file that isn't an image (spec/FILES-AND-ENVIRONMENT.md §6.1): its type icon and name. With
  * `href`, a link that downloads the copy sent with the message; without, it's still being added.
+ * A card file (`card`) shows as a card: its picture (a PNG card's own) in the attachments' 104 px
+ * box, its name under it, and "Card file".
  */
 function FileTile({
   name,
   href,
   view,
-  show
+  show,
+  card
 }: {
   name: string
   href: string | null
   /** The copy as sent, inline: it opens in the viewer for its type, where there is one. */
   view?: string | null
   show?: string | null
+  card?: CardFace | null
 }) {
   const navigate = useNavigate()
   const attachments = useFileAttachments()
   const [open, setOpen] = useState(false)
   const Viewer = attachments?.Viewer
   const opens = view !== null && view !== undefined && Viewer !== undefined && (attachments?.opens?.(name) ?? false)
-  const body = (
+  const body = card ? (
+    <>
+      <span className="flex h-26 w-26 items-center justify-center overflow-hidden rounded-md border border-border bg-surface-raised">
+        {card.picture ? (
+          <ContentImage src={card.picture} alt="" className="h-26 w-26 object-cover" />
+        ) : (
+          <Icon name="user" size={32} className="text-muted" />
+        )}
+      </span>
+      <span className="w-full truncate text-center text-xs text-text">{card.name}</span>
+      <span className="text-xs text-muted">Card file</span>
+    </>
+  ) : (
     <>
       <Icon name="file" className="shrink-0 text-muted" />
       <span className="min-w-0 truncate">{name}</span>
     </>
   )
-  const tile =
-    "flex h-11 max-w-60 min-w-0 items-center gap-2 rounded-md border border-border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  const tile = card
+    ? "flex w-26 flex-col items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+    : "flex h-11 max-w-60 min-w-0 items-center gap-2 rounded-md border border-border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  const what = card ? "card file" : "file"
   return (
-    <span className="flex min-w-0 items-center gap-1">
+    <span className={`flex min-w-0 gap-1 ${card ? "items-start" : "items-center"}`}>
       {href && opens && Viewer && view ? (
         <>
-          <Tooltip label="Opens the copy of this file as it was attached.">
+          <Tooltip label={`Opens the copy of this ${what} as it was attached.`}>
             <button
               type="button"
-              className={`${tile} hover:bg-hover`}
-              aria-label={`Open ${name}`}
+              className={`${tile} ${card ? "" : "hover:bg-hover"}`}
+              aria-label={card ? `Open the card file ${card.name} (${name})` : `Open ${name}`}
+              data-card-file={card ? name : undefined}
               onClick={() => setOpen(true)}
             >
               {body}
@@ -376,20 +401,26 @@ function FileTile({
           </Dialog>
         </>
       ) : href ? (
-        <Tooltip label="Downloads the copy of this file as it was attached.">
+        <Tooltip label={`Downloads the copy of this ${what} as it was attached.`}>
           <a
             href={href}
             download={name}
             rel="noopener"
-            className={`${tile} hover:bg-hover`}
-            aria-label={`Download ${name}`}
+            className={`${tile} ${card ? "" : "hover:bg-hover"}`}
+            aria-label={card ? `Download the card file ${card.name} (${name})` : `Download ${name}`}
+            data-card-file={card ? name : undefined}
           >
             {body}
           </a>
         </Tooltip>
       ) : (
-        <Tooltip label="This file is still being added.">
-          <span tabIndex={0} className={tile} aria-label={`${name}, being added`}>
+        <Tooltip label={`This ${what} is still being added.`}>
+          <span
+            tabIndex={0}
+            className={tile}
+            aria-label={`${name}, being added`}
+            data-card-file={card ? name : undefined}
+          >
             {body}
           </span>
         </Tooltip>
@@ -414,6 +445,8 @@ interface AttachmentItem {
   readonly name: string
   /** A file that isn't an image (§6.1): shown by its name, opening its copy at `fileHref`. */
   readonly kind?: "file"
+  /** A character card file (spec/WORKSHOP-CARDS.md §4.5): shown as a card. */
+  readonly card?: CardFace
   readonly fileHref?: string | null
   /** The copy as sent, inline, for its viewer. */
   readonly fileView?: string | null
@@ -681,7 +714,8 @@ function ImageScope({
     position: row.position,
     saved: true,
     ...(row.kind ? { kind: row.kind } : {}),
-    ...(row.path ? { path: row.path } : {})
+    ...(row.path ? { path: row.path } : {}),
+    ...(row.card ? { card: row.card } : {})
   })
   const upload = async (entry: ImageDraftEntry) => {
     if (entry.mediaId) return sync(entry)
@@ -707,6 +741,7 @@ function ImageScope({
         mediaId: attached.mediaId,
         ...("path" in attached ? { path: attached.path } : {}),
         ...("kind" in attached && attached.kind === "file" ? { kind: "file" as const } : {}),
+        ...("card" in attached && attached.card ? { card: attached.card } : {}),
         ...(entry.pendingPosition === undefined ? {} : { pendingPosition: entry.pendingPosition })
       }
       await keepImage(uploaded)
@@ -1076,7 +1111,16 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                       mediaId: entry.mediaId ?? null,
                       file: entry.file,
                       thumbnail: <DraftThumbnail entry={entry} />,
-                      ...(entry.kind === "file" || (!entry.mediaId && entry.path && !entry.file)
+                      ...(entry.card
+                        ? {
+                            card: {
+                              name: entry.card.name,
+                              picture:
+                                entry.card.format === "png" && entry.mediaId ? mediaUrl(entry.mediaId, 208) : null
+                            }
+                          }
+                        : {}),
+                      ...(entry.kind === "file" || entry.card || (!entry.mediaId && entry.path && !entry.file)
                         ? {
                             kind: "file" as const,
                             fileHref:
@@ -1423,7 +1467,8 @@ function Thumbnails({
   if (!images.length || editing) return null
   // A workshop's files of other types (§6.1) by name; the images' indexes are among images only.
   const pictures = imagesOnly(images)
-  const others = images.filter((image) => image.kind === "file")
+  // A card file shows as a card among them, a PNG card too; its index stays among the images.
+  const others = images.filter((image) => image.kind === "file" || image.card)
   return (
     <>
       {others.length > 0 && (
@@ -1435,6 +1480,14 @@ function Thumbnails({
                 href={attachments ? attachments.copyUrl(file.mediaId, file.name ?? file.altText ?? "file", true) : null}
                 view={attachments ? attachments.copyUrl(file.mediaId, file.name ?? file.altText ?? "file") : null}
                 show={attachments && file.path ? attachments.showHref(file.path) : null}
+                card={
+                  file.card
+                    ? {
+                        name: file.card.name,
+                        picture: file.card.format === "png" ? mediaUrl(file.mediaId, 208) : null
+                      }
+                    : null
+                }
               />
             </li>
           ))}
@@ -1442,6 +1495,7 @@ function Thumbnails({
       )}
       <div className="flex flex-wrap gap-2 empty:hidden" aria-label="Message images">
         {pictures.map((image, index) => {
+          if (image.card) return null
           const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
           const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
           const reason = excluded ? "taken out of the context by you" : left ? left.message : null

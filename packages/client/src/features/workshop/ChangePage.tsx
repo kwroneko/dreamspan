@@ -21,8 +21,8 @@ import { useSharedEditorStore } from "../editor/sharedStore.ts"
 import { useEditorState, useWorkingDoc, type EditorStore } from "../editor/store.ts"
 import { useTitle } from "../shell.tsx"
 import { openNearProps } from "../workbench/kinds.ts"
-import { ItemPicture } from "./ChangeRows.tsx"
-import { type ChangeReply, changeViewTarget, type ItemChange, itemChanges } from "./changeRows.ts"
+import { cardFileHref, ItemPicture } from "./ChangeRows.tsx"
+import { cardFileChangeTarget, type ChangeReply, changeViewTarget, type ItemChange, itemChanges } from "./changeRows.ts"
 import { versionEffectsAtom } from "./effects.ts"
 import { ItemChangeAction } from "./ItemChangeAction.tsx"
 import { type ItemChangeDetail, itemChangeAtom, itemChangeKey } from "./itemChange.ts"
@@ -231,6 +231,84 @@ function ChangeView({ target }: { target: Target }) {
       </div>
     </section>
   )
+}
+
+/**
+ * A card file's change view (spec/WORKSHOP-CARDS.md §4.5): what one reply's edits changed in a
+ * card file in Files, field by field, from the fields its edits kept; the header links the file,
+ * the reply, and has the row's Revert.
+ */
+function CardFileChangeView({ target }: { target: NonNullable<ReturnType<typeof cardFileChangeTarget>> }) {
+  const result = useAtomValue(versionEffectsAtom(target.reply.versionId))
+  const item = AsyncResult.isSuccess(result)
+    ? itemChanges(result.value).find((i) => i.file?.path === target.path && i.to === target.to)
+    : undefined
+  const title = changeTabName(item?.label ?? "")
+  useTitle(title)
+  if (AsyncResult.isFailure(result) || (AsyncResult.isSuccess(result) && !item?.file))
+    return (
+      <Alert tone="warning">
+        <p>This change isn’t there any more.</p>
+      </Alert>
+    )
+  if (!item?.file) return <Loading label="Reading the changes…" />
+  const { file } = item
+  const changes = changedFields(file.before, file.after)
+  const at = item.effects.at(0)?.createdAt
+  return (
+    <section aria-label={title} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <CenterHeaderContent>
+        <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
+      </CenterHeaderContent>
+      <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 p-3 sm:p-4">
+        <header className="flex min-w-0 items-start gap-3">
+          <ItemPicture item={item} />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <Tooltip label="Opens the card file in Files, as it is now.">
+              <a
+                href={cardFileHref(file.path)}
+                className={`${link} w-fit text-base font-semibold [overflow-wrap:anywhere]`}
+                {...linkMenuProps}
+              >
+                {item.label}
+              </a>
+            </Tooltip>
+            <p className="text-xs text-muted [overflow-wrap:anywhere]">
+              Card file {file.path}, changed by the assistant in{" "}
+              <Tooltip label="Opens the workshop at the reply that made this change.">
+                <Link
+                  to="/chats/$chatId"
+                  params={{ chatId: target.reply.chatId }}
+                  search={{ slot: target.reply.slotId } as never}
+                  className={link}
+                  {...linkMenuProps}
+                >
+                  a workshop reply
+                </Link>
+              </Tooltip>
+              {at ? ` at ${new Date(at).toLocaleTimeString([], { timeStyle: "short" })}` : ""}
+            </p>
+          </div>
+          <ItemChangeAction item={item} />
+        </header>
+        <Comparisons
+          kind="card"
+          before={file.before}
+          after={file.after}
+          changes={changes}
+          beforeLabel="Before this reply"
+          afterLabel="After this reply"
+        />
+      </div>
+    </section>
+  )
+}
+
+export function CardFileChangePage() {
+  const href = useLocation({ select: (location) => location.href })
+  const target = cardFileChangeTarget(new URL(href, "http://tab.invalid"))
+  if (!target) return <Alert tone="warning">This link doesn’t name a change.</Alert>
+  return <CardFileChangeView key={`${target.path}\n${target.to}`} target={target} />
 }
 
 export function ChangePage() {

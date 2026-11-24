@@ -12,7 +12,9 @@ const actionLabel = (item: ItemChange) => (item.created ? "Undo" : "Revert")
 const actionHint = (item: ItemChange) =>
   item.created
     ? `Moves ${item.label} to the bin, with what this reply wrote in it.`
-    : `Puts ${item.label} back as it was before this reply, as a new revision.`
+    : item.file
+      ? `Puts the card file back as it was before this reply. The file as it is now is kept as an earlier version.`
+      : `Puts ${item.label} back as it was before this reply, as a new revision.`
 
 export function ItemChangeAction({ item }: { item: ItemChange }) {
   const action = useAction()
@@ -20,7 +22,11 @@ export function ItemChangeAction({ item }: { item: ItemChange }) {
     return (
       <Tooltip
         label={
-          item.created ? `${item.label} is in the bin.` : `${item.label} was put back as it was before this reply.`
+          item.created
+            ? `${item.label} is in the bin.`
+            : item.file
+              ? "The card file was put back as it was before this reply."
+              : `${item.label} was put back as it was before this reply.`
         }
       >
         <span
