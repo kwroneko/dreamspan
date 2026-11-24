@@ -179,6 +179,20 @@ export const migrationDefinitions = {
             WHERE j.value ->> '$.revisionId' = purged_library_documents.revision_id);
       END`
     ]
+  },
+  // Cards, lorebooks and presets attached to a workshop's composer and not sent yet
+  // (spec/WORKSHOP-CARDS.md §4.4): one row per item, gone once sent or removed. The ref has no
+  // foreign key: an item binned or purged meanwhile is left out of the reads and refused at send.
+  "0021_composer_library": {
+    statements: [
+      `CREATE TABLE composer_library (
+        draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+        ref_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('card', 'lorebook', 'preset')),
+        position INTEGER NOT NULL,
+        PRIMARY KEY (draft_id, ref_id)
+      ) STRICT, WITHOUT ROWID`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

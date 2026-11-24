@@ -8,7 +8,7 @@
 // - `actions`: the row's last buttons, at its right end (guidance, generate, send);
 // - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) under the box.
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
-import type { EntityId, PathEntry, MessageImages } from "@dreamspan/shared/chat.ts"
+import type { EntityId, PathEntry, MessageImages, MessageLibrary } from "@dreamspan/shared/chat.ts"
 import type { AvatarCrop } from "@dreamspan/shared/media.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
@@ -28,7 +28,7 @@ export interface ComposerControlContext {
   /** The box's text once typing pauses (`restedText.ts`): what reads it this way doesn't render per keystroke. */
   readonly typed: import("./restedText.ts").RestedText
   readonly compact?: boolean
-  readonly recoverQueued: (text: string, images?: MessageImages) => void
+  readonly recoverQueued: (text: string, images?: MessageImages, library?: MessageLibrary) => void
   readonly session: ChatSession
   readonly view: ChatView
   /** Opens a side panel tab. */
@@ -99,6 +99,8 @@ export interface PlannedSend {
   readonly composer: ComposerSource
   readonly images?: MessageImages | undefined
   readonly imageDraftIds?: ReadonlyArray<string> | undefined
+  /** Cards, lorebooks and presets a workshop's message carries (spec/WORKSHOP-CARDS.md §4). */
+  readonly library?: MessageLibrary | undefined
 }
 
 /**

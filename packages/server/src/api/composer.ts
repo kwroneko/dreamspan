@@ -2,7 +2,7 @@
 // draft store every text field shares (ARCHITECTURE §3.10). A closing page sends its unsaved
 // text to POST /library/drafts with the editors' (importer/routes.ts).
 import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
-import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
+import { ComposerLibraryApi, TextTooLong } from "@dreamspan/shared/composerApi.ts"
 import { composerKey } from "@dreamspan/shared/drafts.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -69,4 +69,21 @@ export const makeComposerHandlers = Effect.gen(function* () {
       )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers
+})
+
+/** A workshop composer's library items (spec/WORKSHOP-CARDS.md §4.4), a group of its own. */
+export const makeComposerLibraryHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    GetComposerLibrary: (payload) =>
+      Effect.flatMap(userId, (id) => reader.GetComposerLibrary({ userId: id, ...payload })).pipe(
+        internal("GetComposerLibrary")
+      ),
+    SetComposerLibrary: (payload) =>
+      Effect.flatMap(userId, (id) => writer.SetComposerLibrary({ userId: id, ...payload })).pipe(
+        internal("SetComposerLibrary")
+      )
+  } satisfies Parameters<typeof ComposerLibraryApi.of>[0]
 })

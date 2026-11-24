@@ -3,6 +3,7 @@ import { fileTyped, pendingRow, type SweptDraft, sweepPendingChat, titleFor } fr
 import { presenceAt, presenceJson } from "./participation.ts"
 import { composerKey, Draft } from "@dreamspan/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
+import { composerLibrary } from "./composerLibrary.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -515,6 +516,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         yield* graph.checkImages(userId, images ?? [], chatId)
         const libraryPins = kind === "message" ? yield* pinLibrary(sql, userId, chatId, library ?? []) : []
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
+        if (kind === "message") yield* composerLibrary(sql).consume(commitDraft?.draftId, library ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
         if (parentSlotId !== null) {

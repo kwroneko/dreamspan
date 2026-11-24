@@ -7,6 +7,7 @@ import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from
 import { previewFork } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
+import { composerLibrary } from "./composerLibrary.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast, chatStateAt, previewNamesOf } from "./cards.ts"
@@ -642,6 +643,8 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     GetComposerImages: ({ userId, chatId, draftId, ids }) =>
       composerImages(sql).read(userId, chatId, draftId, ids).pipe(query("GetComposerImages")),
+    GetComposerLibrary: ({ userId, chatId, draftId }) =>
+      composerLibrary(sql).read(userId, chatId, draftId).pipe(query("GetComposerLibrary")),
     GetComposerChoice: ({ userId, chatId, draftId }) =>
       drafts.composerChoice(userId, chatId, draftId).pipe(query("GetComposerChoice")),
 

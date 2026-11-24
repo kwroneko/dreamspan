@@ -174,7 +174,8 @@ describe("0002_files", () => {
           "library_attachments",
           "pending_chats",
           "queue_library_revisions",
-          "retained_library_attachments"
+          "retained_library_attachments",
+          "composer_library"
         ]
       )
       // The existing row is kept, an image by default.
@@ -503,7 +504,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0017_library_attachments",
       "0018_pending_chats",
       "0019_queue_library_revisions",
-      "0020_retained_library_attachments"
+      "0020_retained_library_attachments",
+      "0021_composer_library"
     ])
   }).pipe(Effect.provide(layer()))
 )

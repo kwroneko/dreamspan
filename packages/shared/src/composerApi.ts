@@ -9,6 +9,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { RefId } from "./library.ts"
 
 /** Text past the drafts' cap (DraftHistoryPolicy.maxContentChars); nothing was saved. */
 export class TextTooLong extends Schema.TaggedError<TextTooLong>()("TextTooLong", {
@@ -97,6 +98,23 @@ export const SetComposerImageFields = {
   path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)))
 }
 
+/**
+ * A card, lorebook or preset attached to a workshop's composer and not sent yet
+ * (spec/WORKSHOP-CARDS.md §4.4), with its name in the library now.
+ */
+export const ComposerLibraryItem = Schema.Struct({
+  kind: Schema.Literals(["card", "lorebook", "preset"]),
+  refId: RefId,
+  name: Schema.String
+})
+export type ComposerLibraryItem = typeof ComposerLibraryItem.Type
+export const SetComposerLibraryFields = {
+  ...ComposerImageKey,
+  /** Attached after those there, by id (the server knows each one's kind); one already there stays where it is. */
+  add: Schema.Array(RefId).check(Schema.isMaxLength(16)),
+  remove: Schema.Array(RefId).check(Schema.isMaxLength(16))
+}
+
 export class ComposerApi extends RpcGroup.make(
   Rpc.make("GetComposerImages", {
     payload: { ...ComposerImageKey, ids: ComposerImageIds },
@@ -170,6 +188,28 @@ export class ComposerApi extends RpcGroup.make(
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },
     success: ComposerChoice,
+    error: Schema.Union([...Errors])
+  })
+) {}
+
+/**
+ * A workshop composer's attached cards, lorebooks and presets (spec/WORKSHOP-CARDS.md §4.4), in a
+ * group of its own: AppCoreApi is at TypeScript's instantiation depth.
+ */
+export class ComposerLibraryApi extends RpcGroup.make(
+  /** Its items, in the order attached. */
+  Rpc.make("GetComposerLibrary", {
+    payload: ComposerImageKey,
+    success: Schema.Array(ComposerLibraryItem),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Removes, then attaches (a story's composer refuses: NotFound), and gives the list after. At
+   * most 16, as a message carries.
+   */
+  Rpc.make("SetComposerLibrary", {
+    payload: SetComposerLibraryFields,
+    success: Schema.Array(ComposerLibraryItem),
     error: Schema.Union([...Errors])
   })
 ) {}

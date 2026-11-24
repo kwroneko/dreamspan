@@ -19,9 +19,18 @@ import {
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else. Its box is the message editor's (the `message.text-editor`
 // slot): a message is typed styled as it will render, guidance plain.
-import type { CastCard, EntityId, MessageImages } from "@dreamspan/shared/chat.ts"
+import type { CastCard, EntityId, MessageImages, MessageLibrary } from "@dreamspan/shared/chat.ts"
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode
+} from "react"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { restedText } from "./restedText.ts"
@@ -235,10 +244,20 @@ export interface AttachmentInput {
   readonly editor: ReactNode
   /** The control that attaches (a paperclip), in the composer's action row. */
   readonly action?: ReactNode
-  readonly restore: (images: MessageImages) => void
+  /**
+   * Drops on the composer it takes besides files (a workshop's library items): `takes` while the
+   * drag is over (its data unreadable then), `drop` with the data.
+   */
+  readonly drop?: {
+    readonly takes: (data: DataTransfer) => boolean
+    readonly drop: (data: DataTransfer) => void
+  }
+  readonly restore: (images: MessageImages, library?: MessageLibrary) => void
   readonly capture: () => {
     readonly images: MessageImages
     readonly ids: readonly string[]
+    /** Cards, lorebooks and presets a workshop's message carries (spec/WORKSHOP-CARDS.md §4). */
+    readonly library?: MessageLibrary
     readonly begin: (from: ComposerSource) => Promise<void>
     readonly finish: (sent: boolean) => Promise<void>
   }
@@ -256,6 +275,38 @@ export function Composer({
   attachmentInput?: AttachmentInput
 }) {
   const { compact: phone, ref: composerRef } = useCompactComposer()
+  // Drops the attachments take besides files (a workshop's library items) are the composer's own:
+  // taken before the frame around it, which would open a dragged card as a tab.
+  const dropping = useRef(attachmentInput?.drop)
+  useLayoutEffect(() => {
+    dropping.current = attachmentInput?.drop
+  })
+  const rootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      const resized = composerRef(node)
+      if (node === null) return resized
+      const claim = (event: DragEvent) => {
+        if (!event.dataTransfer || !dropping.current?.takes(event.dataTransfer)) return false
+        event.preventDefault()
+        event.stopPropagation()
+        return true
+      }
+      const over = (event: DragEvent) => {
+        if (claim(event)) event.dataTransfer!.dropEffect = "copy"
+      }
+      const drop = (event: DragEvent) => {
+        if (claim(event)) dropping.current!.drop(event.dataTransfer!)
+      }
+      node.addEventListener("dragover", over)
+      node.addEventListener("drop", drop)
+      return () => {
+        resized?.()
+        node.removeEventListener("dragover", over)
+        node.removeEventListener("drop", drop)
+      }
+    },
+    [composerRef]
+  )
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -520,7 +571,8 @@ export function Composer({
                 decides: nextDecisionOn,
                 composer: from,
                 images: captured?.images,
-                imageDraftIds: captured?.ids
+                imageDraftIds: captured?.ids,
+                library: captured?.library
               })
             : await session.send(
                 from.text,
@@ -531,7 +583,8 @@ export function Composer({
                 captured?.images,
                 captured?.ids,
                 plan.round,
-                autoPick
+                autoPick,
+                captured?.library
               )
         accepted = sent
         report(outcome)
@@ -648,8 +701,8 @@ export function Composer({
     },
     typed,
     compact: phone,
-    recoverQueued: (withdrawn, images) => {
-      if (images?.length) attachmentInput?.restore(images)
+    recoverQueued: (withdrawn, images, library) => {
+      if (images?.length || library?.length) attachmentInput?.restore(images ?? [], library)
       const current = draft.snapshot().text
       draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
     },
@@ -760,7 +813,7 @@ export function Composer({
 
   return (
     <div
-      ref={composerRef}
+      ref={rootRef}
       className="@container chat-column flex flex-col gap-1.5 border-t border-border pt-2 pb-2 max-sm:px-2"
     >
       {/* Sent while a reply is written, posting after it: between the messages and the box. */}
@@ -809,7 +862,7 @@ export function Composer({
               surfaceClass: `composer-text text-base sm:text-sm${guidance ? "" : " composer-message"}`,
               onKeyDown,
               onBlur: typed.flush,
-              hostFiles: attachmentData,
+              hostFiles: (data: DataTransfer) => attachmentData(data) || (attachmentInput?.drop?.takes(data) ?? false),
               onChange: (value) => draft.type(value)
             }}
           />
