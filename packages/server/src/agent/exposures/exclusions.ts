@@ -345,6 +345,9 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetUserDisabled: "User-only security, consent, account, credential or network configuration.",
   SetVersionFlags: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetWorkshopGrant: "User-only security, consent, account, credential or network configuration.",
+  // spec/WORKSHOP-CARDS.md §2.5: Allow always grants are the user's; the agent can't give itself any.
+  ListLibraryGrants: "User-only security, consent, account, credential or network configuration.",
+  RemoveLibraryGrant: "User-only security, consent, account, credential or network configuration.",
   ShowSectionsAsText: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SourceCapabilities:
     "Exposed through the workshop's card-source tools (sources.* commands), which add the source and rating checks.",

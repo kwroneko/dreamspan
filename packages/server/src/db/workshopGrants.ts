@@ -18,6 +18,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
+import { writeClassGrant } from "./workshopSight.ts"
 
 type Sql = SqlClient.SqlClient
 
@@ -154,7 +155,14 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
           grantTarget?: unknown
           once?: unknown
           rerun?: { connectionId: string }
+          scoped?: { card?: { entityId: string } }
         }
+        // Allow always answers only a library class's question; for a card, the one the server
+        // named when it asked (spec/WORKSHOP-CARDS.md §2.4), never one the answer names.
+        if ((answer === "allow_card" || answer === "allow_always") && asked.scoped === undefined)
+          return yield* new ApprovalRefused({ message: "This can't be allowed always." })
+        if (answer === "allow_card" && asked.scoped?.card === undefined)
+          return yield* new ApprovalRefused({ message: "This workshop has no assistant card to allow it for." })
         const expectedAt = asked.storyAt
         // Server-written with the request: the client's answer can't name other content.
         const target = typeof asked.grantTarget === "string" ? asked.grantTarget : ""
@@ -188,12 +196,21 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
           workshopCapabilities.get(row.capability)?.modes?.includes("allow") === false
         )
           return yield* new ApprovalRefused({ message: "This capability must ask each time." })
-        yield* sql`UPDATE tool_approvals SET status = ${answer === "deny" ? "denied" : "allowed"}, answer = ${answer},
+        // A standing answer (for the card, always) is kept in its setting; the row is this call's Allow.
+        const stored = answer === "allow_card" || answer === "allow_always" ? "allow" : answer
+        yield* sql`UPDATE tool_approvals SET status = ${answer === "deny" ? "denied" : "allowed"}, answer = ${stored},
           note = ${note}, answered_at = ${Date.now()} WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (answer === "allow_chat") {
           yield* ownedWorkshop(sql, userId, chat_id)
           yield* writeGrant(sql, userId, chat_id, row.capability, "allow", target)
         }
+        if (answer === "allow_card" || answer === "allow_always")
+          yield* writeClassGrant(
+            sql,
+            userId,
+            row.capability,
+            answer === "allow_card" ? asked.scoped!.card!.entityId : null
+          )
       }).pipe(transaction(sql, "AnswerToolApproval")),
     SettleToolApproval: ({ userId, rolloutId, toolCallId, status }) =>
       Effect.gen(function* () {

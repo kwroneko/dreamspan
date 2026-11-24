@@ -167,8 +167,13 @@ export function workshopChatTests() {
           await expect(nextReply(page).getByRole("button", { name: /^Next: / })).toHaveCount(0)
           await chip.click()
           const popover = page.getByRole("dialog", { name: "What the assistant may do" })
-          await expect(popover.locator('[data-capability="library.read"]')).toContainText("Read your library")
-          await expect(popover.locator('[data-capability="library.read"]')).toContainText("Always allowed")
+          // The library classes ask first by default (spec/WORKSHOP-CARDS.md §2.2).
+          const cards = popover.locator('[data-capability="library.cards"]')
+          await expect(cards).toContainText("Look through your cards")
+          await expect(cards.getByRole("button", { name: "Ask first", exact: true })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+          )
           for (const [id, label] of [
             ["library.write", "Create and edit library items"],
             ["chats.setup", "Set up chats"],

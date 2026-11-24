@@ -134,6 +134,7 @@ const SCOPED: Readonly<Record<string, number>> = {
   "db/workshopForks.ts": 1,
   "db/workshopGrants.ts": 6,
   "db/workshopPairing.ts": 2,
+  "db/workshopSight.ts": 2,
   "db/workshopTranscript.ts": 1,
   "db/workshopWrites.ts": 2,
   "db/writes.ts": 12

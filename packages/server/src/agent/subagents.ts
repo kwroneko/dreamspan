@@ -42,6 +42,8 @@ import {
 import type { SubagentModelEntry, SubagentModelsAt } from "../db/subagentSettings.ts"
 import { ExecutionRegistry, executionRegistry } from "../execution.ts"
 import { askUser, makePermit, offeredByGrants } from "./approvals.ts"
+import { makeLibrarySight } from "./librarySight.ts"
+import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { loadingWireFor } from "./loadingPlan.ts"
 import { Mailbox } from "./mailbox.ts"
 import { codeType, generalType, researchType } from "./subagentTypesPart.ts"
@@ -1478,24 +1480,9 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       writer: run.writer,
       ...(run.onChanged ? { onChanged: run.onChanged } : {}),
       ...(run.onState ? { onState: run.onState } : {}),
-      permit: (input) => {
-        // While it waits for the user's answer its wall time doesn't run (§6.2: the limit is
-        // for runaway work, not for the user's reading).
-        let waitingNow = false
-        return permit({
-          ...input,
-          onWaiting: (prompt) => {
-            if (prompt !== null && !waitingNow) {
-              waitingNow = true
-              if (asking++ === 0) clock.pause()
-            } else if (prompt === null && waitingNow) {
-              waitingNow = false
-              if (--asking === 0) clock.resume()
-            }
-            input.onWaiting(prompt)
-          }
-        })
-      },
+      permit: (input) => permit({ ...input, onWaiting: paused(input.onWaiting) }),
+      // Its library questions are the reply's (spec/WORKSHOP-CARDS.md §2.4): the reply's answers cover it.
+      ...(run.sight ? { sight: (context, onWaiting) => sight(context, paused(onWaiting)) } : {}),
       subagent: {
         writeNow: WRITE_REPORT,
         beforeNextRequest: (signal) => limitCheck(signal),
@@ -1525,8 +1512,31 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       chatId,
       rolloutId
     })
+    const sight = makeLibrarySight({
+      registries: execution,
+      reader: run.reader,
+      writer: run.writer,
+      userId,
+      chatId,
+      rolloutId
+    })
     /** Calls of its own waiting for the user's answer now. */
     let asking = 0
+    // While it waits for the user's answer its wall time doesn't run (§6.2: the limit is for
+    // runaway work, not for the user's reading).
+    const paused = (onWaiting: (prompt: ApprovalPrompt | null) => void) => {
+      let waitingNow = false
+      return (prompt: ApprovalPrompt | null) => {
+        if (prompt !== null && !waitingNow) {
+          waitingNow = true
+          if (asking++ === 0) clock.pause()
+        } else if (prompt === null && waitingNow) {
+          waitingNow = false
+          if (--asking === 0) clock.resume()
+        }
+        onWaiting(prompt)
+      }
+    }
     const services = yield* Effect.context<never>()
     const runPromise = Effect.runPromiseWith(services)
     // Its limits (§6.2): at 80% of one, a one-time note to wrap up; at 100%, the next request

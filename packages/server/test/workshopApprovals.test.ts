@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { TOOL_DATA_NOTICE, toolData } from "../src/agent/toolData.ts"
 // Asking first in workshops (spec/WORKSHOP.md §3.4, W4): per-capability grants, approvals bound
 // to one call, the server's own description of what a call will do, Off taking tools out of the
@@ -142,7 +143,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
     )
     const api = yield* client()
     yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { mock, api, chat, events }
   })
@@ -495,7 +496,7 @@ describe("workshop approvals", () => {
         )
       )
       const me = yield* api.Whoami()
-      const [grants] = yield* fixtureSql(
+      const [grants = []] = yield* fixtureSql(
         config.dataDir,
         [
           {
@@ -505,7 +506,10 @@ describe("workshop approvals", () => {
         ],
         { readOnly: true }
       )
-      assert.deepStrictEqual(grants, [{ capability: "library.write", mode: "allow", owner_user_id: me.id, target: "" }])
+      assert.deepStrictEqual(
+        grants.filter((g) => !OPEN_LIBRARY.some((o) => o.capability === g.capability)),
+        [{ capability: "library.write", mode: "allow", owner_user_id: me.id, target: "" }]
+      )
       assert.deepInclude(
         (yield* api.ListWorkshopCapabilities({ chatId: chat.id })).find((c) => c.id === "library.write"),
         {

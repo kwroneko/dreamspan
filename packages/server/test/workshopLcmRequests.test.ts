@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -112,7 +113,7 @@ for (const mode of ["native", "dispatcher", "every"] as const)
           key: "synthetic-summary",
           overrides: { context: 32768, maxOutput: 2048 }
         })
-        const chat = yield* api.CreateWorkshop({})
+        const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         yield* writer.AddStateEvent({
           userId: user.id,
           chatId: chat.id,

@@ -109,6 +109,11 @@ export interface AgentRun {
    */
   readonly permit?: (input: PermitInput) => Effect.Effect<PermitResult>
   /**
+   * What the library tools may look at without asking, and the class questions beyond it
+   * (librarySight.ts, spec/WORKSHOP-CARDS.md §2). Absent: no gate (outside a workshop).
+   */
+  readonly sight?: import("./librarySight.ts").LibrarySightFor
+  /**
    * This run is a subagent (spec/SUBAGENTS.md): its tools get no host to start one of their own,
    * and its last request says `writeNow`. Its transcript is summarized as it goes, as a workshop
    * reply's is (SA7).
@@ -734,7 +739,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         if (sent !== full) result.details = { ...(result.details as object | null), sentText: sent }
         deliveredContent.add(result.content)
       }
-      const context = (toolCallId: string) => ({
+      const baseContext = (toolCallId: string) => ({
         ...(workshopData
           ? {
               formatResult: (text: string, frame?: string) => {
@@ -823,6 +828,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
       })
+      // What the library tools may look at (librarySight.ts): a class's question shows on the call's step.
+      const context = (toolCallId: string) => {
+        const base = baseContext(toolCallId)
+        return run.sight ? { ...base, sight: run.sight(base, (prompt) => waitingChanged(toolCallId, prompt)) } : base
+      }
       const prepareTool = (tool: RolloutTool<never>, toolCallId: string) =>
         Effect.gen(function* () {
           const hook = tool.snapshot

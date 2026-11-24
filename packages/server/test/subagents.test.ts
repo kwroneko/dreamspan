@@ -3,6 +3,7 @@
 // the reply (and the workshop's grants now) allow, asks first where the reply would, reports inside
 // the data boundary, counts toward the reply's cost, stops alone with its row's Stop, and is never
 // started again by Resume. Synthetic data and a scripted loopback provider only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -145,7 +146,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
       connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {}
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { mock, api, chat, events, story: story.chat }
   })

@@ -345,13 +345,19 @@ export const makePermit =
  * tools out of the next turn's definitions (the cache breaks once), and is named in the
  * instructions. Ask first and Allowed change only execution, so the definitions stay as they were.
  */
-export const offeredByGrants = <T extends { readonly capability?: string | undefined; readonly effect: string }>(
+export const offeredByGrants = <
+  T extends {
+    readonly capability?: string | undefined
+    readonly gatedBy?: ReadonlyArray<string> | undefined
+    readonly effect: string
+  }
+>(
   deps: Pick<PermitDeps, "registries" | "reader" | "userId" | "chatId">,
   tools: ReadonlyArray<T>
 ): Effect.Effect<{ readonly tools: ReadonlyArray<T>; readonly off: ReadonlyArray<string> }> =>
   Effect.gen(function* () {
     // Story tools carry no capability: nothing to read, and their definitions stay byte-identical.
-    if (!tools.some((tool) => tool.capability !== undefined)) return { tools, off: [] }
+    if (!tools.some((tool) => tool.capability !== undefined || tool.gatedBy !== undefined)) return { tools, off: [] }
     const grants = new Map<string, CapabilityMode>(
       (yield* deps.reader
         .WorkshopGrants({ userId: deps.userId as never, chatId: deps.chatId as never, now: Date.now() })
@@ -360,11 +366,17 @@ export const offeredByGrants = <T extends { readonly capability?: string | undef
     const isOff = (tool: T) =>
       tool.capability !== undefined && resolveMode(deps.registries, grants, tool.capability, tool.effect) === "off"
     const off = [
-      ...new Set(
-        tools
+      ...new Set([
+        ...tools
           .filter(isOff)
-          .map((tool) => deps.registries.workshopCapabilities.get(tool.capability!)?.label ?? tool.capability!)
-      )
+          .map((tool) => deps.registries.workshopCapabilities.get(tool.capability!)?.label ?? tool.capability!),
+        // A library class turned off here keeps its tools (what's in view is read with them),
+        // but it's named, so the assistant asks for an attachment instead (WORKSHOP-CARDS §2.2).
+        ...tools
+          .flatMap((tool) => tool.gatedBy ?? [])
+          .filter((id) => grants.get(id) === "off")
+          .map((id) => deps.registries.workshopCapabilities.get(id)?.label ?? id)
+      ])
     ]
     return { tools: tools.filter((tool) => !isOff(tool)), off }
   })

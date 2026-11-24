@@ -1,6 +1,7 @@
 // Subagents, milestone SA7 (spec/SUBAGENTS.md §2.3, §10): a long subagent is summarized as it
 // goes, with the same request-boundary compaction a workshop reply uses; a fork sees the reply's
 // conversation and shares its request's prefix. Synthetic data and a scripted loopback provider only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -68,7 +69,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
     )
     const api = yield* client()
     yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

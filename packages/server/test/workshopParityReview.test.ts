@@ -118,7 +118,7 @@ describe("notes and files tools: review", () => {
   it("each capability's explanation names what its new tools touch", () => {
     const says = (id: string) => workshopCapabilities.get(id)!.explanation.toLowerCase()
     // Read your library: the shared and card notes read_note and list_shared_notes read.
-    assert.include(says("library.read"), "notes")
+    assert.include(says("library.notes"), "notes")
     // Create and edit library items: notes, the bin, a file's import, personas.
     for (const word of ["notes", "bin", "import", "persona"]) assert.include(says("library.write"), word)
     // Set up chats: a chat's notes, made and switched.

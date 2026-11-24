@@ -1,3 +1,4 @@
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -113,7 +114,7 @@ it.live(
       yield* api.ChangeGenerationDefaults({
         change: { model: { connection: connection.id, model: model.id }, lcm: { enabled: false } }
       })
-      const workshop = yield* api.CreateWorkshop({})
+      const workshop = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const state = foldState(
         yield* reader.StateEventsAt({ userId: user.id, chatId: workshop.id, slotId: workshop.activeLeafSlotId })
       )
@@ -395,7 +396,7 @@ it.live("does not inherit an unrelated later Undo through an identical call id a
       (yield* api.CreateChat({ title: "Early target" })).id,
       (yield* api.CreateChat({ title: "Later target" })).id
     )
-    const workshop = yield* api.CreateWorkshop({})
+    const workshop = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     yield* writer.AddStateEvent({
       userId: user.id,
       chatId: workshop.id,

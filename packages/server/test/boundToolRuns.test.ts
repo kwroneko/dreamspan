@@ -7,6 +7,7 @@
 // refusal's stripped retry leaving the run broken for every later request. Requests that carry
 // thinking opt into the provider's drop_block, and what it drops shows in the inspector only.
 // Synthetic chats only; nothing reaches a real provider.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
@@ -325,7 +326,7 @@ const workshopRun = (parent: Script, child: Script, tasks: ReadonlyArray<string>
       modelKey: BOUND,
       model: {}
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

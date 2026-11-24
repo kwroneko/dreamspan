@@ -2,6 +2,7 @@
 // effort and a type's, the type's first, each only where the model takes that level; the level
 // reaches each provider's request as the model's own "Reasoning effort" setting would, and the
 // subagent's row names it. Synthetic data and scripted loopback providers only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat } from "@dreamspan/shared/chat.ts"
@@ -184,7 +185,7 @@ const setup = (reasons: boolean) =>
       picks: ["same", pick],
       rows: { [pick]: { alias: "cheap", note: "", effort: "high" } }
     })
-    const chat: Chat = yield* api.CreateWorkshop({})
+    const chat: Chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { api, chat, events, first, second }
   })

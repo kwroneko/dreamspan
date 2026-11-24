@@ -262,6 +262,17 @@ export const migrationDefinitions = {
       ) STRICT, WITHOUT ROWID`,
       "CREATE INDEX change_reversal_effects_effect ON change_reversal_effects(rollout_id, tool_call_id, seq)"
     ]
+  },
+  // The library's classes (spec/WORKSHOP-CARDS.md §2.2): "Read your library" became four, and a
+  // workshop's choice for it is its choice for each of them.
+  "0027_library_classes": {
+    statements: [
+      `INSERT OR IGNORE INTO workshop_grants (chat_id, capability, target, owner_user_id, mode, expires_at, updated_at)
+        SELECT g.chat_id, c.value, g.target, g.owner_user_id, g.mode, g.expires_at, g.updated_at
+        FROM workshop_grants g, json_each('["library.cards","library.lorebooks","library.presets","library.notes"]') c
+        WHERE g.capability = 'library.read'`,
+      "DELETE FROM workshop_grants WHERE capability = 'library.read'"
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

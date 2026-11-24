@@ -9,6 +9,7 @@ import type { ChatId, ForkId, SlotId, VersionId } from "@dreamspan/shared/chat.t
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { Effect, type Scope } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
+import type { LibrarySight } from "./librarySight.ts"
 
 /**
  * `read`: lookups, freely re-run. `chat_state`: state events attached to the generating
@@ -51,6 +52,11 @@ export interface ToolContext {
   readonly writer: ToolWriter
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
   readonly cache: Map<string, unknown>
+  /**
+   * What the library tools may look at (spec/WORKSHOP-CARDS.md §2): what's in view, and a class's
+   * question for the rest. Absent outside a workshop run: nothing is gated.
+   */
+  readonly sight?: LibrarySight
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
   /** New workshop results only; receipt producers use this before saving their final text. */
@@ -193,6 +199,12 @@ export interface RolloutTool<A = never> {
   readonly explanation?: string
   readonly capability?: string
   /**
+   * The library classes this tool asks for what's outside view (spec/WORKSHOP-CARDS.md §2.2),
+   * through `ToolContext.sight`: shown in the capability chip wherever the tool is offered. They
+   * never take the tool out of the offer, since what's in view is read with it whatever they say.
+   */
+  readonly gatedBy?: ReadonlyArray<string>
+  /**
    * A capability that applies to this call only, from its arguments and the run's offer: the
    * permit then decides as for a tool with that capability (`load_skill` for a card's own skill).
    */
@@ -305,7 +317,8 @@ export const USER_ONLY_WRITES = [
   "ClearCapabilityGrants",
   "AnswerToolApproval",
   "RequestToolApproval",
-  "SettleToolApproval"
+  "SettleToolApproval",
+  "RemoveLibraryGrant"
 ] as const
 export type ToolWriter = Omit<Writer["Service"], (typeof USER_ONLY_WRITES)[number]>
 

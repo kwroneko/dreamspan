@@ -16,6 +16,12 @@ import { SubagentLimits, SubagentModels, SubagentTypes } from "@dreamspan/shared
 import { StaleWrite } from "@dreamspan/shared/errors.ts"
 import { StorageError } from "./ops.ts"
 
+/** Allow always for an assistant card, and in every workshop (spec/WORKSHOP-CARDS.md §2.5). */
+export const CARD_GRANTS = "workshop.cardGrants"
+export const ALWAYS_GRANTS = "workshop.alwaysGrants"
+/** Settings no agent writes, whatever a registration says: the assistant can't give itself anything. */
+export const USER_ONLY_SETTINGS: ReadonlySet<string> = new Set([CARD_GRANTS, ALWAYS_GRANTS])
+
 type SettingScope = "app" | "user" | "device"
 export interface SettingDefinition {
   readonly id: string
@@ -82,6 +88,15 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     scope: "user",
     schema: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String }))
   },
+  // What the assistant may look at without asking beyond one workshop (spec/WORKSHOP-CARDS.md
+  // §2.5): per assistant card (by entity, so its revisions and renames keep it) and in every
+  // workshop. Consent, so never an agent's write: no `agent` entry, and `USER_ONLY_SETTINGS`.
+  {
+    id: CARD_GRANTS,
+    scope: "user",
+    schema: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Literal("allow")))
+  },
+  { id: ALWAYS_GRANTS, scope: "user", schema: Schema.Record(Schema.String, Schema.Literal("allow")) },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.judge", scope: "user", schema: Schema.NullOr(ModelChoice) },

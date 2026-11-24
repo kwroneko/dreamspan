@@ -16,6 +16,7 @@ import { MediaHolds } from "../importer/MediaHolds.ts"
 import { Formats } from "../importer/Formats.ts"
 import { DISK_RESERVE_BYTES, FILE_TOOLS, makeFileTools } from "../agent/tools/files.ts"
 import { reversalNote } from "../agent/reversalNote.ts"
+import { changedNote } from "../agent/changedNote.ts"
 import { COMMANDS_UNSANDBOXED } from "../agent/capabilities.ts"
 import { settleOrphanedCopies } from "../agent/subagents.ts"
 import { makeAddressSet } from "../net/addressSet.ts"
@@ -232,6 +233,8 @@ export class WorkshopFiles extends Context.Service<
       )
       // What the user took back since the last reply (spec/WORKSHOP-CARDS.md §8.2), once.
       yield* execution.turnNotes.register(reversalNote(reader))
+      // What changed under it since its last reply, by someone else (spec/WORKSHOP-CARDS.md §4.3), once.
+      yield* execution.turnNotes.register(changedNote(reader))
       // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
       yield* execution.turnNotes.register({
         id: "files.workingFolder",

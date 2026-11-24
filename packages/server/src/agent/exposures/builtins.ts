@@ -17,7 +17,8 @@ import { CastChange } from "@dreamspan/shared/chatSetupApi.ts"
 import type { EntityKind, LibraryRef } from "@dreamspan/shared/library.ts"
 import type { ToolContext, WorkshopStoryRead } from "../tools.ts"
 import type { OperationExposure } from "../operations.ts"
-import { resolveLibrary } from "../tools/library.ts"
+import { gateListing, resolveLibrary } from "../tools/library.ts"
+import { LIBRARY_CLASSES, libraryClassIds } from "../capabilities.ts"
 import { chatNotesAt } from "../../chat/chatNotesAt.ts"
 import type { ChatNote } from "@dreamspan/shared/chatSetupApi.ts"
 import type { SharedNote } from "@dreamspan/shared/editorApi.ts"
@@ -189,7 +190,8 @@ const libraryNote = (ctx: ToolContext, value: unknown) =>
 const exposure = (
   id: string,
   rpc: string,
-  capability: string,
+  /** Null: a read that only the library classes gate (spec/WORKSHOP-CARDS.md §2.2), or nothing. */
+  capability: string | null,
   effect: OperationExposure["effect"],
   explanation: string,
   extra: Partial<OperationExposure> = {}
@@ -197,7 +199,7 @@ const exposure = (
   id,
   ...(storyReads[id] ? { storyRead: storyReads[id] } : {}),
   operation: { rpc },
-  capability,
+  ...(capability === null ? {} : { capability }),
   effect,
   label: explanation,
   explanation,
@@ -456,13 +458,19 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
       chatPayload(ctx, args).pipe(Effect.map(({ chatId, slotId }) => ({ chatId, leaf: slotId, pinned: args.pinned })))
   }),
   exposure("change_generation_defaults", "ChangeGenerationDefaults", "settings", "setup", "Change generation defaults"),
-  exposure("list_library", "ListLibrary", "library.read", "read", "List your library", {
+  exposure("list_library", "ListLibrary", null, "read", "List your library", {
+    gatedBy: libraryClassIds,
     parameters: Schema.Struct({
       kind: Schema.Literals(["card", "preset", "lorebook", "note"]),
       query: optional(label),
       limit: optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })))
     }),
-    adapt: (args) => Effect.succeed({ kind: args.kind, withFilterData: true }),
+    adapt: (args, ctx) =>
+      gateListing(ctx, args.kind as EntityKind, args.query === undefined ? undefined : String(args.query)).pipe(
+        Effect.flatMap((refused) =>
+          refused === null ? Effect.succeed({ kind: args.kind, withFilterData: true }) : fail(refused)
+        )
+      ),
     label: "Looked in your library",
     summarize: (args) => String(args.query ?? args.kind),
     render: (result, args) => {
@@ -498,7 +506,8 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         return payload
       })
   }),
-  exposure("list_revisions", "ListRevisions", "library.read", "read", "List a library entry's revisions", {
+  exposure("list_revisions", "ListRevisions", null, "read", "List a library entry's revisions", {
+    gatedBy: libraryClassIds,
     parameters: Schema.Struct(refArgs),
     adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map(({ refId }) => ({ refId, limit: 50 })))
   }),
@@ -560,12 +569,18 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
       })
   },
   // --- Notes (DESIGN §4.1): the Notes editors' own operations.
-  exposure("list_shared_notes", "ListSharedNotes", "library.read", "read", "List your shared notes", {
+  exposure("list_shared_notes", "ListSharedNotes", null, "read", "List your shared notes", {
+    gatedBy: [LIBRARY_CLASSES.note],
     label: "Looked through your shared notes",
     description:
       "Lists shared notes (texts card and chat notes can show): ids, titles, each text's start and how many notes show it. Page with offset; read one with read_note.",
     parameters: Schema.Struct({ query: optional(label), ...pageArgs }),
-    adapt: (args) => Effect.succeed(args.query === undefined ? {} : { query: args.query }),
+    adapt: (args, ctx) =>
+      gateListing(ctx, "note", args.query === undefined ? undefined : String(args.query)).pipe(
+        Effect.flatMap((refused) =>
+          refused === null ? Effect.succeed(args.query === undefined ? {} : { query: args.query }) : fail(refused)
+        )
+      ),
     summarize: (args) => String(args.query ?? "shared notes"),
     render: (result, args) =>
       JSON.stringify(
@@ -721,7 +736,7 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
     render: (_result, args) => JSON.stringify({ persona: args.persona })
   }),
   // --- Files (ARCHITECTURE.md §11.4, §13).
-  exposure("list_export_formats", "ListExportFormats", "library.read", "read", "List export formats", {
+  exposure("list_export_formats", "ListExportFormats", null, "read", "List export formats", {
     label: "Looked up export formats",
     description:
       "Lists the file formats cards, presets and lorebooks export to. The user downloads exports from the library.",

@@ -28,6 +28,47 @@ export interface CapabilityEntry {
     readonly confirmLabel: string
     readonly cancelLabel: string
   }
+  /**
+   * A library class (spec/WORKSHOP-CARDS.md §2.2): asked once per reply with the four scopes, its
+   * question's title, and what it covers in a phrase ("cards"). No tool names it as its
+   * capability: the library tools ask it for what's outside view.
+   */
+  readonly scoped?: { readonly title: string; readonly noun: string }
+}
+
+/** The library class each kind of item is under (spec/WORKSHOP-CARDS.md §2.2). */
+export const LIBRARY_CLASSES = {
+  card: "library.cards",
+  lorebook: "library.lorebooks",
+  preset: "library.presets",
+  note: "library.notes"
+} as const
+export type LibraryClass = (typeof LIBRARY_CLASSES)[keyof typeof LIBRARY_CLASSES]
+export const libraryClassIds: ReadonlyArray<string> = Object.values(LIBRARY_CLASSES)
+/** A preset overlay is a preset's, so it's under presets. */
+export const classOfKind = (kind: "card" | "lorebook" | "preset" | "note" | "preset_overlay"): LibraryClass =>
+  LIBRARY_CLASSES[kind === "preset_overlay" ? "preset" : kind]
+
+/** Allow always grants (spec/WORKSHOP-CARDS.md §2.5): the assistant card's, and every workshop's. */
+export interface StandingGrants {
+  readonly card?: { readonly name: string; readonly grants: Readonly<Record<string, "allow">> }
+  readonly always: Readonly<Record<string, "allow">>
+}
+
+/**
+ * How a library class stands in one workshop: the most specific choice wins (§2.5). The
+ * workshop's own, else the assistant card's Allow always, else the account's, else the default.
+ */
+export const classStanding = (
+  registries: CapabilityRegistries,
+  grants: ReadonlyMap<string, CapabilityMode>,
+  standing: StandingGrants,
+  capability: string
+): { readonly mode: CapabilityMode; readonly from: "chat" | "card" | "always" | "default" } => {
+  if (grants.has(capability)) return { mode: resolveMode(registries, grants, capability, "read"), from: "chat" }
+  if (standing.card?.grants[capability] === "allow") return { mode: "allow", from: "card" }
+  if (standing.always[capability] === "allow") return { mode: "allow", from: "always" }
+  return { mode: resolveMode(registries, new Map(), capability, "read"), from: "default" }
 }
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
@@ -63,13 +104,41 @@ export const MCP_CAPABILITY = "mcp"
 export const SIDE_STORY_READ_MODE: CapabilityMode = "allow"
 
 export const workshopCapabilities = makeRegistry<CapabilityEntry>([
+  // spec/WORKSHOP-CARDS.md §2.2: what the library exposes, a class at a time. What's in view
+  // (attached, made here, the workshop's own cast, a story's cast beside it) never asks.
   {
-    id: "library.read",
+    id: "library.cards",
     order: 10,
-    label: "Read your library",
-    explanation: "Looks up your cards, presets, lorebooks and notes. Always on: the assistant can't help without it.",
-    example: "Lists your cards to find one called Mara.",
-    modes: ["allow"]
+    label: "Look through your cards",
+    explanation:
+      "Searches and reads your characters and personas, with their notes and revisions. Cards you attach, and those it makes here, never ask.",
+    example: "Searches your cards for a lighthouse keeper.",
+    scoped: { title: "Let the assistant look through your cards?", noun: "cards" }
+  },
+  {
+    id: "library.lorebooks",
+    order: 11,
+    label: "Look through your lorebooks",
+    explanation:
+      "Searches and reads your lorebooks, cards' own books included. Lorebooks you attach, and those it makes here, never ask.",
+    example: "Lists your lorebooks to find the one about the harbour.",
+    scoped: { title: "Let the assistant look through your lorebooks?", noun: "lorebooks" }
+  },
+  {
+    id: "library.presets",
+    order: 12,
+    label: "Look through your presets",
+    explanation: "Searches and reads your prompt presets. Presets you attach, and those it makes here, never ask.",
+    example: "Reads your Night preset to compare it with another.",
+    scoped: { title: "Let the assistant look through your presets?", noun: "presets" }
+  },
+  {
+    id: "library.notes",
+    order: 13,
+    label: "Look through your notes",
+    explanation: "Searches and reads your shared notes and snippets. The notes of cards in view never ask.",
+    example: "Lists your shared notes to find the one on the village.",
+    scoped: { title: "Let the assistant look through your notes?", noun: "notes" }
   },
   {
     id: "chats.read",
@@ -216,7 +285,11 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
  * changes only this table.
  */
 export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly mode: CapabilityMode }>([
-  { id: "library.read", mode: "allow" },
+  // Owner [D] (2026-11-24, spec/WORKSHOP-CARDS.md §2.2): beyond what's in view, ask.
+  { id: "library.cards", mode: "ask" },
+  { id: "library.lorebooks", mode: "ask" },
+  { id: "library.presets", mode: "ask" },
+  { id: "library.notes", mode: "ask" },
   { id: "library.write", mode: "allow" },
   { id: "chats.setup", mode: "allow" },
   { id: "chats.rewrite", mode: "allow" },
@@ -268,12 +341,20 @@ export const resolveMode = (
 export const capabilityView = (
   registries: CapabilityRegistries,
   grants: ReadonlyMap<string, CapabilityMode>,
-  entry: CapabilityEntry
+  entry: CapabilityEntry,
+  /** A library class's Allow always grants, which stand in for the default (§2.5). */
+  standing?: StandingGrants
 ): WorkshopCapability => {
   const modes = entry.modes ?? ALL_MODES
-  const defaultMode = resolveMode(registries, new Map(), entry.id, "read")
-  const mode = resolveMode(registries, grants, entry.id, "read")
+  const inherited = standing && entry.scoped ? classStanding(registries, new Map(), standing, entry.id) : null
+  const defaultMode = inherited?.mode ?? resolveMode(registries, new Map(), entry.id, "read")
+  const mode = grants.has(entry.id) || !inherited ? resolveMode(registries, grants, entry.id, "read") : inherited.mode
   return {
+    ...(inherited?.from === "card"
+      ? { standing: { from: "card" as const, name: standing!.card!.name } }
+      : inherited?.from === "always"
+        ? { standing: { from: "always" as const } }
+        : {}),
     id: entry.id,
     order: entry.order,
     label: entry.label,

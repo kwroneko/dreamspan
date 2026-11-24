@@ -2,6 +2,7 @@
 // subagent's come from functions of the request's messages (a turn may wait on a promise the test
 // settles), a subagent's request can be held after n of its results, and a second connection on its
 // own loopback provider stands for a model the user may pick for subagents. Synthetic data only.
+import { OPEN_LIBRARY } from "./libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { Effect, Stream } from "effect"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
@@ -140,7 +141,7 @@ export const workshop = (handler: (request: Recorded, res: ServerResponse) => vo
       connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {}
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

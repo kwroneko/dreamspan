@@ -3,6 +3,7 @@
 // "Stopped at its limit" with what it had; a model's own row can change its limits; a reply starts
 // at most its per-reply count; and past the account's running count a subagent waits, queued, until
 // a place frees. Synthetic data and a scripted loopback provider only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Chat, VersionId } from "@dreamspan/shared/chat.ts"
@@ -33,7 +34,7 @@ const setup = (script: ReturnType<typeof scripted>) =>
     const mock = yield* mockProvider(script.handler)
     const api = yield* client()
     yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
-    const chat: Chat = yield* api.CreateWorkshop({})
+    const chat: Chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { api, chat, events, mock }
   })
@@ -185,7 +186,7 @@ describe("subagent limits", () => {
       const script = scripted({ parent: [START], child: () => undefined })
       const { api, chat, events, mock } = yield* setup(script)
       yield* api.ChangeSubagentSettings({ limits: { accountConcurrent: 1 } })
-      const other: Chat = yield* api.CreateWorkshop({})
+      const other: Chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
       const otherEvents: Array<ChatEvent> = yield* watch(api, other)
       script.hold()
       const first = yield* task(api, chat, "first")

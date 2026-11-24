@@ -1603,6 +1603,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListWorkshopCapabilities: {
     probe: (actor, owner) => refused(actor.api.ListWorkshopCapabilities({ chatId: owner.chat.chatId }), "NotFound")
   },
+  ListLibraryGrants: { createOnly: "takes no target: it reads only the caller's own Allow always settings" },
+  RemoveLibraryGrant: {
+    createOnly: "writes only the caller's own Allow always settings; another account's card id matches nothing there"
+  },
   UndoRolloutEffect: {
     probe: (actor, owner) =>
       refused(

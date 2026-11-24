@@ -4,6 +4,7 @@
 // page for the model, Stop and timeouts cancelling the call, and Resume never re-running a call
 // that may have happened without asking. A scripted loopback provider and a local fake MCP
 // server only.
+import { OPEN_LIBRARY } from "./support/libraryGrants.ts"
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -151,7 +152,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void, con
       connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: context === undefined ? {} : { context }
     })
-    const chat = yield* api.CreateWorkshop({})
+    const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { mock, api, chat, events }
   })
