@@ -7,6 +7,12 @@ import type { EntityId } from "@dreamspan/shared/chat.ts"
 export const homeIntro = defineSlot<{ data: ShellLibrary }>("home.intro")
 
 /**
+ * The Characters page's header, right-aligned before its end controls (owner, 2026-11-24): the
+ * editor feature's New card, so a card is made from Home without a visit to the library.
+ */
+export const homeHeaderActions = defineSlot<Record<string, never>>("home.header-actions")
+
+/**
  * The left panel's foot, below its list of chats (owner, 2026-11-01): the open chat's branches
  * (`OpenChatBranches`), registered by the characters feature as a plugin would register a part.
  */

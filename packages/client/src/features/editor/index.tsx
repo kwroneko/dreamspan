@@ -7,6 +7,7 @@ import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions, libraryPanels } from "../library/slots.ts"
+import { homeHeaderActions } from "../characters/homeSlots.ts"
 import { LibraryReplaceButton, LibraryReplacePanel } from "./LibraryReplace.tsx"
 import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
@@ -91,6 +92,8 @@ export const register = () => {
     order: 10,
     component: ({ kind, personas }) => (kind === "card" ? <NewCardButton persona={personas} /> : null)
   })
+  // The same button and dialog in the Characters page's header (owner, 2026-11-24).
+  homeHeaderActions.register({ id: "editor.new-card", order: 10, component: () => <NewCardButton /> })
   libraryActions.register({
     id: "editor.new-preset",
     order: 20,
