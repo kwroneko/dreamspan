@@ -841,19 +841,24 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const entity = characters[i]!
             const greeter = byId.get(entity)
             const wanted = wantedOf.get(entity)
-            if (greeter === undefined || wanted === undefined) continue
-            const offered = new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
+            if (greeter === undefined) continue
+            // None drawn for it (its card moved to the bin since): it keeps the greetings it has,
+            // except that a group-only one goes once it is the chat's only character.
+            if (wanted === undefined && characters.length > 1) continue
+            const groupOnly = new Set(greeter.greetingIndexes.slice(greeter.greetings.length))
+            const offered =
+              wanted === undefined ? null : new Map(wanted.options.map((option) => [cardIndex(entity, option), option]))
             const versions = yield* versionsOf(slot.id)
             const have = new Set(versions.map((version) => refIndex(version.ref)))
             let ordinal = Math.max(-1, ...versions.map((version) => version.ordinal)) + 1
-            for (const [index, option] of offered)
+            for (const [index, option] of offered ?? [])
               if (!have.has(index)) {
                 yield* graph.insertVersion(slot.id, ordinal++, greetingVersionOf(greeter, option), at, forkOf, userId)
                 changed = true
               }
             const removed = versions.filter((version) => {
               const index = refIndex(version.ref)
-              return index !== null && !offered.has(index)
+              return index !== null && (offered === null ? groupOnly.has(index) : !offered.has(index))
             })
             if (removed.length === 0) continue
             const stays = versions

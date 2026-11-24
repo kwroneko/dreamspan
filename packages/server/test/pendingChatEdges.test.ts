@@ -88,6 +88,28 @@ describe("a pending chat's edges", () => {
     )
   )
 
+  it.live("a group-only greeting goes when its character, binned meanwhile, is left alone in the draft", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make, writer, userId } = yield* setup
+        const mira = yield* make("Mira", { group_only_greetings: ["Mira greets everyone."] })
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Join", entityId: tobin } })
+        const [first] = yield* path(api, draft.id)
+        const versions = () =>
+          Effect.map(api.ListVersions({ slotId: first!.slotId }), (all) => all.map((v) => v.content))
+        assert.include(yield* versions(), "Mira greets everyone.")
+        // Mira's card goes to the bin in another tab; then Tobin leaves.
+        yield* writer.DeleteEntity({ userId, entityId: mira })
+        yield* api.ChangeCast({ chatId: draft.id, slotId: null, forkId, change: { _tag: "Leave", entityId: tobin } })
+        assert.notInclude(yield* versions(), "Mira greets everyone.")
+        assert.include(yield* versions(), "Mira waves.")
+      })
+    )
+  )
+
   it.live("a send racing a join starts the chat with the greetings of the cast it starts with", () =>
     run(
       Effect.gen(function* () {
