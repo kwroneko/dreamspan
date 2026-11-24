@@ -250,9 +250,10 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
         }
         return recorded
       }).pipe(transaction(sql, "RecordSavedMediaScans")),
-    RecordSavedMediaResult: ({ id, at, saved, failure }) =>
+    RecordSavedMediaResult: ({ id, ownerUserId, url, at, saved, failure }) =>
       Effect.gen(function* () {
-        const [row] = yield* sql<{ id: number }>`SELECT id FROM saved_media WHERE id = ${id} AND state = 'pending'`
+        const [row] = yield* sql<{ id: number }>`SELECT id FROM saved_media WHERE id = ${id}
+          AND owner_user_id = ${ownerUserId} AND url = ${url} AND state = 'pending'`
         if (!row) return false
         if (saved) {
           yield* sql`INSERT INTO media_assets ${sql.insert({

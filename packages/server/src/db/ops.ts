@@ -820,6 +820,8 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("RecordSavedMediaResult", {
     payload: {
       id: Schema.Int,
+      ownerUserId: UserId,
+      url: Schema.String,
       at: Schema.Int,
       saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
       failure: Schema.NullOr(Schema.String)

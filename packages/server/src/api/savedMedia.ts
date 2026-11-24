@@ -111,9 +111,14 @@ export class SavedMedia extends Context.Service<SavedMedia, SavedMediaShape>()("
         }
         return budget
       }
-      const record = (id: number, outcome: { saved?: { sha256: string; mime: string; byteSize: number } } | string) =>
+      const record = (
+        item: SavedMediaDownload,
+        outcome: { saved?: { sha256: string; mime: string; byteSize: number } } | string
+      ) =>
         writer.RecordSavedMediaResult({
-          id,
+          id: item.id,
+          ownerUserId: item.ownerUserId,
+          url: item.url,
           at: Date.now(),
           saved: typeof outcome === "string" ? null : (outcome.saved ?? null),
           failure: typeof outcome === "string" ? outcome : null
@@ -123,16 +128,16 @@ export class SavedMedia extends Context.Service<SavedMedia, SavedMediaShape>()("
         Effect.gen(function* () {
           const budget = budgetOf(item)
           if (budget.bytes >= REVISION_BYTES || budget.ms >= REVISION_MS)
-            return yield* record(item.id, "This entry's media limit was reached.")
+            return yield* record(item, "This entry's media limit was reached.")
           // Approved by the account's list, or for these files only (that host alone).
           const allowHost = async (host: string) => {
             const hosts = await Effect.runPromise(reader.GetMediaHosts({ userId: item.ownerUserId }))
             return hostApproved(hosts, host) || (item.once && normalizeHost(host) === item.host)
           }
           if (!(yield* Effect.tryPromise(() => allowHost(item.host))))
-            return yield* record(item.id, "Its site isn't approved any more.")
+            return yield* record(item, "Its site isn't approved any more.")
           const fetcher = fetchers.get("media.saved")
-          if (!fetcher) return yield* record(item.id, "Saving media is turned off.")
+          if (!fetcher) return yield* record(item, "Saving media is turned off.")
           const started = Date.now()
           const result = yield* Effect.acquireUseRelease(
             Effect.tryPromise({
@@ -155,14 +160,14 @@ export class SavedMedia extends Context.Service<SavedMedia, SavedMediaShape>()("
                 return yield* holds.holding(
                   [sha256],
                   storeMedia(config.dataDir, sha256, bytes).pipe(
-                    Effect.andThen(record(item.id, { saved: { sha256, mime: file.mime, byteSize: bytes.byteLength } }))
+                    Effect.andThen(record(item, { saved: { sha256, mime: file.mime, byteSize: bytes.byteLength } }))
                   )
                 )
               }),
             (file) => Effect.promise(file.dispose)
           ).pipe(Effect.result)
           budget.ms += Date.now() - started
-          if (result._tag === "Failure") yield* record(item.id, failureReason(result.failure))
+          if (result._tag === "Failure") yield* record(item, failureReason(result.failure))
         }).pipe(
           Effect.catch((error) => Effect.logWarning("saving a media file failed", error)),
           Effect.ensuring(
