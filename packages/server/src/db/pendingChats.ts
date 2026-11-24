@@ -42,10 +42,12 @@ export const noteDroppedReply = (sql: SqlClient.SqlClient, userId: UserId, ids: 
       yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
         VALUES (${DROPPED_REPLY + id}, ${userId}, ${DROPPED_REPLY_LABEL}, ${now})`
   })
-/** A URL handover can first arrive after the page it was issued for has been swept. */
-export const recentlySwept = (sql: SqlClient.SqlClient, userId: UserId, chatId: ChatId) =>
-  sql`SELECT 1 FROM swept_pending_chats WHERE chat_id = ${chatId} AND user_id = ${userId}
-    AND swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(Effect.map((rows) => rows.length > 0))
+/** A first-time URL handover can arrive after an authoritative workshop sweep. */
+export const recentlySweptWorkshop = (sql: SqlClient.SqlClient, userId: UserId, chatId: ChatId) =>
+  sql`SELECT 1 FROM swept_workshops w JOIN swept_pending_chats s ON s.chat_id = w.chat_id AND s.user_id = w.user_id
+    WHERE w.user_id = ${userId} AND w.chat_id = ${chatId} AND s.swept_at >= ${Date.now() - SWEPT_KEPT_MS}`.pipe(
+    Effect.map((rows) => rows.length > 0)
+  )
 
 /** The label a late save to the removed reply's `targetId` (a slot or a version) is filed under. */
 export const droppedReplyLabel = (sql: SqlClient.SqlClient, userId: UserId, targetId: string) =>
@@ -56,6 +58,7 @@ export const droppedReplyLabel = (sql: SqlClient.SqlClient, userId: UserId, targ
 export interface PendingRow {
   readonly id: ChatId
   readonly owner_user_id: UserId
+  readonly kind: string
   readonly title_source: string
   readonly draft_for: string | null
   readonly active_leaf_slot_id: string | null
@@ -74,7 +77,7 @@ const castNames = (sql: SqlClient.SqlClient, chat: PendingRow) =>
 
 export const pendingRow = (sql: SqlClient.SqlClient, chatId: string) =>
   Effect.map(
-    sql<PendingRow>`SELECT id, owner_user_id, title_source, draft_for, active_leaf_slot_id FROM chats /* chat:includes-pending: this chat's lifecycle */
+    sql<PendingRow>`SELECT id, owner_user_id, kind, title_source, draft_for, active_leaf_slot_id FROM chats /* chat:includes-pending: this chat's lifecycle */
       WHERE id = ${chatId} AND status = 'pending'`,
     ([row]) => row ?? null
   )
@@ -252,12 +255,14 @@ export const sweepPendingChat = (
     yield* sql`DELETE FROM swept_pending_chats WHERE swept_at < ${now - SWEPT_KEPT_MS}`
     yield* sql`INSERT OR REPLACE INTO swept_pending_chats (chat_id, user_id, label, swept_at)
       VALUES (${chatId}, ${userId}, ${names.length === 0 ? "New chat" : `New chat with ${names.join(" & ")}`}, ${now})`
-    // Ownership moves out of the composer before its chat is deleted. Kept items can be
-    // recovered even after the late-save receipt has expired.
-    yield* sql`INSERT INTO swept_composer_library (chat_id, user_id, ref_id, draft_for, position, swept_at)
-      SELECT ${chatId}, ${userId}, l.ref_id, ${chat.draft_for}, l.position, ${now}
-      FROM composer_library l JOIN drafts d ON d.id = l.draft_id
-      WHERE d.user_id = ${userId} AND d.target_kind = 'composer' AND d.target_id = ${chatId}`
+    if (chat.kind === "workshop" && chat.draft_for !== null) {
+      // Keep the workshop's entry and attachments beyond the late-save receipt's lifetime.
+      yield* sql`INSERT INTO swept_workshops (user_id, chat_id, draft_for) VALUES (${userId}, ${chatId}, ${chat.draft_for})`
+      yield* sql`INSERT INTO swept_composer_library (user_id, chat_id, ref_id, position)
+        SELECT ${userId}, ${chatId}, l.ref_id, l.position
+        FROM composer_library l JOIN drafts d ON d.id = l.draft_id
+        WHERE d.user_id = ${userId} AND d.target_kind = 'composer' AND d.target_id = ${chatId}`
+    }
     yield* sql`DELETE FROM chats WHERE id = ${chatId} AND status = 'pending' /* chat:includes-pending: sweeps it */`
     // A copied URL can still find a pending destination or its swept item. Once both
     // its origin's first-use window and its destination are gone, it has no effect.

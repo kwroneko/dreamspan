@@ -9,7 +9,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { pinLibrary } from "./libraryAttachments.ts"
 import { NotFound, StorageError } from "./ops.ts"
-import { recentlySwept } from "./pendingChats.ts"
+import { recentlySweptWorkshop } from "./pendingChats.ts"
 
 /** As many as a message carries (`MessageLibrary`). */
 const MAX_ITEMS = 16
@@ -18,10 +18,7 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
   /** The user's composer draft of a live chat; `workshop`: one of a workshop's. */
   const owned = (userId: UserId, chatId: string, draftId: string, requireWorkshop: boolean, forkId?: string) =>
     Effect.gen(function* () {
-      const [row] = yield* sql<{
-        status: string
-        created_at: number
-      }>`SELECT c.status, d.created_at FROM drafts d JOIN chats c ON c.id=d.target_id
+      const [row] = yield* sql<{ status: string }>`SELECT c.status FROM drafts d JOIN chats c ON c.id=d.target_id
       WHERE d.id=${draftId} AND d.user_id=${userId} AND d.target_kind='composer'
         AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
         ${requireWorkshop ? sql`AND c.kind='workshop'` : sql``}
@@ -42,16 +39,10 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
       return yield* list(userId, draftId)
     })
   // One move consumes the swept source's item in the same transaction that attaches it.
-  const move = (userId: UserId, source: string, chatId: string, refId: string, legacyDestination?: number) =>
+  const move = (userId: UserId, source: string, chatId: string, refId: string) =>
     Effect.gen(function* () {
       const [moved] = yield* sql`DELETE FROM swept_composer_library
         WHERE chat_id = ${source} AND user_id = ${userId} AND ref_id = ${refId}
-          ${
-            legacyDestination === undefined
-              ? sql``
-              : sql`AND NOT EXISTS (SELECT 1 FROM composer_library_carry_cutover
-                WHERE swept_at < before_ms AND ${legacyDestination} < before_ms)`
-          }
         RETURNING ref_id`
       if (moved === undefined) return false
       yield* sql`UPDATE composer_library_handovers SET chat_id = ${chatId}
@@ -68,17 +59,17 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
       if (applied !== undefined) return yield* move(userId, applied.chat_id, chatId, refId)
       if (originChatId !== chatId) {
         const moved = yield* move(userId, originChatId, chatId, refId)
-        if (!moved && !(yield* recentlySwept(sql, userId, originChatId))) return false
+        if (!moved && !(yield* recentlySweptWorkshop(sql, userId, originChatId))) return false
       }
       yield* sql`INSERT INTO composer_library_handovers (origin_chat_id, user_id, operation_id, ref_id, chat_id)
         VALUES (${originChatId}, ${userId}, ${operationId}, ${refId}, ${chatId})`
       return true
     })
 
-  const sweptForReplacement = (userId: UserId, source: string, draftFor: string) =>
+  const sweptForReplacement = (userId: UserId, source: string) =>
     sql<{ refId: RefId }>`SELECT s.ref_id AS refId FROM swept_composer_library s
       JOIN entity_refs r ON r.id = s.ref_id JOIN entities e ON e.id = r.entity_id
-      WHERE s.chat_id = ${source} AND s.user_id = ${userId} AND (s.draft_for = ${draftFor} OR s.draft_for IS NULL)
+      WHERE s.chat_id = ${source} AND s.user_id = ${userId}
         AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset')
         AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
       ORDER BY s.position, s.ref_id LIMIT ${MAX_ITEMS}`.pipe(Effect.map((rows) => rows.map((row) => row.refId)))
@@ -93,13 +84,12 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
     handover?: ComposerLibraryHandover
   ) =>
     Effect.gen(function* () {
-      const { status, created_at } = yield* owned(userId, chatId, draftId, add.length > 0)
+      const { status } = yield* owned(userId, chatId, draftId, add.length > 0)
       for (const refId of remove) yield* sql`DELETE FROM composer_library WHERE draft_id=${draftId} AND ref_id=${refId}`
       for (const refId of add) {
         if (carriedFrom !== undefined) {
-          // A retained ref belongs to the swept workshop, even when an older client also
-          // supplies the original URL. Pre-0028 bare retries still have the cutover boundary.
-          if (remove.includes(refId) || !(yield* move(userId, carriedFrom, chatId, refId, created_at))) continue
+          // A carry needs the swept workshop's item even when a client also supplies a URL.
+          if (remove.includes(refId) || !(yield* move(userId, carriedFrom, chatId, refId))) continue
         } else if (handover !== undefined) {
           if (status !== "pending" || remove.includes(refId) || !(yield* applyUrl(userId, chatId, handover, refId)))
             continue

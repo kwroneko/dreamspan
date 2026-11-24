@@ -1046,17 +1046,18 @@ it.effect("a carry applied and removed at schema 0027 stays removed on a later r
     const afterUpgrade = Date.now()
     yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, created_at, updated_at)
       VALUES ('new-draft', ${userId}, 'composer', 'replacement', 'another-fork', '', ${afterUpgrade}, ${afterUpgrade})`
-    yield* sql`INSERT INTO swept_composer_library (chat_id, user_id, ref_id, position, swept_at)
-      VALUES ('recent', ${userId}, 'ref', 1, ${afterUpgrade})`
-    assert.deepStrictEqual(yield* library.set(userId, "replacement", "new-draft", ["ref"], [], "original"), [item])
+    yield* sql`INSERT INTO swept_workshops (user_id, chat_id, draft_for) VALUES (${userId}, 'recent', 'workshop::')`
+    yield* sql`INSERT INTO swept_composer_library (user_id, chat_id, ref_id, position)
+      VALUES (${userId}, 'recent', 'ref', 1)`
+    assert.deepStrictEqual(yield* library.set(userId, "replacement", "new-draft", ["ref"], [], "original"), [])
     assert.deepStrictEqual(yield* library.set(userId, "replacement", "draft", ["ref"], [], "recent"), [item])
   }).pipe(Effect.provide(layer()))
 )
 
-it.effect("0031 preserves legacy swept items and imports evidence of moves from 0028 and 0029", () =>
+it.effect("0031 leaves ownership empty even when legacy sweep and move receipts survive (rev-dd10 #1)", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* migrate(upTo(29))
+    yield* migrate(upTo(30))
     yield* sql`INSERT INTO users (id, handle, display_name, role, created_at)
       VALUES ('u', 'u', 'Owner', 'user', 0)`
     yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
@@ -1077,11 +1078,8 @@ it.effect("0031 preserves legacy swept items and imports evidence of moves from 
       VALUES ('origin', 'u', 'url', 'moved-by-url', 'url-destination'),
              ('origin', 'u', 'local-url', 'stayed', 'origin')`
     yield* migrate(migrationDefinitions)
-    assert.deepStrictEqual(yield* sql`SELECT chat_id, ref_id, position FROM swept_composer_library ORDER BY chat_id`, [
-      { chat_id: "origin", ref_id: "stayed", position: 1 },
-      { chat_id: "other-source", ref_id: "kept", position: 1 },
-      { chat_id: "url-destination", ref_id: "moved-by-url", position: 0 }
-    ])
+    assert.deepStrictEqual(yield* sql`SELECT * FROM swept_workshops`, [])
+    assert.deepStrictEqual(yield* sql`SELECT chat_id, ref_id, position FROM swept_composer_library`, [])
     assert.lengthOf(yield* sql`SELECT * FROM swept_pending_chats`, 6)
     assert.lengthOf(yield* sql`SELECT * FROM composer_library_carries`, 1)
     assert.lengthOf(yield* sql`SELECT * FROM composer_library_handovers`, 2)

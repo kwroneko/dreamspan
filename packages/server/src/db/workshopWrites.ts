@@ -279,14 +279,35 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   return {
     CreateWorkshop: (input) =>
       Effect.gen(function* () {
-        const { chat } = yield* stepsFor.createWorkshop(input)
         const { userId, draftFor, replaceDraft } = input
+        let swept: ChatId | undefined
         if (draftFor !== undefined && replaceDraft !== undefined) {
-          const refs = yield* library.sweptForReplacement(userId, replaceDraft, draftFor)
+          let source = replaceDraft
+          while (true) {
+            const [existing] = yield* sql<ChatRow>`SELECT * FROM chats /* chat:includes-pending: reopening a workshop */
+              WHERE id = ${source} AND owner_user_id = ${userId} AND kind = 'workshop' AND deleted_at IS NULL
+                AND (status <> 'pending' OR draft_for = ${draftFor})`
+            if (existing !== undefined) return toChat(existing)
+            const [receipt] = yield* sql<{ replacement_chat_id: ChatId | null }>`SELECT replacement_chat_id
+              FROM swept_workshops WHERE user_id = ${userId} AND chat_id = ${source} AND draft_for = ${draftFor}`
+            if (receipt === undefined) break
+            if (receipt.replacement_chat_id === null) {
+              swept = source
+              break
+            }
+            source = receipt.replacement_chat_id
+          }
+        }
+        const { chat } = yield* stepsFor.createWorkshop(input)
+        if (swept !== undefined && draftFor !== undefined) {
+          const refs = yield* library.sweptForReplacement(userId, swept)
           if (refs.length > 0) {
             const draft = yield* openComposer(userId, chat)
-            yield* library.set(userId, chat.id, draft.id, refs, [], replaceDraft)
+            yield* library.set(userId, chat.id, draft.id, refs, [], swept)
           }
+          // A retry can follow this link even after the replacement itself is swept.
+          yield* sql`UPDATE swept_workshops SET replacement_chat_id = ${chat.id}
+            WHERE user_id = ${userId} AND chat_id = ${swept} AND draft_for = ${draftFor}`
         }
         return chat
       }).pipe(transaction(sql, "CreateWorkshop")),

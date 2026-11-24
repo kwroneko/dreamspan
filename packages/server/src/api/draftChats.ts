@@ -54,39 +54,40 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
             if (Option.isSome(found) && found.value.status !== "pending") return found.value
           }
         }
-        // Pending chats no tab has had open for a while are left behind: each visit draws afresh.
-        for (const chat of pending)
-          if (chat.chatId !== reopen && !hub.held(chat.chatId, PENDING_KEPT_MS)) yield* sweep(id, chat.chatId)
+        // Pending chats no tab has had open for a while are left behind.
+        const sweepOthers = (opened?: ChatId) =>
+          Effect.gen(function* () {
+            for (const chat of pending)
+              if (chat.chatId !== reopen && chat.chatId !== opened && !hub.held(chat.chatId, PENDING_KEPT_MS))
+                yield* sweep(id, chat.chatId)
+          })
         const [kind, of] =
           draftFor === "empty"
             ? ["empty", ""]
             : [draftFor.slice(0, draftFor.indexOf(":")), draftFor.slice(draftFor.indexOf(":") + 1)]
-        // A workshop beside a story (its Workshop tab), going with the story branch shown.
-        if (kind === "side") {
-          const [story = "", fork = ""] = of.split(":")
-          return given(
+        if (kind === "side" || kind === "workshop") {
+          const [first = "", second = ""] = of.split(":")
+          const options =
+            kind === "side"
+              ? { attachTo: first as ChatId, ...(second === "" ? {} : { attachFork: second as ForkId }) }
+              : {
+                  ...(first === "" ? {} : { card: first }),
+                  ...(second === "" ? {} : { persona: second === "none" ? null : second })
+                }
+          if (reopen === undefined) yield* sweepOthers()
+          const opened = given(
             yield* writer.CreateWorkshop({
               userId: id,
               draftFor,
               ...(reopen === undefined ? {} : { replaceDraft: reopen }),
-              attachTo: story as ChatId,
-              ...(fork === "" ? {} : { attachFork: fork as ForkId })
+              ...options
             })
           )
+          // A retry can name an older predecessor. Resolve it before sweeping abandoned chats.
+          if (reopen !== undefined) yield* sweepOthers(opened.id)
+          return opened
         }
-        // A new workshop: made as the first send made it before, pending (spec/WORKSHOP-CARDS.md §3).
-        if (kind === "workshop") {
-          const [card = "", persona = ""] = of.split(":")
-          return given(
-            yield* writer.CreateWorkshop({
-              userId: id,
-              draftFor,
-              ...(reopen === undefined ? {} : { replaceDraft: reopen }),
-              ...(card === "" ? {} : { card }),
-              ...(persona === "" ? {} : { persona: persona === "none" ? null : persona })
-            })
-          )
-        }
+        yield* sweepOthers()
         // A new chat's own cast, not started yet (New chat with this cast there), has no group:
         // its characters, who the user plays left out.
         const unstarted = kind === "group" ? pending.find((chat) => chat.chatId === of) : undefined
