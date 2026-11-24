@@ -624,7 +624,7 @@ export const stripCorners = (layout: Layout): { topLeft: string; topRight: strin
 
 // --- Saved layouts: whatever is read is repaired into a valid layout, or dropped.
 
-const MAX_TABS = 60
+export const MAX_SAVED_TABS = 60
 const MAX_DEPTH = 6
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -652,7 +652,7 @@ export const restoreLayout = (value: unknown, accept: (href: string) => boolean 
       const tabs: Array<Tab> = []
       for (const t of Array.isArray(raw["tabs"]) ? raw["tabs"] : []) {
         if (!isRecord(t) || typeof t["id"] !== "string" || typeof t["href"] !== "string") continue
-        if (seen.has(t["id"]) || !appHref(t["href"]) || !accept(t["href"]) || count >= MAX_TABS) continue
+        if (seen.has(t["id"]) || !appHref(t["href"]) || !accept(t["href"]) || count >= MAX_SAVED_TABS) continue
         seen.add(t["id"])
         count++
         const sticky = t["sticky"] === true
@@ -721,5 +721,10 @@ export const saveLayout = (layout: Layout, persist: (href: string) => string | n
           })
         }
       : { type: "split", id: n.id, direction: n.direction, sizes: n.sizes, children: n.children.map(node) }
-  return { version: 1, root: node(layout.root), focused: layout.focused, recent: layout.recent.slice(0, MAX_TABS) }
+  return {
+    version: 1,
+    root: node(layout.root),
+    focused: layout.focused,
+    recent: layout.recent.slice(0, MAX_SAVED_TABS)
+  }
 }

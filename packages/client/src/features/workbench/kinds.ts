@@ -21,6 +21,8 @@ export interface TabKind {
   readonly document?: boolean
   /** The URL as saved in the layout, or null to leave the tab out of it. By default, as is. */
   readonly persist?: (url: URL) => string | null
+  /** Query keys the saved URL needs to open this item when space is tight. */
+  readonly essentialSearch?: ReadonlyArray<string>
   /**
    * Opens where a tab of its kind is showing (owner, 2026-11-23: the request inspector): a plain
    * open goes to the frame focused most recently whose shown tab is of this kind, not the
@@ -65,6 +67,18 @@ export const persistHref = (href: string) => {
   const url = parse(href)
   const kind = kindOf(url)?.kind
   return kind?.persist ? kind.persist(url) : href
+}
+
+/** A smaller saved URL with the same item. Query-keyed kinds can name the keys they need. */
+export const compactHref = (href: string) => {
+  const url = parse(href)
+  const found = kindOf(url)
+  const essential = found?.kind.essentialSearch
+  const search = new URLSearchParams()
+  for (const [key, value] of url.searchParams) if (essential?.includes(key)) search.append(key, value)
+  const compact = search.size === 0 ? url.pathname : `${url.pathname}?${search}`
+  if (essential !== undefined || itemKey(compact) === itemKey(href)) return compact
+  return `${url.pathname}${url.search}`
 }
 
 /** Shell search params (the left sidebar's place): the browser's own, never a tab's. */

@@ -2,7 +2,7 @@
 // The stored start is the message as written. A template message (a greeting) shows its macros
 // replaced, as the chat shows it: `{{user}}` is the persona the fork plays, `{{char}}` the
 // message's speaker, by the names the cards have now. Pure, so a reader worker can run it.
-import { expand } from "@dreamspan/shared/macros/expand.ts"
+import { expand, hasMacroMarker } from "@dreamspan/shared/macros/expand.ts"
 import { registerBuiltinMacros } from "@dreamspan/shared/macros/builtins.ts"
 import { makeMacroRegistry } from "@dreamspan/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
@@ -44,7 +44,7 @@ const seeded = (text: string) => {
  * reached leaves the text as written, as the chat does.
  */
 export const previewText = (text: string, macro: PreviewMacro | null, names: PreviewNames): string => {
-  if (macro === null || !text.includes("{{")) return text
+  if (macro === null || !hasMacroMarker(text)) return text
   const open = text.lastIndexOf("{{")
   const complete = open >= 0 && text.indexOf("}}", open) < 0 ? text.slice(0, open) : text
   const result = expand({

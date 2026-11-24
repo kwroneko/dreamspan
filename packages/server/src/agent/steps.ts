@@ -35,13 +35,14 @@ const title = (args: unknown, field?: string) => {
 /**
  * What "N steps" counts: the tool calls a transcript holds, the message's own call (or the pass)
  * left out, and the turns the app asked to be sent (spec/REPLY-CONTRACT.md §3.3), so a run whose
- * stray text was nudged has steps to show. The same count the live steps give (`counted`).
+ * stray text was nudged has steps to show. A transcript with only progress still counts as
+ * one step, so the finished message can open it.
  */
 export const countSteps = (messages: ReadonlyArray<AgentMessage>) => counted(stepsOf(messages, [], true))
 
-/** The steps "N steps" counts: tool calls and the turns the app asked to be sent. */
+/** Tool calls and app asks, with a minimum of one when there's progress to show. */
 export const counted = (steps: ReadonlyArray<RolloutStep>) =>
-  steps.filter((s) => s.kind === "tool" || s.asked === true).length
+  Math.max(steps.length > 0 ? 1 : 0, steps.filter((s) => s.kind === "tool" || s.asked === true).length)
 
 /**
  * The steps of a transcript. The last assistant turn without tool calls is the message (its

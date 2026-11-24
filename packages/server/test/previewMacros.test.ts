@@ -44,7 +44,7 @@ it.live("shell rows, the branch list and the chats list show a greeting's macros
       kind: "card",
       label: "Ana",
       subtitle: "",
-      doc: cardDoc("Ana", { first_mes: "Welcome, {{user}}. I am {{char}}." }),
+      doc: cardDoc("Ana", { first_mes: "Welcome, <user>. I am <BOT>, also <CHAR>." }),
       schemaVersion: 1,
       origin: "user",
       sourcePath: null
@@ -64,10 +64,11 @@ it.live("shell rows, the branch list and the chats list show a greeting's macros
       range: { _tag: "Bottom" },
       limit: 10
     })
-    assert.strictEqual(path.entries[0]!.version.content, "Welcome, {{user}}. I am {{char}}.")
-    const welcome = "Welcome, Sam. I am Ana."
+    assert.strictEqual(path.entries[0]!.version.content, "Welcome, <user>. I am <BOT>, also <CHAR>.")
+    const welcome = "Welcome, Sam. I am Ana, also Ana."
     const at = { chatId: started.chat.id, fromForkId: null, atSlotId: path.entries[0]!.slotId }
     const { fork } = yield* api.CreateFork(at)
+    assert.strictEqual(fork.tipExcerpt, welcome)
     // The fork that ends at the greeting: the shell's row, the fork list and the chat's row.
     const rows = yield* api.GetShellForks({
       entity: null,

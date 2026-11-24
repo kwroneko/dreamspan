@@ -13,6 +13,7 @@
 // Retention: versions older than 30 days are removed every hour (the writer's
 // PruneFileVersions, in batches); the media sweep removes their bytes later, outside any
 // transaction.
+import type { Stats } from "node:fs"
 import { lstat, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect, Schema } from "effect"
@@ -64,6 +65,9 @@ export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
 }
 
+type Inode = Pick<Stats, "dev" | "ino">
+const inodeKey = (info: Inode) => `${info.dev}:${info.ino}`
+
 /**
  * Bytes under `root`, links not followed (a link counts itself), each inode once. Missing:
  * 0. Each folder is read by name below the one before, so a folder swapped for a link mid-walk
@@ -75,8 +79,8 @@ export const measureTree = async (
   maxMs = WALK_MAX_MS,
   /** Count only what deleting `root` would free for sure: a file with other links frees nothing. */
   soleOwnerOnly = false,
-  /** Inodes already counted, shared by the trees of one walk: a file linked into two counts once. */
-  seen = new Set<string>()
+  /** Counted bytes by inode, shared by the trees of one walk. */
+  seen = new Map<string, number>()
 ) => {
   const deadline = Date.now() + maxMs
   let bytes = 0
@@ -86,11 +90,12 @@ export const measureTree = async (
     const path = stack.pop()!
     const info = await lstat(path, { bigint: false }).catch(() => null)
     if (!info) continue
-    const key = `${info.dev}:${info.ino}`
+    const key = inodeKey(info)
     if (seen.has(key)) continue
-    seen.add(key)
     // Files and links by size; folders by the blocks their entries take.
-    bytes += info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
+    const size = info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
+    seen.set(key, size)
+    bytes += size
     if (++entries >= maxEntries || Date.now() > deadline) return { bytes, entries, partial: true }
     if (info.isDirectory()) {
       const names = await readdir(path).catch(() => [] as Array<string>)
@@ -111,7 +116,7 @@ export const measureBin = async (
   maxEntries = WALK_MAX_ENTRIES,
   maxMs = WALK_MAX_MS,
   soleOwnerOnly = false,
-  seen = new Set<string>(),
+  seen = new Map<string, number>(),
   items = true
 ) => {
   const deadline = Date.now() + maxMs
@@ -169,8 +174,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const unlandedCopies = new Set<number>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement, by token. */
   const frees = new Map<string, Map<number, number>>()
-  /** Uploads that landed (were renamed into place) while the account's walk ran. */
-  const landing = new Map<string, Set<number>>()
+  /** Uploads and copies that landed while the account's walk ran. */
+  const landing = new Map<string, Map<number, { readonly inode: string; readonly reserved: number } | null>>()
   let nextId = 1
   const ambient = new Map<string, number>()
   const total = (entries: Map<number, number> | undefined) => {
@@ -199,17 +204,17 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     Effect.gen(function* () {
       const started = Date.now()
       // What each entry held before this walk began may or may not be in what it reads, and is
-      // taken off when the walk ends; what lands during the walk stays (over-counting at worst,
-      // never missing it). Frees go the other way: they are applied before the removal, so a walk
+      // taken off when the walk ends. A landing upload is reconciled against what the walk saw
+      // of its inode. Frees go the other way: they are applied before the removal, so a walk
       // that ends later either counted the file (clearing the free over-counts) or reached it
       // after (clearing is exact); keeping it could subtract bytes the walk never counted.
       const heldBefore = new Map(pending.get(userId))
       for (const id of heldBefore.keys()) if (unlandedCopies.has(id)) heldBefore.delete(id)
-      const landedDuring = new Set<number>()
+      const landedDuring = new Map<number, { readonly inode: string; readonly reserved: number } | null>()
       landing.set(userId, landedDuring)
       const { filesRoot, home, bin, output } = deps.folders(userId)
       // Files and the bin share their inodes: a file deleted while linked elsewhere counts once.
-      const seen = new Set<string>()
+      const seen = new Map<string, number>()
       const [files, homeUse, binUse, outputUse] = yield* Effect.promise(() =>
         Promise.all([
           measureTree(filesRoot, deps.walkMaxEntries, undefined, false, seen),
@@ -245,15 +250,22 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       for (const [id, was] of heldBefore) {
         const now = entries?.get(id)
         if (now === undefined) continue
-        // An upload renamed into place during the walk may have been listed as its temporary
-        // name and gone before it was read: the walk may not hold it at all, so its entry stays
-        // (over-counting until the next walk, never missing it).
+        // A renamed upload is handled below. A copy outside Files has no measured inode and
+        // keeps its pending bytes until the next walk, which sees its database row.
         if (landedDuring.has(id)) continue
         // An entry only grows or goes, so a smaller one is a bug: say so, and take off what is
         // left of it rather than fail the call that asked for a figure.
         if (now < was) shrunk.push(`files quota: pending entry ${id} shrank from ${was} to ${now}`)
         if (now <= was) entries!.delete(id)
         else entries!.set(id, now - was)
+      }
+      for (const [id, upload] of landedDuring) {
+        if (upload === null) continue
+        // The walk may have seen the file at either name, while it was still growing, or
+        // missed it across the rename. Retain only the reservation the walk didn't count.
+        const remaining = upload.reserved - (seen.get(upload.inode) ?? 0)
+        pending.get(userId)?.delete(id)
+        if (remaining > 0) grow(userId, id, remaining)
       }
       frees.delete(userId)
       for (const warning of shrunk) yield* Effect.logWarning(warning)
@@ -340,22 +352,25 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     const id = nextId++
     if (outsideFiles) unlandedCopies.add(id)
     let released = false
+    let reserved = 0
     return {
       reserve: (bytes: number, quotaBytes: number) => {
         if (released) return false
         const known = usages.get(userId)?.usedBytes ?? 0
         if (known + total(pending.get(userId)) - total(frees.get(userId)) + bytes > quotaBytes) return false
+        reserved += bytes
         grow(userId, id, bytes)
         return true
       },
-      /** The file is in place: a walk running now may not have seen it, so its entry stays. */
-      landed: () => {
+      /** The file is in place. Give the walk its inode to account for a read under either name. */
+      landed: (file?: Inode) => {
         unlandedCopies.delete(id)
-        landing.get(userId)?.add(id)
+        landing.get(userId)?.set(id, file === undefined ? null : { inode: inodeKey(file), reserved })
       },
       release: () => {
         released = true
         unlandedCopies.delete(id)
+        landing.get(userId)?.delete(id)
         pending.get(userId)?.delete(id)
       }
     }

@@ -45,7 +45,6 @@ import {
   type LayoutAction,
   stripCorners,
   neighbours,
-  restoreLayout,
   type Node,
   type Split,
   type Tab,
@@ -56,6 +55,7 @@ import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { decodeLayout, encodeLayout, WORKBENCH_PARAM } from "./layoutParam.ts"
+import { persistHref } from "./kinds.ts"
 import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../tabLayoutParams.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
@@ -91,11 +91,9 @@ const useWideScreen = () => useSyncExternalStore(subscribeWide, () => matchMedia
 /** Sets where the side panel's toggle goes: the top-right strip's end (tab.tsx `usePanelTogglePlace`). */
 const PanelToggleHostRef = createContext<(element: HTMLElement | null) => void>(() => {})
 
-/** The layout as `WorkbenchStore` saves it (`saveLayout`), into the browser tab's URL. */
-const saveToUrl = (json: string) => {
-  const layout = restoreLayout(JSON.parse(json))
-  writeLayoutParam(WORKBENCH_PARAM, layout ? encodeLayout(layout, (href) => href, withoutLayoutParams) : null)
-}
+/** Save the live layout into the browser tab's URL. */
+const saveToUrl = (layout: Layout) =>
+  writeLayoutParam(WORKBENCH_PARAM, encodeLayout(layout, persistHref, withoutLayoutParams))
 
 /** Registered in the shell's center column (`centerColumn`). */
 export function Workbench() {

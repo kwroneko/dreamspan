@@ -27,6 +27,7 @@ import { TextTooLong } from "@dreamspan/shared/composerApi.ts"
 import { NotFound } from "@dreamspan/shared/errors.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { DraftHistoryPolicy } from "@dreamspan/shared/drafts.ts"
+import { hasMacroMarker } from "@dreamspan/shared/macros/expand.ts"
 import { foldState, swappedCard } from "@dreamspan/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -139,7 +140,7 @@ export const makeChatHandlers = Effect.gen(function* () {
   // A fork a write returns shows its last message as the branch list does (greeting macros replaced).
   // Only a tip with a macro in it can read differently, so an ordinary fork costs no read.
   const withShownTip = (user: UserId, fork: Fork) =>
-    !fork.tipExcerpt.includes("{{")
+    !hasMacroMarker(fork.tipExcerpt)
       ? Effect.succeed(fork)
       : reader.ListForks({ userId: user, chatId: fork.chatId }).pipe(
           Effect.map((list) => {

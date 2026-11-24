@@ -17,7 +17,20 @@ import { shownPlaceValue, spentOverride } from "../src/usePlaceParam.ts"
 import { decodeOpen, encodeOpen, OPEN_LIMIT } from "../src/features/editor/lorebookOpen.ts"
 import { decodeWeights, keptWeights, MAX_WEIGHTS } from "../src/features/chat/ChatPortraitProvider.tsx"
 import { decodeLayout, encodeLayout, WB_LIMIT } from "../src/features/workbench/layoutParam.ts"
-import { initialLayout, openTab, restoreLayout, splitFrame, allTabs, frames } from "../src/features/workbench/model.ts"
+import {
+  initialLayout,
+  openTab,
+  restoreLayout,
+  splitFrame,
+  allTabs,
+  closeTab,
+  frames,
+  pinTab,
+  stickTab
+} from "../src/features/workbench/model.ts"
+import { register as registerFiles } from "../src/features/files/index.tsx"
+import { filesHref } from "../src/features/files/href.ts"
+import { itemKey } from "../src/features/workbench/kinds.ts"
 
 const off: Array<() => void> = []
 afterEach(() => {
@@ -161,6 +174,18 @@ it("keeps a lorebook view's open entries short: Expand all on 2000 entries is a 
   ).toBeLessThanOrEqual(OPEN_LIMIT + 1)
 })
 
+it("in Expand all mode keeps the most recently closed entry when the URL's exceptions fill up", () => {
+  const uids = Array.from({ length: 100 }, (_, i) => i + 1)
+  const closed = uids.slice(50)
+  const previous = ["all", ...closed]
+  const open = new Set(decodeOpen(previous, uids))
+  open.delete(1)
+  const next = encodeOpen(open, uids, true, previous)
+  expect(next).toEqual(["all", ...closed.slice(1), 1])
+  expect(decodeOpen(next, uids).has(1)).toBe(false)
+  expect(decodeOpen(next, uids).has(51)).toBe(true)
+})
+
 it("shows a place value just set until the URL's value moves, then never again (Back after it)", () => {
   // Set [3] while the URL had none: shown until the URL changes.
   const local = { base: "undefined", value: [3] }
@@ -207,6 +232,19 @@ it("puts the workbench's frames in one compact param, the focused tab as the URL
   ])
 })
 
+it.each([true, false])("restores a lone kept tab after closing its neighbor (pinned: %s)", (sticky) => {
+  const key = (href: string) => href
+  const initial = initialLayout("/chats/a")
+  const id = focusedTab(initial)!.id
+  let layout = sticky ? stickTab(initial, id, true) : pinTab(initial, id)
+  layout = openTab(layout, "/chats/b", key)
+  layout = closeTab(layout, focusedTab(layout)!.id)
+  const restored = restoreLayout(decodeLayout(encodeLayout(layout, key), "/chats/a"))!
+  expect(focusedTab(restored)).toMatchObject({ href: "/chats/a", preview: false })
+  expect(focusedTab(restored)?.sticky ?? false).toBe(sticky)
+  expect(allTabs(openTab(restored, "/chats/c", key)).map((t) => t.href)).toEqual(["/chats/a", "/chats/c"])
+})
+
 it("keeps the workbench param under its budget, dropping the place params of the least recent other frames' tabs first", () => {
   const key = (href: string) => href.split("?")[0]!
   const place = `?${"lb:open=" + encodeURIComponent(JSON.stringify(Array.from({ length: 50 }, (_, i) => i)))}&timeline=summaries`
@@ -230,6 +268,60 @@ it("keeps the workbench param under its budget, dropping the place params of the
   // A focused frame too big alone: its hidden tabs go too, after the other frame's.
   for (let i = 3; i < 40; i++) layout = openTab(layout, `/chats/right-${i}${place}`, key, { preview: false })
   expect(fits(encodeLayout(layout, (href) => href)!)).toBe(true)
+})
+
+it("keeps Files folders and open filenames when compacting hidden tabs", () => {
+  off.push(...registerFiles())
+  const folder = `/files/${Array.from({ length: 5 }, () => "雪".repeat(15)).join("/")}`
+  const hrefs = [filesHref(folder), filesHref(folder, "first.txt"), filesHref(folder, "second.txt")]
+  let layout = initialLayout(hrefs[0]!)
+  for (const href of hrefs)
+    layout = openTab(layout, `${href}&presentation=${"p".repeat(WB_LIMIT)}`, itemKey, { preview: false })
+  layout = openTab(layout, "/chats/current", itemKey, { preview: false })
+  const encoded = encodeLayout(layout, (href) => href)!
+  expect(new URLSearchParams({ wb: encoded }).toString().length).toBeLessThanOrEqual(WB_LIMIT)
+  const restored = restoreLayout(decodeLayout(encoded, "/chats/current"))!
+  expect(allTabs(restored).map((t) => t.href)).toEqual([...hrefs, "/chats/current"])
+})
+
+it("caps the saved workbench when many bare inspector URLs still exceed the budget", () => {
+  const hrefs = Array.from({ length: 60 }, (_, i) => `/chats/${"a".repeat(30)}${i}/context/${"b".repeat(35)}${i}`)
+  const key = (href: string) => href
+  let layout = initialLayout(hrefs[0]!)
+  for (const href of hrefs) layout = openTab(layout, href, key, { preview: false })
+  layout = openTab(layout, hrefs[0]!, key)
+  const encoded = encodeLayout(layout, key)!
+  expect(new URLSearchParams({ wb: encoded }).toString().length).toBeLessThanOrEqual(WB_LIMIT)
+  const restored = restoreLayout(decodeLayout(encoded, hrefs[0]!))!
+  const tabs = allTabs(restored).map((t) => t.href)
+  expect(tabs.length).toBeLessThan(hrefs.length)
+  expect(tabs.length).toBeGreaterThan(1)
+  expect(tabs).toEqual([hrefs[0], ...hrefs.slice(1 - tabs.length)])
+  expect(focusedTab(restored)?.href).toBe(hrefs[0])
+  expect(allTabs(layout)).toHaveLength(60)
+})
+
+it("omits empty split frames when their essential URLs cannot fit", () => {
+  off.push(...registerFiles())
+  const folder = `/files/${Array.from({ length: 5 }, () => "雪".repeat(50)).join("/")}`
+  const file = filesHref(folder, "notes.txt")
+  let layout = initialLayout(file)
+  layout = splitFrame(layout, layout.focused, "row")
+  layout = openTab(layout, "/chats/current", itemKey, { frame: layout.focused, preview: false })
+  const encoded = encodeLayout(layout, itemKey, undefined, 100)
+  const restored = restoreLayout(decodeLayout(encoded, "/chats/current"))!
+  expect(restored.root.type).toBe("frame")
+  expect(focusedTab(restored)).toMatchObject({ href: "/chats/current", preview: false })
+})
+
+it("keeps the focused tab when there are more tabs than the reader can restore", () => {
+  const key = (href: string) => href
+  let layout = initialLayout("/a0")
+  for (let i = 0; i <= 60; i++) layout = openTab(layout, `/a${i}`, key, { preview: false })
+  const encoded = encodeLayout(layout, key)!
+  const restored = restoreLayout(decodeLayout(encoded, "/a60"))!
+  expect(focusedTab(restored)?.href).toBe("/a60")
+  expect(allTabs(restored).map((tab) => tab.href)).toEqual(Array.from({ length: 60 }, (_, i) => `/a${i + 1}`))
 })
 
 it("writes portrait shares as it reads them back: the same cap, rounding and bounds", () => {

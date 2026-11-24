@@ -17,11 +17,22 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { anthropicSse, completionChunks, json, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const NUDGE = sendNudgeText(true)
 
-const toolCall = (name: string, args: unknown, text = "", id = "call_1") => [
+const toolCall = (name: string, args: unknown, text = "", id = "call_1", reasoning = "") => [
+  ...(reasoning
+    ? [
+        {
+          id: "cmpl-t",
+          object: "chat.completion.chunk",
+          model: "served-model",
+          choices: [{ index: 0, delta: { role: "assistant", reasoning_content: reasoning }, finish_reason: null }]
+        }
+      ]
+    : []),
   {
     id: "cmpl-t",
     object: "chat.completion.chunk",
@@ -112,6 +123,34 @@ const resume = (api: Effect.Success<ReturnType<typeof client>>, versionId: Versi
     return yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
   })
 
+it.live("keeps reasoning with progress in Steps and reasoning before a bare send in the reply", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const reasoning = "Consider the keeper."
+    const progress = "Let me check."
+    const mock = yield* scriptedMock((n, _body, res) =>
+      sse(res, toolCall("send_message", { message: "Ansel waves." }, n === 0 ? progress : "  ", "send", reasoning))
+    )
+    const api = yield* client()
+    const generate = () =>
+      generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+    const withProgress = (yield* generate()).version
+    assert.strictEqual(withProgress.content, "Ansel waves.")
+    assert.isNotOk(withProgress.reasoning)
+    assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: withProgress.id }), [
+      { kind: "thinking", text: reasoning },
+      { kind: "text", text: progress }
+    ])
+    const bare = (yield* generate()).version
+    assert.strictEqual(bare.reasoning, reasoning)
+    assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: bare.id }), [])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
 describe("reply contract", () => {
   it.live("by default a reply is sent with send_message: text before the send is a step, never the body", () => {
     const config = testConfig()
@@ -127,6 +166,7 @@ describe("reply contract", () => {
       })
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(version.content, "Ansel waves.")
+      assert.strictEqual(version.steps?.count, 1)
       assert.isNull(version.mark)
       const sent = bodies(mock.requests())
       assert.lengthOf(sent, 1)
@@ -140,6 +180,15 @@ describe("reply contract", () => {
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
         { kind: "text", text: "Let me think about the keeper." }
       ])
+      // A reply stored by the previous counter still exposes its progress on reload.
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE rollouts SET step_count = 0 WHERE id = (SELECT rollout_id FROM versions WHERE id = ?)",
+          params: [version.id]
+        }
+      ])
+      const stored = (yield* api.ListVersions({ slotId: version.slotId })).find((v) => v.id === version.id)
+      assert.strictEqual(stored?.steps?.count, 1)
       // The default instructions name both endings.
       assert.include(JSON.stringify(sent[0]!.messages.at(-1)), "call no_reply instead")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -651,6 +700,7 @@ describe("reply contract", () => {
       yield* api.StopGeneration({ versionId: version.id })
       yield* eventually(() => finished(events, version.id) !== undefined)
       assert.strictEqual(finished(events, version.id)!.content, "")
+      assert.strictEqual(finished(events, version.id)!.steps?.count, 1)
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
         { kind: "text", text: "Three paragraphs of plain text" }
       ])
