@@ -47,3 +47,21 @@ for (const width of [1440, 390])
     await expect(link).toBeVisible()
     await expect.poll(() => scrollTop(page)).toBe(saved)
   })
+
+for (const width of [1440, 390])
+  test(`Characters returns to the top after Back from a scrolled cardex at ${width}px`, async ({ page }) => {
+    await open(page, width, "/")
+    const local = tab(page).getByRole("link", { name: "Open Scroll fixture 55", exact: true })
+    await expect(local).toBeVisible()
+    expect(await scrollTop(page)).toBe(0)
+
+    await tab(page).getByRole("button", { name: "cardex", exact: true }).click()
+    await expect(tab(page).locator("[data-remote-card]").nth(8)).toBeVisible()
+    await expect(tab(page).locator("[data-source-results]")).toHaveAttribute("aria-busy", "false")
+    await scroller(page).evaluate((el) => (el.scrollTop = 750))
+    expect(await scrollTop(page)).toBe(750)
+
+    await back(page, width)
+    await expect(local).toBeVisible()
+    await expect.poll(() => scrollTop(page)).toBe(0)
+  })

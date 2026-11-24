@@ -445,7 +445,7 @@ export function CenterPage() {
       ) : (
         // The scrollbar's gutter is kept whether or not the page scrolls: a page growing past the
         // window or shrinking under it (a tab switch) never moves the centred column sideways.
-        <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div data-page-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           <div className="mx-auto w-full max-w-5xl px-4 py-6">
             <Outlet />
           </div>
