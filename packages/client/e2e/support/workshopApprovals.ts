@@ -1,8 +1,8 @@
 // Workshop permissions, approvals and undo in the browser (spec/WORKSHOP.md W4): the chip's Off /
 // Ask first / Allowed choices, a call that asks first (what it will do, from its real arguments),
 // a reload while it waits, Allow and Allow in this workshop, the regenerate warning (Cancel, then
-// Undo them), Undo from a step and from the Changes tab, an undo refused after an edit by hand, and
-// Off taking the tool out of the request. Run by workshopApprovals.spec.ts and, with
+// Undo them), Undo from a step and from the Changes tab, an undo that asks first after an edit by
+// hand, and Off taking the tool out of the request. Run by workshopApprovals.spec.ts and, with
 // LAYOUT_AUDIT_WORKSHOP_ONLY=1, by layoutAudit.spec.ts. Synthetic data and a scripted loopback
 // provider only.
 import { mkdirSync } from "node:fs"
@@ -215,7 +215,8 @@ export function workshopApprovalTests() {
           await expect.poll(async () => (await effects()).length, { timeout: 30_000 }).toBe(3)
           await expect(page.getByRole("article").last().getByText(WORKSHOP_ANSWER)).toBeVisible({ timeout: 30_000 })
 
-          // An edit by hand to the first card: its undo is refused, with the reason and Open.
+          // An edit by hand to the first card: its undo asks first instead of refusing
+          // (spec/WORKSHOP-CARDS.md §8.1, Created items); Cancel leaves it as it is, with Open.
           const oldest = (await effects()).at(-1)!
           await admin((api) =>
             Effect.gen(function* () {
@@ -243,12 +244,16 @@ export function workshopApprovalTests() {
           const rows = changes.locator("[data-effect]")
           await expect(rows).toHaveCount(3)
           await expect(rows.nth(1)).toContainText("Undone")
-          const refused = rows.nth(2)
-          await refused.getByRole("button", { name: "Undo", exact: true }).click()
-          await expect(refused.getByRole("alert")).toContainText(
-            "Changed since; open its history before undoing this change."
-          )
-          await expect(refused.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
+          const edited = rows.nth(2)
+          await edited.getByRole("button", { name: "Undo", exact: true }).click()
+          const binIt = page.getByRole("alertdialog", { name: "Move it to the bin?" })
+          await expect(binIt).toContainText("It was changed since, or a chat uses it.")
+          await expect(binIt.getByRole("button", { name: "Move to the bin", exact: true })).toBeVisible()
+          await binIt.getByRole("button", { name: "Cancel", exact: true }).click()
+          await expect(binIt).toHaveCount(0)
+          await expect(edited).not.toContainText("Undone")
+          expect((await effects()).at(-1)!.undoneAt).toBeNull()
+          await expect(edited.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
             "href",
             `/library/${oldest.undo!.refId as string}`
           )
@@ -262,6 +267,10 @@ export function workshopApprovalTests() {
           await page.goto(`${server().url}/chats/${workshop.id}`)
           await openSteps(page.getByRole("article").last())
           await expect(page.getByRole("article").last().locator("[data-effect]").first()).toContainText("Undone")
+          // Opening the steps can scroll the list up to their badge (the turn's change rows sit
+          // below the reply), which lets go of the end; scroll back down so the next reply is followed.
+          await page.getByRole("article").last().hover()
+          await page.mouse.wheel(0, 10_000)
 
           // Off: the tool isn't in the next request at all, and nothing more is made.
           const off = await choose(

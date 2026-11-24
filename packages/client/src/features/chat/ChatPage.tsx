@@ -22,7 +22,7 @@ import { useIsPanelTab } from "./panels.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
 import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
-import { observeElementOffset, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
+import { elementScroll, observeElementOffset, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import {
   type RefObject,
   useCallback,
@@ -94,6 +94,8 @@ export interface Flashes {
 const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
+/** Whether `offset` is where the list stood at `at` (null: nowhere yet). */
+const atOffset = (at: number | null, offset: number) => at !== null && Math.abs(offset - at) < 1
 
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
@@ -240,6 +242,31 @@ export function MessageList({
     },
     [follow]
   )
+  /**
+   * Offsets the list was put at without the user: where it last stood at its end while held
+   * there, as a commit left it (the browser clamps to it when the last rows get shorter, a
+   * reply's steps folding), and the last offset the virtualizer wrote (an end scroll from
+   * estimates, a correction for rows measured above). The scroll event for either can
+   * arrive after rows grew (rows a contribution adds once it has read them), away from the
+   * end: that isn't the user scrolling away.
+   */
+  const endOffset = useRef<number | null>(null)
+  const writtenOffset = useRef<number | null>(null)
+  const scrollToFn = useCallback(
+    (
+      offset: number,
+      options: { adjustments?: number; behavior?: ScrollBehavior },
+      instance: Virtualizer<HTMLDivElement, Element>
+    ) => {
+      writtenOffset.current = offset + (options.adjustments ?? 0)
+      elementScroll(offset, options, instance)
+    },
+    []
+  )
+  const placedOffset = useCallback(
+    (offset: number) => atOffset(endOffset.current, offset) || atOffset(writtenOffset.current, offset),
+    []
+  )
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, changed: (offset: number, isScrolling: boolean) => void) => {
@@ -251,7 +278,8 @@ export function MessageList({
           follow.stuck &&
           list !== null &&
           offset < (instance.scrollOffset ?? 0) &&
-          list.scrollHeight - offset - list.clientHeight > END_PX
+          list.scrollHeight - offset - list.clientHeight > END_PX &&
+          !placedOffset(offset)
         )
           setFollow(instance, false)
         changed(offset, isScrolling)
@@ -263,7 +291,7 @@ export function MessageList({
         stop?.()
       }
     },
-    [follow, setFollow]
+    [follow, setFollow, placedOffset]
   )
   // While the list scrolls, TanStack Virtual measures newly mounted rows only in its resize
   // observer, before the browser paints, but re-renders for a size that moves nothing above the
@@ -296,6 +324,7 @@ export function MessageList({
     estimateSize,
     getItemKey,
     observeElementOffset: observeOffset,
+    scrollToFn,
     // Start near the destination. Mounting the first window's first rows only to replace
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
@@ -334,6 +363,12 @@ export function MessageList({
     offsetChanged.current?.(actual, false)
   }, [virtualizer])
   useLayoutEffect(syncOffset)
+  useLayoutEffect(() => {
+    const list = parent.current
+    if (list === null || !follow.stuck) return
+    const offset = list.scrollTop
+    if (list.scrollHeight - offset - list.clientHeight <= 1) endOffset.current = offset
+  })
 
   // Contributions can grow below a partly visible earlier row whose text is already
   // above the viewport. Keep the reading row fixed through a resize batch: querying
@@ -641,7 +676,11 @@ export function MessageList({
     }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
-      if (!atEnd()) hold(false)
+      if (!atEnd()) {
+        // Rows grew after the list was put somewhere without the user (above): still held.
+        if (follow.stuck && placedOffset(list.scrollTop)) virtualizer.scrollToEnd()
+        else hold(false)
+      }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
       // Their corrected estimates can grow the list beyond END_PX in that same commit.
       else if (spacing === "compact" && !revealing.current && performance.now() - intent.current > 300) hold(true)
@@ -661,7 +700,7 @@ export function MessageList({
       list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing])
+  }, [hold, spacing, follow, virtualizer, placedOffset])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
