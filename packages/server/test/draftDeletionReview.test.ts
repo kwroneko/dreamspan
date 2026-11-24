@@ -129,7 +129,7 @@ it.live("clearing nested or removed form inputs protects only those inputs", () 
     const api = yield* client()
     const ownerId = (yield* api.Whoami()).id
     for (const [index, cleared] of [{ info: { name: "" } }, { info: { name: null } }, { info: {} }, {}].entries()) {
-      const address = { ownerId, targetId: `nested-form:${index}`, field: "Settings" }
+      const address = { ownerId, targetId: `connection:nested-form:${index}`, field: "Settings" }
       const first = yield* api.SaveUserDraft({
         ...address,
         draftId: null,

@@ -244,22 +244,32 @@ describe("a stale form save is refused and the current version kept", () => {
         targetId: "Settings → Chats",
         field: "Summarization instruction"
       }
+      const textSave = (content: string, on: Draft | null) => ({
+        key: textKey,
+        content,
+        draftId: on?.id ?? null,
+        expectedRowVersion: on?.rowVersion ?? null,
+        expectedSession: on?.session ?? null,
+        baseRevision: null
+      })
       const saveText = (content: string, on: Draft | null) =>
-        writer.SaveDraft({
-          userId: user.id,
-          key: textKey,
-          content,
-          draftId: on?.id ?? null,
-          expectedRowVersion: on?.rowVersion ?? null,
-          expectedSession: on?.session ?? null,
-          baseRevision: null
-        })
-      const start = yield* saveText("Synthetic instruction.", null)
-      yield* saveText("Synthetic instruction, typed in A.", start)
-      const b = yield* saveText("Synthetic instruction, typed in B.", start)
-      assert.strictEqual(b.content, "Synthetic instruction, typed in B.")
+        writer.SaveDraft({ userId: user.id, ...textSave(content, on) })
+      const start = yield* saveText(form({ instruction: "Synthetic instruction." }), null)
+      const a = yield* saveText(form({ instruction: "", note: "Typed in A." }), start)
+      const local = form({ instruction: "Typed in B." })
+      const b = yield* saveText(local, start)
+      assert.strictEqual(b.content, local)
       assert.isUndefined(b.refused)
-      assert.strictEqual(b.displaced?.content, "Synthetic instruction, typed in A.")
+      assert.strictEqual(b.displaced?.content, a.content)
+
+      const closing = form({ instruction: "Typed in a closing tab." })
+      const [filed] = yield* writer.SaveDraftBatch({
+        userId: user.id,
+        entries: [{ _tag: "draft", ...textSave(closing, start) }]
+      })
+      assert.strictEqual(filed?.draft?.content, closing)
+      assert.isUndefined(filed?.draft?.refused)
+      assert.strictEqual(filed?.draft?.displaced?.content, local)
     }).pipe(Effect.provide(layer()))
   )
 })

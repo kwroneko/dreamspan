@@ -11,7 +11,7 @@ import {
   type Draft,
   type DraftDisplacement,
   type DraftState,
-  isFormContent
+  isUserDraftForm
 } from "@dreamspan/shared/drafts.ts"
 import type { UserDraftSave } from "@dreamspan/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
@@ -96,11 +96,13 @@ export class UserDraftStore {
   private userId: UserId
   private targetId: string
   private field: string
+  private readonly isForm: boolean
   private run: Run
   constructor(userId: UserId, targetId: string, field: string, run: Run) {
     this.userId = userId
     this.targetId = targetId
     this.field = field
+    this.isForm = isUserDraftForm(targetId, field)
     this.run = run
   }
   subscribe = (listener: () => void) => {
@@ -209,8 +211,9 @@ export class UserDraftStore {
         accepted || result.value.refused !== undefined
           ? null
           : deletedSince(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null) ||
-              reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
-                .changed
+              (this.isForm &&
+                reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
+                  .changed)
             ? "This text was deleted elsewhere. Find your copy in recovered texts."
             : "This text changed elsewhere. Review the updated text.",
       displaced: result.value.displaced ?? this.state.displaced,
@@ -256,7 +259,7 @@ export class UserDraftStore {
           continue
         }
         const safeCopy =
-          this.draft === null
+          this.draft === null || !this.isForm
             ? { content: copy.content, changed: false, rejected: false }
             : reconcileDeletedFields(
                 this.draft,
@@ -419,13 +422,7 @@ export class UserDraftStore {
       // local text into recovered texts instead of reopening a deleted field.
       if (!load) this.observedDeletion = observeDeletion(remote)
       // A form on its old version would be refused: keeping it is choosing it over the remote one.
-      if (
-        !load &&
-        remote.status === "active" &&
-        this.state.text !== null &&
-        isFormContent(this.state.text) &&
-        isFormContent(remote.content)
-      ) {
+      if (!load && this.isForm && remote.status === "active" && this.state.text !== null) {
         this.base = baseOf(remote)
         this.editingFrom = remote.content
       }

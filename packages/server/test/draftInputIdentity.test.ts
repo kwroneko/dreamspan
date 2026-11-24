@@ -82,7 +82,7 @@ for (const reverse of [false, true])
       Effect.gen(function* () {
         const api = yield* client()
         const ownerId = (yield* api.Whoami()).id
-        const address = { ownerId, targetId: `identity:${reverse}:${operation}`, field: "Scripts" }
+        const address = { ownerId, targetId: `connection:identity:${reverse}:${operation}`, field: "Settings" }
         const a = { id: "a", name: "Alpha", findRegex: "first" },
           b = { id: "b", name: "Bravo deleted", findRegex: "second" },
           c = { id: "c", name: "Charlie newly typed", findRegex: "third" }
@@ -135,7 +135,7 @@ it.live("a stale clear is refused whole: no barrier, the other device's input ke
   Effect.gen(function* () {
     const api = yield* client(),
       ownerId = (yield* api.Whoami()).id
-    const address = { ownerId, targetId: "proved-input-clear", field: "Settings" }
+    const address = { ownerId, targetId: "connection:proved-input-clear", field: "Settings" }
     const initial = JSON.stringify({ name: "Original name", baseUrl: "" })
     const first = yield* api.SaveUserDraft({
       ...address,
@@ -171,7 +171,7 @@ it.live("anonymous-array deletion conflicts retain the array instead of projecti
   Effect.gen(function* () {
     const api = yield* client(),
       ownerId = (yield* api.Whoami()).id
-    const address = { ownerId, targetId: "anonymous-array", field: "Inputs" }
+    const address = { ownerId, targetId: "connection:anonymous-array", field: "Settings" }
     const initial = JSON.stringify({ items: [{ name: "Alpha" }, { name: "Bravo deleted" }], other: "" })
     const first = yield* api.SaveUserDraft({
       ...address,
@@ -201,7 +201,7 @@ it.live("retrying an actual clear cannot create a new barrier while updating ano
   Effect.gen(function* () {
     const api = yield* client(),
       ownerId = (yield* api.Whoami()).id
-    const address = { ownerId, targetId: "clear-acknowledgement", field: "Settings" }
+    const address = { ownerId, targetId: "connection:clear-acknowledgement", field: "Settings" }
     const initial = JSON.stringify({ name: "", baseUrl: "" })
     const typed = JSON.stringify({ name: "Name before clearing", baseUrl: "" })
     const first = yield* api.SaveUserDraft({
@@ -240,7 +240,7 @@ it.live("an offline anonymous clear remains protected when its text is reused be
   Effect.gen(function* () {
     const api = yield* client(),
       ownerId = (yield* api.Whoami()).id
-    const address = { ownerId, targetId: "anonymous-reused-clear", field: "Inputs" }
+    const address = { ownerId, targetId: "connection:anonymous-reused-clear", field: "Settings" }
     const original = JSON.stringify({ items: [{ name: "Deleted name", note: "", other: "" }] })
     const clear = JSON.stringify({ items: [{ name: "", note: "", other: "" }] })
     const moved = JSON.stringify({ items: [{ name: "", note: "Deleted name", other: "" }] })

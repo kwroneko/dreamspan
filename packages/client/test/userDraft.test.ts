@@ -21,7 +21,7 @@ vi.mock("../src/features/editor/backup.ts", async (original) => ({
 }))
 const { UserDraftStore, newerText } = await import("../src/features/editor/userDraft.tsx")
 const ownerId = "author" as UserId
-const key = new DraftKey({ targetKind: "user_field", targetId: "test", field: "Instruction" })
+const key = new DraftKey({ targetKind: "user_field", targetId: "Settings → Chats", field: "Summarization instruction" })
 const draft = (content: string, rowVersion = 1) =>
   new Draft({
     id: "draft",
@@ -634,13 +634,20 @@ it("typing into the empty field before its tombstone read finishes starts from t
 
 it("a refused compound replay protects cleared inputs while retaining other last keystrokes", async () => {
   const raw = JSON.stringify({ name: "deleted name", baseUrl: "https://example.invalid/last-keystroke" })
-  const old = makeCopy(ownerId, key.targetId, key.field, { kind: "userDraft", payload: payload(raw) }, 1)
+  const address = { targetId: "connection:synthetic", field: "Settings" }
+  const old = makeCopy(
+    ownerId,
+    address.targetId,
+    address.field,
+    { kind: "userDraft", payload: { ...payload(raw), ...address } },
+    1
+  )
   await keepCopy(old)
   const cleared = new Draft({
     ...draft(JSON.stringify({ name: "", baseUrl: "https://example.invalid" }), 5),
     deletions: { '["name"]': { draftId: "draft", rowVersion: 5, value: "" } }
   })
-  const { store, handlers, saves } = harness(cleared)
+  const { store, handlers, saves } = harness(cleared, address.field, address.targetId)
   const save = handlers.SaveUserDraft
   handlers.SaveUserDraft = async () => {
     throw new Error("offline during replay")
