@@ -1,4 +1,4 @@
-import { chromium, expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { SlotId } from "@dreamspan/shared/chat.ts"
 import type { SendResult } from "@dreamspan/shared/chatApi.ts"
@@ -109,22 +109,28 @@ test.describe("touch input", () => {
   })
 })
 
-test("a scrollbar drag through the end keeps control during a continuous reply", async ({ browserName }) => {
-  test.skip(browserName !== "chromium", "Uses the Chromium scrollbar thumb geometry")
-  const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] })
-  try {
-    const page = await browser.newPage()
+const bottomThumb = async (list: Locator) => {
+  const thumb = await list.evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    return {
+      x: box.left + (node.clientWidth + box.width) / 2,
+      y: box.bottom - 8,
+      gutter: box.width - node.clientWidth
+    }
+  })
+  expect(thumb.gutter).toBeGreaterThan(0)
+  return thumb
+}
+
+const scrollbarTest = test.extend({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } })
+
+scrollbarTest.describe("native scrollbar", () => {
+  scrollbarTest.skip(({ browserName }) => browserName !== "chromium", "Uses the Chromium scrollbar thumb geometry")
+
+  scrollbarTest("a scrollbar drag through the end keeps control during a continuous reply", async ({ page }) => {
     const stream = await openStream(page, 1440, true)
     await expect.poll(stream.fromEnd).toBeLessThanOrEqual(1)
-    const thumb = await stream.list.evaluate((node) => {
-      const box = node.getBoundingClientRect()
-      return {
-        x: box.left + (node.clientWidth + box.width) / 2,
-        y: box.bottom - 8,
-        gutter: box.width - node.clientWidth
-      }
-    })
-    expect(thumb.gutter).toBeGreaterThan(0)
+    const thumb = await bottomThumb(stream.list)
     await page.mouse.move(thumb.x, thumb.y)
     await page.mouse.down()
     await page.mouse.move(thumb.x, thumb.y - 24, { steps: 3 })
@@ -137,7 +143,30 @@ test("a scrollbar drag through the end keeps control during a continuous reply",
     await page.mouse.move(thumb.x, thumb.y - 32, { steps: 3 })
     await page.mouse.up()
     await expectReadingHistory(stream)
-  } finally {
-    await browser.close()
-  }
+  })
+
+  for (const width of [1440, 390])
+    scrollbarTest(
+      `releasing the scrollbar at the end resumes following a continuous reply at ${width}px`,
+      async ({ page }) => {
+        const stream = await openStream(page, width, true)
+        const { list, fromEnd, height, generating } = stream
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1)
+        const thumb = await bottomThumb(list)
+
+        await page.mouse.move(thumb.x, thumb.y)
+        await page.mouse.down()
+        await page.mouse.move(thumb.x, thumb.y - 45, { steps: 3 })
+        await expectReadingHistory(stream)
+
+        await page.mouse.move(thumb.x, thumb.y + 60, { steps: 3 })
+        await expect.poll(fromEnd, { intervals: [10, 20, 30], timeout: 1500 }).toBeLessThanOrEqual(1)
+        await page.mouse.up()
+
+        const releaseHeight = await height()
+        await expect.poll(height).toBeGreaterThan(releaseHeight + 240)
+        await expect(generating).toBeVisible()
+        await expect.poll(fromEnd, { timeout: 1500 }).toBeLessThanOrEqual(1)
+      }
+    )
 })

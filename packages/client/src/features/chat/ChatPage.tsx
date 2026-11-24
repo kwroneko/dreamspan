@@ -607,7 +607,7 @@ export function MessageList({
   // starts with steps small enough to still look like the end. So does grabbing the
   // scrollbar or a middle-button autoscroll. A change in scroll position can be a browser
   // layout clamp, even after the list's previous height has returned, so it cannot let go.
-  // Reaching the end again holds on once the user has stopped for a moment.
+  // Reaching the end again holds on after a pause, or on release of the thumb there.
   //
   // A menu open on a message pauses the hold until it closes (anchorScroll.ts): following a
   // streaming reply carried the menu up with its row, then closed it as the row left the view.
@@ -656,6 +656,18 @@ export function MessageList({
       if (scrollbarPointer.current !== event.pointerId) return
       scrollbarPointer.current = null
       intent.current = performance.now()
+      // Read the native position before stream growth or virtualizer measurements move the end.
+      if (
+        event.type === "pointerup" &&
+        list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX &&
+        !revealing.current &&
+        menus.current.open === 0 &&
+        session.snapshot().newer === null
+      ) {
+        hold(true)
+        virtualizer.scrollToEnd()
+        session.followAtBottom()
+      }
     }
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
@@ -697,7 +709,7 @@ export function MessageList({
       window.removeEventListener("pointercancel", onPointerEnd, true)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, virtualizer])
+  }, [hold, spacing, follow, virtualizer, session])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
