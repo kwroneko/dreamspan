@@ -827,7 +827,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return made.ref
       }).pipe(internal("ForkCardForChat")),
 
-    ChangeCast: ({ chatId, slotId: asked, change, forkId }) =>
+    ChangeCast: ({ chatId, slotId: asked, change, forkId, pending: shownPending }) =>
       Effect.gen(function* () {
         let slotId = asked
         const id = yield* userId
@@ -837,10 +837,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // A pending chat's greetings follow who's in it, as a group start's would (DESIGN §2.1):
         // its cast change and its greetings are written together, so a first send or another
         // change from another tab sees both or neither.
-        if (
-          ["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag) &&
-          (yield* reader.GetChat({ userId: id, chatId })).status === "pending"
-        ) {
+        const chat = yield* reader.GetChat({ userId: id, chatId })
+        // Asked for on the pending page, but a first send from another tab started the chat
+        // first: an ordinary cast change, after what was said, not at its start.
+        if (shownPending === true && asked === null && chat.status !== "pending") slotId = chat.activeLeafSlotId
+        if (["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag) && chat.status === "pending") {
           const before = yield* castAt(id, chatId, null, forkId, displayEnd)
           const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
           const events =
@@ -863,10 +864,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                 ? (change.entityIds[0] ?? null)
                 : (before.playedByMe[0] ?? null)
           const playing = new Set<string>(
-            change._tag === "Persona" ? [change.entityId] : change._tag === "PlayedByMe" ? change.entityIds : before.playedByMe
+            change._tag === "Persona"
+              ? [change.entityId]
+              : change._tag === "PlayedByMe"
+                ? change.entityIds
+                : before.playedByMe
           )
-          const joining =
-            change._tag === "Join" || change._tag === "Swap" ? [change.entityId] : []
+          const joining = change._tag === "Join" || change._tag === "Swap" ? [change.entityId] : []
           const candidates = [...new Set([...before.participants, ...joining])].filter((entity) => !playing.has(entity))
           const drawn = yield* drawGreeters(
             reader,

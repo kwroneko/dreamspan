@@ -362,4 +362,31 @@ describe("a pending chat's edges", () => {
       })
     )
   )
+  it.live("a join asked for on the pending page after another tab's first send goes after it", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, make } = yield* setup
+        const mira = yield* make("Mira")
+        const tobin = yield* make("Tobin")
+        const draft = yield* api.OpenDraftChat({ draftFor: `card:${mira}` })
+        const forkId = draft.currentForkId!
+        const [greeting] = yield* path(api, draft.id)
+        // The other tab's first send lands first.
+        yield* api.SendMessage({ chatId: draft.id, parentSlotId: greeting!.slotId, branch: false, content: "Hello." })
+        // This tab still shows the chat pending: its join names the start.
+        yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId,
+          pending: true,
+          change: { _tag: "Join", entityId: tobin }
+        })
+        const entries = yield* path(api, draft.id)
+        const atStart = yield* api.GetCast({ chatId: draft.id, slotId: greeting!.slotId, forkId })
+        assert.notInclude(atStart.participants, tobin)
+        const atTip = yield* api.GetCast({ chatId: draft.id, slotId: entries.at(-1)!.slotId, forkId })
+        assert.include(atTip.participants, tobin)
+      })
+    )
+  )
 })
