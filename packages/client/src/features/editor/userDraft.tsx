@@ -23,6 +23,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { iconButtonClass } from "../../ui/Tooltip.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
+import { clearRefusedDraft, keepRefusedDraft, readRefusedDraft } from "./refusedDraft.ts"
 
 import { readTypedBackup, keepTypedBackup, dropTypedBackup } from "./typedBackup.ts"
 
@@ -117,6 +118,7 @@ export class UserDraftStore {
     if (this.state.saved !== saved) this.update({ saved })
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
+  private refusalKey = () => `dreamspan.refusedDraft:${JSON.stringify(this.address())}`
   private payload = (content: string, seed = false, editingFrom = this.editingFrom) => ({
     ...this.address(),
     content,
@@ -193,7 +195,8 @@ export class UserDraftStore {
     if (accepted && this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
     // A form refused as out of date (owner, 2026-11-24): the field now shows the current version,
     // and this tab's one is offered back. Another tab's draft seen meanwhile is the one shown.
-    const refused = !seed && result.value.refused !== undefined && showing ? result.value.refused : null
+    const refused = !seed && showing && this.edits === edit ? (result.value.refused ?? null) : null
+    if (refused !== null) keepRefusedDraft(this.refusalKey(), result.value, refused)
     if (
       refused !== null &&
       this.state.remote?.id === result.value.id &&
@@ -318,6 +321,8 @@ export class UserDraftStore {
         const replay = await this.run((client) => client("SaveUserDraft", save.payload))
         if (replay.ok) {
           this.draft = replay.value
+          const refused = this.edits === 0 && save.payload.seed !== true ? replay.value.refused : undefined
+          if (refused !== undefined) keepRefusedDraft(this.refusalKey(), replay.value, refused)
           if (this.edits === 0) {
             this.base = baseOf(replay.value)
             this.editingFrom = replay.value.status === "active" ? replay.value.content : null
@@ -326,9 +331,7 @@ export class UserDraftStore {
           }
           this.update({
             // A form copy typed on an older version is refused: offered back, the field showing the current one.
-            ...(this.edits === 0 && save.payload.seed !== true && replay.value.refused !== undefined
-              ? { refused: replay.value.refused }
-              : {}),
+            ...(refused === undefined ? {} : { refused }),
             displaced: replay.value.displaced ?? this.state.displaced,
             recovered: this.state.recovered + replay.value.recovered
           })
@@ -364,7 +367,12 @@ export class UserDraftStore {
       this.update({
         ready: true,
         savedAt: this.draft?.updatedAt ?? null,
-        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
+        text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null),
+        refused:
+          this.state.refused ??
+          (this.edits === 0 && (this.state.text === null || this.state.text === this.draft?.content)
+            ? readRefusedDraft(this.refusalKey(), this.draft)
+            : null)
       })
     })
   }
@@ -484,6 +492,7 @@ export class UserDraftStore {
     this.editingFrom = editingOrigin(this.editingFrom, initial, content)
     this.edits++
     // Editing the version shown is going on from it: a refused one stays in the field's history.
+    clearRefusedDraft(this.refusalKey())
     this.update({ text: content, history: null, refused: null })
     void this.remember(content, true).kept
     const pending = { initial, content, editingFrom: this.editingFrom, edit: this.edits }
@@ -546,6 +555,7 @@ export class UserDraftStore {
         if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
       }
       if (this.state.text === content) this.editingFrom = null
+      clearRefusedDraft(this.refusalKey())
       this.update({
         text: this.state.text === content ? null : this.state.text,
         error: ended.ok ? null : ended.error.message,
