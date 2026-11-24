@@ -397,15 +397,37 @@ const httpCode = (error: unknown): number | undefined => {
   return typeof code === "number" && code >= 100 && code < 600 ? code : undefined
 }
 
-/**
- * The server answered the request itself with "I don't know this session": a 404 on the
- * session, or a 400 saying it isn't initialized (spec/MCP.md §7.2). Both are HTTP statuses on
- * the response to the request's own POST, so the server refused it before processing it. A
- * transport error, a timeout or an error message alone never counts.
- */
-const isDeadSession = (error: unknown) =>
-  error instanceof StreamableHTTPError &&
-  (error.code === 404 || (error.code === 400 && /not initiali[sz]ed|session/i.test(error.message)))
+class DeadMcpSession extends StreamableHTTPError {}
+
+const initializationRefused = (body: string) => {
+  let message: unknown = body
+  try {
+    const response = JSON.parse(body) as { jsonrpc?: unknown; error?: { message?: unknown } } | null
+    if (response?.jsonrpc === "2.0") message = response.error?.message
+  } catch {
+    // Some servers send a plain-text refusal.
+  }
+  return (
+    typeof message === "string" &&
+    /^(?:bad request:\s*)?(?:mcp )?(?:server|session) (?:is )?not initiali[sz]ed\.?$/i.test(message.trim())
+  )
+}
+
+/** Only the response to a POST bearing a session ID can prove that session was refused. */
+const detectDeadSession =
+  (fetch: typeof globalThis.fetch): typeof globalThis.fetch =>
+  async (input, init) => {
+    const response = await fetch(input, init)
+    if (response.status !== 400 && response.status !== 404) return response
+    if (init?.method !== "POST" || !new Headers(init.headers).get("mcp-session-id")) return response
+    if (response.status === 404) {
+      void response.body?.cancel().catch(() => {})
+      throw new DeadMcpSession(404, "Session not found")
+    }
+    const body = await response.text().catch(() => null)
+    if (body !== null && initializationRefused(body)) throw new DeadMcpSession(400, "Session not initialized")
+    throw new StreamableHTTPError(400, `Error POSTing to endpoint: ${body}`)
+  }
 
 /** A failed request as the ledger records it and the user reads it, secrets scrubbed. */
 const failureOf = (
@@ -437,7 +459,7 @@ const failureOf = (
   if (code === 403 || /\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(text))
     return new McpRequestFailed("failed", `${name} refused the request (${code ?? "unauthorized"}): ${text}`, true)
   if (error instanceof McpError) return new McpRequestFailed("error", `${name} answered with an error: ${text}`, false)
-  if (isDeadSession(error))
+  if (error instanceof DeadMcpSession)
     return new McpRequestFailed("failed", `${name} had lost the app's session (${code}).`, false, true)
   return new McpRequestFailed("failed", `Couldn't reach ${name}: ${text}`, false)
 }
@@ -861,6 +883,7 @@ export const layer = Layer.effect(
               ? new SSEClientTransport(url!, options)
               : new StreamableHTTPClientTransport(url!, {
                   ...options,
+                  fetch: detectDeadSession(fetch),
                   // A dropped stream isn't reopened behind the app's back: the call reports it.
                   reconnectionOptions: {
                     maxRetries: 0,

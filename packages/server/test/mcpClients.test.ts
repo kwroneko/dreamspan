@@ -177,6 +177,52 @@ describe("kept MCP clients", () => {
       assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call"])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
+
+  it.live("a session-related validation error on a tool call may have run and is never retried", () =>
+    Effect.gen(function* () {
+      const { server, call } = yield* setup()
+      server.state.failCall = () => ({ status: 400, body: "invalid session title" })
+      const outcome = yield* call("create")
+      assert.strictEqual(outcome._tag, "Failed")
+      if (outcome._tag === "Failed") assert.isTrue(outcome.sent)
+      const posts = server.requests().filter((request) => request.methods.includes("tools/call"))
+      assert.lengthOf(posts, 1)
+      assert.isString(posts[0]!.headers["mcp-session-id"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("an explicit HTTP 400 initialization refusal reconnects a session once", () =>
+    Effect.gen(function* () {
+      const { server, call } = yield* setup()
+      let refused = false
+      server.state.failCall = () => {
+        if (refused) return null
+        refused = true
+        return {
+          status: 400,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            error: { code: -32000, message: "Bad Request: Server not initialized" }
+          })
+        }
+      }
+      assert.strictEqual((yield* call("create"))._tag, "Result")
+      assert.deepStrictEqual(sentMethods(server.methods()), ["initialize", "tools/call", "initialize", "tools/call"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("a tool POST without a session ID cannot be retried as a dead session", () =>
+    Effect.gen(function* () {
+      const { server, call } = yield* setup({ stateless: true })
+      server.state.failCall = () => ({ status: 400, body: "Bad Request: Server not initialized" })
+      const outcome = yield* call("create")
+      assert.strictEqual(outcome._tag, "Failed")
+      if (outcome._tag === "Failed") assert.isTrue(outcome.sent)
+      const posts = server.requests().filter((request) => request.methods.includes("tools/call"))
+      assert.lengthOf(posts, 1)
+      assert.isUndefined(posts[0]!.headers["mcp-session-id"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
 })
 
 /** Waits until a check through the API holds. */
