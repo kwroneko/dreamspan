@@ -399,7 +399,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         return new RefChange({ ...change, setAside: [...orphans], recovered, recoveredFields })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
-    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion, chatNote }) =>
+    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion, chatNote, message: given }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
         // A chat's own note is restored on its branch, from the position on, as its Save writes.
@@ -429,7 +429,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           doc = withHtmlApprovals(head, doc)
         }
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
-        const message = `Restored the revision of ${saved} UTC`
+        const message = given?.replace(/\p{Cc}+/gu, " ").trim() || `Restored the revision of ${saved} UTC`
         const origin = JSON.stringify({ restored: revisionId })
         if (ref.kind === "note") {
           const conflict = yield* replacementConflict(

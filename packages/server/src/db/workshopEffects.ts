@@ -38,6 +38,11 @@ import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
+import { guarded, insertReversal, revisionReversal } from "./changeReversals.ts"
+import { unitName } from "@dreamspan/shared/changeReversal.ts"
+
+/** The assistant's message for a revision it writes, on one line; none when it gave none. */
+const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/gu, " ").trim() || undefined
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
@@ -1072,6 +1077,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               sourcePath: null,
               tags: input.tags
             })
+            const message = agentMessage(input.message)
+            if (message) yield* sql`UPDATE entity_revisions SET message = ${message} WHERE id = ${ref.headRevisionId}`
             return {
               result: JSON.stringify({ id: ref.id, entityId: ref.entityId, revision: ref.headRevisionId }),
               effects: [yield* creation(ref.id)]
@@ -1090,7 +1097,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               refId: input.refId,
               doc: input.doc,
               expectedRowVersion: input.expectedRowVersion,
-              message: "Edited in the workshop",
+              message: agentMessage(input.message) ?? "Edited in the workshop",
               commitDraft: null,
               agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
             })
@@ -1105,6 +1112,93 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         targetKind: "entity",
                         targetId: before.entity_id,
                         title: `Edited the ${before.kind} ${before.label}`,
+                        undo: {
+                          refId: before.id,
+                          before: before.head_revision_id,
+                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
+                          archivedAt: before.archived_at,
+                          beforeRowVersion: before.row_version,
+                          head: change.ref.headRevisionId,
+                          rowVersion: change.ref.rowVersion
+                        }
+                      }
+                    ]
+            }
+          })
+        ),
+      AgentRevertRevision: (input) =>
+        receipted(
+          input,
+          "library.write",
+          Effect.gen(function* () {
+            const before = yield* lib.ownedRef(input.userId, input.refId)
+            const { plan, covered, chatId } = yield* revisionReversal(
+              sql,
+              input.userId,
+              before,
+              input.revisionId,
+              input.fields
+            )
+            const unchanged = { result: "", effects: [] }
+            if (plan.conflicts.length > 0)
+              return {
+                ...unchanged,
+                result: JSON.stringify({
+                  reverted: false,
+                  note: "Nothing was written: these fields were changed since in the same places. Edit them yourself if they should change.",
+                  conflicts: plan.conflicts.map((c) => ({
+                    field: unitName(c.field),
+                    now: c.now ?? null,
+                    before_the_change: c.before ?? null
+                  }))
+                })
+              }
+            if (plan.doc === null || plan.fields.length === 0)
+              return {
+                ...unchanged,
+                result: JSON.stringify({ reverted: false, note: "That change has nothing left to take back." })
+              }
+            const head = yield* lib.loadDoc(before.head_revision_id)
+            const valid = validateDoc(before.kind, guarded(before.kind, head, plan.doc as Doc))
+            if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            const change = yield* ops.EditRef({
+              userId: input.userId,
+              refId: input.refId,
+              doc: valid.doc,
+              expectedRowVersion: before.row_version,
+              message: agentMessage(input.message) ?? "Reverted a change",
+              commitDraft: null,
+              agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
+            })
+            yield* insertReversal(sql, {
+              userId: input.userId,
+              chatId,
+              targetKind: "entity",
+              targetId: before.entity_id,
+              label: change.ref.label,
+              action: "revert",
+              reversesId: null,
+              headBefore: before.head_revision_id,
+              headAfter: change.ref.headRevisionId,
+              plan,
+              effects: covered
+            })
+            return {
+              result: JSON.stringify({
+                reverted: true,
+                id: change.ref.id,
+                revision: change.ref.headRevisionId,
+                fields: plan.fields.map(unitName)
+              }),
+              effects:
+                change.ref.headRevisionId === before.head_revision_id
+                  ? []
+                  : [
+                      {
+                        kind: "library.revise",
+                        targetKind: "entity",
+                        targetId: before.entity_id,
+                        title: `Reverted a change to the ${before.kind} ${before.label}`,
                         undo: {
                           refId: before.id,
                           before: before.head_revision_id,
@@ -1149,7 +1243,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             }>`SELECT id, content, base_revision, row_version FROM drafts WHERE user_id = ${input.userId} AND target_kind = 'entity_field' AND status = 'active'
         AND target_id IN (SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
           WHERE e.owner_user_id = ${input.userId} AND (e.id = ${source.entity_id} OR (e.kind = 'note' AND json_extract(h.doc_json, '$.owner.card') = ${source.entity_id})))`
-            const ref = yield* ops.ForkCard(input)
+            const { message: given, ...fork } = input
+            const ref = yield* ops.ForkCard(fork)
+            const message = agentMessage(given)
+            if (message) yield* sql`UPDATE entity_revisions SET message = ${message} WHERE id = ${ref.headRevisionId}`
             const made = yield* sql<{
               id: RefId
               entity_id: string
@@ -1297,6 +1394,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       | "AgentCreateEntity"
       | "AgentReviseEntity"
       | "AgentCloneCard"
+      | "AgentRevertRevision"
       | "AgentStartChat"
       | "CompletePluginUndo"
       | "UndoRolloutEffect"

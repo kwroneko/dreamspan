@@ -7,6 +7,7 @@
 import {
   changedUnits,
   docOfUnits,
+  pickedUnits,
   planReversal,
   revertedFields,
   type ReversalPlan
@@ -90,7 +91,7 @@ export interface CoveredEffect extends EffectKey {
 }
 
 /** Writes one reversal record and its effects (inside the caller's transaction). */
-const insertReversal = (
+export const insertReversal = (
   sql: SqlClient.SqlClient,
   record: {
     readonly userId: UserId
@@ -175,7 +176,7 @@ export const withReversions = (sql: SqlClient.SqlClient, effects: ReadonlyArray<
   })
 
 /** The approvals a revert never gives (as a restored revision, editorWrites.ts `RestoreRevision`). */
-const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
+export const guarded = (kind: EntityKind, head: Doc, next: Doc): Doc => {
   let doc = withoutGrantedAgentEdits(kind, head, next)
   if (kind === "preset" || kind === "card") {
     if (doc.regex_approved === true && !keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
@@ -200,6 +201,53 @@ const outcome = (plan: ReversalPlan, reversalId: string | null = null): Reversal
     ...(c.before === undefined ? {} : { before: c.before })
   }))
 })
+
+/**
+ * The assistant's revert of one revision's change (spec/WORKSHOP-CARDS.md §9 `revert_change`): the
+ * change from its first parent to it, planned on the item as it is now, and the workshop's own
+ * changes that made exactly that revision (so their rows say Reverted). Read-only: the caller
+ * writes, in its own transaction.
+ */
+export const revisionReversal = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  ref: { readonly id: string; readonly entity_id: string; readonly head_revision_id: string },
+  revisionId: string,
+  names: ReadonlyArray<string> | undefined
+) =>
+  Effect.gen(function* () {
+    const [revision] = yield* sql<{ parents: string; doc_json: string }>`SELECT parents, doc_json
+      FROM entity_revisions WHERE id = ${revisionId} AND entity_id = ${ref.entity_id}`
+    if (!revision) return yield* new NotFound({ entity: "revision", id: revisionId })
+    const parent = (JSON.parse(revision.parents) as Array<string>)[0]
+    if (parent === undefined) return yield* refuse("That's the item's first revision: it has no change to take back.")
+    const [before] = yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${parent}`
+    if (!before) return yield* refuse("Its earlier revision is gone.")
+    const [head] = yield* sql<{
+      doc_json: string
+    }>`SELECT doc_json FROM entity_revisions WHERE id = ${ref.head_revision_id}`
+    const original = JSON.parse(before.doc_json) as Doc
+    const changed = JSON.parse(revision.doc_json) as Doc
+    const units = changedUnits(original, changed)
+    const plan = planReversal({
+      original,
+      changed,
+      now: JSON.parse(head!.doc_json) as Doc,
+      fields: pickedUnits(units, names)
+    })
+    const made = yield* sql<EffectRow & { chat_id: string }>`SELECT e.*, r.chat_id FROM rollout_effects e
+      JOIN rollouts r ON r.id = e.rollout_id JOIN chats c ON c.id = r.chat_id
+      WHERE c.owner_user_id = ${userId} AND e.kind = 'library.revise' AND e.target_id = ${ref.entity_id} AND e.undone_at IS NULL
+        AND json_extract(e.undo_json, '$.head') = ${revisionId} AND json_extract(e.undo_json, '$.before') = ${parent}`
+    const covered: Array<CoveredEffect> = made.map((row) => ({
+      rolloutId: row.rollout_id,
+      toolCallId: row.tool_call_id,
+      seq: row.seq,
+      of: units,
+      fields: units
+    }))
+    return { plan, covered, chatId: made[0]?.chat_id ?? null }
+  })
 
 export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef }) =>
   Effect.gen(function* () {
@@ -444,11 +492,14 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
             coalesce((SELECT e.kind FROM entities e WHERE e.id = r.target_id AND r.target_kind = 'entity'), 'card') AS kind
           FROM change_reversals r
           WHERE r.user_id = ${userId} AND r.chat_id = ${chatId} AND r.created_at > ${last?.at ?? 0}
+            -- The assistant's own revert_change is in its transcript already, not the user's to tell.
+            AND NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = r.head_after AND v.origin = 'agent')
           ORDER BY r.created_at, r.rowid`
         // Items the reply made that Undo moved to the bin since.
         const binned = yield* sql<{ title: string }>`SELECT e.title FROM rollout_effects e
-          JOIN rollouts r ON r.id = e.rollout_id
-          WHERE r.chat_id = ${chatId} AND e.kind = 'library.create' AND e.undone_at > ${last?.at ?? 0}
+          JOIN rollouts r ON r.id = e.rollout_id JOIN chats c ON c.id = r.chat_id
+          WHERE r.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND e.kind = 'library.create'
+            AND e.undone_at > ${last?.at ?? 0}
           ORDER BY e.undone_at`
         return {
           reversals: rows.map((r) => ({

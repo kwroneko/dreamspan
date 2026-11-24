@@ -420,8 +420,15 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
       )
   }),
   exposure("restore_revision", "RestoreRevision", "library.write", "library", "Restore a library revision", {
-    parameters: Schema.Struct({ ...refArgs, revision: name }),
-    adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map((ref) => ({ ...ref, revisionId: args.revision }))),
+    parameters: Schema.Struct({ ...refArgs, revision: name, message: optional(label) }),
+    adapt: (args, ctx) =>
+      refPayload(args, ctx).pipe(
+        Effect.map((ref) => ({
+          ...ref,
+          revisionId: args.revision,
+          ...(args.message === undefined ? {} : { message: args.message })
+        }))
+      ),
     describe: (payload, ctx) =>
       Effect.gen(function* () {
         const { ref, doc } = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: payload.refId as RefId })

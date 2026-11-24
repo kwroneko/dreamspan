@@ -67,10 +67,7 @@ const headOf = (full: string, info: CardFileInfo) =>
   `card file ${full} "${info.name}" (${formatName[info.format]}, ${info.spec} ${info.specVersion})`
 
 /** The top-level fields an edit changed, as they were and as they are. */
-export const changedCardFields = (
-  before: Readonly<Record<string, unknown>>,
-  after: Readonly<Record<string, unknown>>
-) => {
+const changedCardFields = (before: Readonly<Record<string, unknown>>, after: Readonly<Record<string, unknown>>) => {
   const was: Record<string, unknown> = {}
   const now: Record<string, unknown> = {}
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)]))

@@ -31,6 +31,10 @@ export const workshopMode: OrchestrationMode = {
       "edit_preset",
       "edit_lorebook",
       "clone_card",
+      // Version tools (spec/WORKSHOP-CARDS.md §9), loaded with the Versions skill.
+      "read_revision",
+      "diff_revisions",
+      "revert_change",
       "start_chat",
       // A subagent inside the reply (spec/SUBAGENTS.md §2.1), under the `subagents` capability.
       "agent",

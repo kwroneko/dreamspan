@@ -817,6 +817,9 @@ const LibraryReplacePlan = Schema.Struct({
  * Saved card media's writes (spec/SAVED-MEDIA.md; db/savedMedia.ts), a group of their own
  * merged into WriteOpsLibrary. No network in any of these: the main thread downloads between them.
  */
+/** The message the assistant gives a revision it writes (spec/WORKSHOP-CARDS.md §9): one line, short. */
+const AgentMessage = Schema.String.check(Schema.isMaxLength(200))
+
 const SavedMediaWriteOps = RpcGroup.make(
   /** Records what queued revisions name: one row per address per account, linked to the revision. */
   Rpc.make("RecordSavedMediaScans", {
@@ -2908,7 +2911,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
-      tags: Schema.Array(Schema.String)
+      tags: Schema.Array(Schema.String),
+      message: Schema.optionalKey(AgentMessage)
     },
     success: Schema.String,
     error: Schema.Union([NotFound, InvalidDocument, EffectUndoRefused, StorageError])
@@ -2930,7 +2934,36 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       ),
       refId: RefId,
       expectedRowVersion: Schema.Int,
-      doc: Doc
+      doc: Doc,
+      message: Schema.optionalKey(AgentMessage)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
+  }),
+  /**
+   * The assistant's `revert_change` (spec/WORKSHOP-CARDS.md §9): one revision's change taken back
+   * on the item as it is now, as the user's Revert plans it (§8.1); with a conflict nothing is
+   * written and the result names the fields with both texts.
+   */
+  Rpc.make("AgentRevertRevision", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
+      refId: RefId,
+      revisionId: RevisionId,
+      fields: Schema.optionalKey(Schema.Array(Schema.String)),
+      message: Schema.optionalKey(AgentMessage)
     },
     success: Schema.String,
     error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
@@ -2953,7 +2986,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
-      characterVersion: Schema.String
+      characterVersion: Schema.String,
+      message: Schema.optionalKey(AgentMessage)
     },
     success: Schema.String,
     error: Schema.Union([NotFound, InvalidDocument, RefOperationRefused, EffectUndoRefused, StorageError])
@@ -4115,7 +4149,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       refId: RefId,
       revisionId: RevisionId,
       expectedRowVersion: Schema.Int,
-      chatNote: Schema.optionalKey(ChatNotePosition)
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      /** The new revision's message, for the default "Restored the revision of …". */
+      message: Schema.optionalKey(AgentMessage)
     },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])

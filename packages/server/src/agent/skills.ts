@@ -60,10 +60,20 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "library",
     label: "Library upkeep",
     kinds: workshop,
-    description: "Copy, rename, archive or restore library entries, and go back to an earlier revision.",
+    description: "Copy, rename, archive or restore library entries.",
+    instructions: "Archiving hides an entry without deleting it.",
+    tools: ["fork_variant", "rename_ref", "set_ref_archived"]
+  },
+  {
+    // spec/WORKSHOP-CARDS.md §9: git-like versions of cards, presets and lorebooks.
+    id: "versions",
+    label: "Versions",
+    kinds: workshop,
+    description:
+      "See a card's, preset's or lorebook's earlier revisions, compare them, take one change back, or go back to an earlier revision.",
     instructions:
-      "List an entry's revisions before restoring one, and say which revision you restored. Archiving hides an entry without deleting it.",
-    tools: ["fork_variant", "rename_ref", "set_ref_archived", "restore_revision", "list_revisions"]
+      "list_revisions shows an item's revisions, numbered, newest first. read_revision shows one; diff_revisions compares two, or one with now. To take back one change and keep everything after it, use revert_change with the revision that made it; to make the item as it was at a revision, use restore_revision. Nothing is ever lost: each is a new revision. Give each change a short message saying what it is, and say which revision you used.",
+    tools: ["list_revisions", "read_revision", "diff_revisions", "restore_revision", "revert_change"]
   },
   {
     id: "chat-setup",

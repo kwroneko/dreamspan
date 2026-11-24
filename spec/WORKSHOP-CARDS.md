@@ -365,7 +365,7 @@ The same model, with their existing tools and diffs:
 | C6 | Creations in view | C2 |
 | C7 | The in-view derivation (story cast and books included), resource classes, view-aware resolution in every library tool, the scoped prompt and its wording, card and always grants with their resolution, the card editor's Extra-tab section and the Settings section, the fixed instruction paragraph | C2, C6 |
 | C8 | **Built** (workshopcards-u8): change rows, the change view tab kind, per-open affinity. Not yet: the attached element's "changed since" tail line (needs `libraryView.ts` after the review fixes) | — |
-| C9 | `read_revision`, `diff_revisions`, `revert_change`, `message`, the Versions skill | C10's merge |
+| C9 | **Built** (workshopcards-c9): `read_revision`, `diff_revisions`, `revert_change`, `message` on every write, the Versions skill. Items are named with `kind` and `item`, as the built `list_revisions` and `restore_revision` take them. Not yet: `list_revisions`'s extended rows (who made each, the fields it changed) | C10's merge |
 | C10 | **Built** (workshopcards-c10): Revert per field and hunk (three-way, word-token merge), conflicts in the change view with Keep now / Take before and Revert the rest, Redo, Revert all of this reply, the bin question for made items, the tail line. See ARCHITECTURE "Revert, like git revert" | C8 |
 | C11 | **Built** (workshopcards-u11, Revert with workshopcards-c10): recognition, the card tile, the attachment line and note, `read_card_file`, `edit_card_file`, `import_card_file`, change rows and a change view for card files with field-by-field Revert, the round-trip and end-to-end tests. Not yet: lorebook and preset JSON files (a follow-up in ARCHITECTURE) | C2b, C8, C10 |
 

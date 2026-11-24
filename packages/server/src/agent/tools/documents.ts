@@ -19,10 +19,13 @@ const partial = (fields: Schema.Struct.Fields, omit: readonly string[] = []) =>
         .map(([key, schema]) => [key, Schema.optionalKey(schema)])
     )
   )
+/** The revision's message (spec/WORKSHOP-CARDS.md §9): one short line. */
+const message = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
 const changes = <S extends Schema.Top>(schema: S) =>
   Schema.Array(schema).check(Schema.isMinLength(1), Schema.isMaxLength(limits.listItems))
 export const presetEditArguments = Schema.Struct({
   preset: name,
+  message,
   changes: changes(
     Schema.Union([
       Schema.Struct({ prompt: name, text }),
@@ -51,6 +54,7 @@ export const presetEditArguments = Schema.Struct({
 })
 export const lorebookEditArguments = Schema.Struct({
   lorebook: name,
+  message,
   changes: changes(
     Schema.Union([
       Schema.Struct({ entry: Schema.Int, set: partial(LorebookEntry.fields, ["uid"]) }),
