@@ -7,6 +7,7 @@
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
 import { locateFolder } from "../../files/workingFolder.ts"
 import { createHash } from "node:crypto"
+import { isUtf8 } from "node:buffer"
 import { lstat, readFile, readdir, rmdir, statfs, type FileHandle } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
@@ -978,6 +979,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
           root,
           segments,
           (before) => {
+            if (!isUtf8(before!)) throw new FilePathRefused(`${full} isn't valid UTF-8 and can't be edited as text.`)
             let text = before!.toString("utf8")
             for (const [index, edit] of edits.entries()) {
               const label = edits.length > 1 ? `Edit ${index + 1}: ` : ""
