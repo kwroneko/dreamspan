@@ -2,7 +2,13 @@
 import { branchMatches } from "@dreamspan/shared/branchNaming.ts"
 import type { CastCard, EntityId, ForkId } from "@dreamspan/shared/chat.ts"
 import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@dreamspan/shared/chatBrowse.ts"
-import { ShellFork, type ShellCard, type ShellForksView, type ShellSection } from "@dreamspan/shared/chatSetupApi.ts"
+import {
+  SHELL_SECTION_LIMIT,
+  ShellFork,
+  type ShellCard,
+  type ShellForksView,
+  type ShellSection
+} from "@dreamspan/shared/chatSetupApi.ts"
 import type { SplitChatLink } from "@dreamspan/shared/splitChat.ts"
 import type { ChatSummaries } from "./forkSummaries.ts"
 import type { ShellSnapshotRead } from "./ops.ts"
@@ -257,9 +263,15 @@ export const cardsView = (state: ShellState) => ({
   fresh: state.fresh
 })
 export const sectionsOf = (state: ShellState, view: ShellForksView) =>
-  view.sections.map(({ id, limit, offset = 0 }) => {
+  view.sections.map(({ id, limit, offset = 0, through }) => {
     const rows = sectionRows(state, view, id)
-    return { id, rows: rows.slice(offset, offset + limit), total: rows.length }
+    const target = through === undefined ? -1 : rows.findIndex((row) => row.chat.id === through)
+    const pastWindow = target >= offset + SHELL_SECTION_LIMIT
+    const end = pastWindow ? offset + limit : Math.max(offset + limit, target + 1)
+    const page = rows.slice(offset, end)
+    // A distant target can still be revealed without transferring thousands of intervening rows.
+    if (pastWindow && page.length > 0) page[page.length - 1] = rows[target]!
+    return { id, rows: page, total: rows.length }
   })
 
 export const forksView = (state: ShellState, view: ShellForksView, availableLabels: ThreadLabels) => {

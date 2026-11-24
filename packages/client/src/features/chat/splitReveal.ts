@@ -15,12 +15,16 @@ export const requestSplitReveal = (groupId: string, added = false) => {
   for (const listener of listeners) listener()
 }
 
-/** Observe the rendered row and its viewport: both can be measured after navigation. */
-export function useSplitReveal(containerRef: RefObject<HTMLDivElement | null>, selected: string | undefined) {
+export function useSplitRevealRequest(selected: string | undefined) {
   const request = useSyncExternalStore(subscribe, () => pending)
+  return request?.id === selected ? request : null
+}
+
+/** Observe the rendered row and its viewport: both can be measured after navigation. */
+export function useSplitReveal(containerRef: RefObject<HTMLDivElement | null>, request: Request | null) {
   useEffect(() => {
     const container = containerRef.current
-    if (!container || !request || selected !== request.id) return
+    if (!container || !request) return
     let frame = 0
     let row: HTMLElement | null = null
     let flashed = false
@@ -80,5 +84,5 @@ export function useSplitReveal(containerRef: RefObject<HTMLDivElement | null>, s
       container.removeEventListener("pointerdown", pointer)
       container.removeEventListener("keydown", keyboard)
     }
-  }, [containerRef, request, selected])
+  }, [containerRef, request])
 }

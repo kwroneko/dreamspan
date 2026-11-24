@@ -2,7 +2,7 @@ import { useOpenPlace } from "../editor/durable.tsx"
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
 import { MessageSortControl, sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
 import { useSplitChats } from "../chat/splitChats.ts"
-import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
+import { requestSplitReveal, useSplitReveal, useSplitRevealRequest } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@dreamspan/shared/chatBrowse.ts"
 import { useChatBrowse } from "./useChatBrowse.ts"
 import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
@@ -15,7 +15,7 @@ import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/Ope
 import { openOnPlainClick } from "../../ui/links.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
-import type { ShellSection } from "@dreamspan/shared/chatSetupApi.ts"
+import { SHELL_SECTION_LIMIT, type ShellSection } from "@dreamspan/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
 import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
@@ -1141,19 +1141,27 @@ function Browser() {
     limits: {}
   })
   const limitOf = (id: ShellSection) => (limits.key === listKey ? (limits.limits[id] ?? PAGE_ROWS) : PAGE_ROWS)
-  const more = (id: ShellSection) =>
+  const setLimit = (id: ShellSection, limit: number) =>
     setLimits({
       key: listKey,
-      limits: { ...(limits.key === listKey ? limits.limits : {}), [id]: limitOf(id) + PAGE_ROWS }
+      limits: { ...(limits.key === listKey ? limits.limits : {}), [id]: limit }
     })
+  const reveal = useSplitRevealRequest(selected)
+  const through = kind === "all" && !grid && !messages ? (reveal?.id as ChatId | undefined) : undefined
   const forks = useShellForks({
     entity: scope.entity,
     chat: scope.chat as ChatId | null,
     search: messages ? "" : listNeedle,
     sort: "recent",
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
-    sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
+    sections: sections.map(([id]) => ({
+      id,
+      limit: limitOf(id),
+      ...(id === "chats" && through !== undefined ? { through } : {})
+    }))
   })
+  const revealedRows = forks.section("chats").rows
+  if (through && !forks.waiting && revealedRows.length > limitOf("chats")) setLimit("chats", revealedRows.length)
   // The chat by its name, which all its branches share; kept while a filter lists none of them.
   const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
   const chat = chatRows[0]
@@ -1162,7 +1170,7 @@ function Browser() {
     setKnownChat({ id: chat.chat.id, name: chat.chatName })
   // The lists show once their rows are read: a cold library's cards wait for every fork's
   // walk, which the rows don't (they fill in as it goes).
-  useSplitReveal(listRef, forks.loading ? undefined : selected)
+  useSplitReveal(listRef, forks.loading ? null : reveal)
   // Subscribe to rows alongside cards, before displaying either. Waiting for cards
   // first can put the rows in another epoch behind unrelated browsing work.
   if (!data && grid)
@@ -1197,7 +1205,11 @@ function Browser() {
               here={f.chat.id === selected && (kind !== "chat" || (shown ? f.forkId === shown : f.current))}
             />
           ))}
-          <ShowMore shown={rows.length} total={total} onMore={() => more(id)} />
+          <ShowMore
+            shown={rows.length}
+            total={Math.min(total, SHELL_SECTION_LIMIT)}
+            onMore={() => setLimit(id, Math.min(SHELL_SECTION_LIMIT, rows.length + PAGE_ROWS))}
+          />
         </section>
       )
     )

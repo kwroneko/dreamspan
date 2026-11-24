@@ -287,7 +287,9 @@ export const ShellForksView = Schema.Struct({
     Schema.Struct({
       id: ShellSection,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: SHELL_SECTION_LIMIT })),
-      offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+      offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      /** Include this chat's row in the section, if it matches the scope and filters. */
+      through: Schema.optionalKey(ChatId)
     })
   ).check(Schema.isMaxLength(12))
 })

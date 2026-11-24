@@ -39,3 +39,23 @@ test("the full Chats page opens and deletes individual split groups", async ({ p
     await expect(row).toHaveCount(0)
   }
 })
+
+test("Related chats reveals a parent beyond the first sidebar page", async ({ page }) => {
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.forEach(
+      Array.from({ length: 100 }, (_, i) => i),
+      (i) => api.CreateChat({ title: `Newer chat ${i}` })
+    )
+  )
+  await page.setViewportSize({ width: 1440, height: 1200 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${seed.chatId}?fork=${seed.harbor}`)
+  const chats = page.getByRole("region", { name: "Chats", exact: true })
+  const parent = chats.locator(`[data-chat-id="${seed.chatId}"]`)
+  await expect(chats.getByRole("button", { name: /Show \d+ more/ })).toBeVisible()
+  await expect(parent).toHaveCount(0)
+  const related = page.getByRole("region", { name: "Related chats", exact: true })
+  await related.getByRole("link", { name: "Open chat Split demo · Journeys", exact: true }).click()
+  await expect(parent).toHaveAttribute("aria-current", "page")
+  await expect(parent).toBeInViewport({ ratio: 1 })
+})
