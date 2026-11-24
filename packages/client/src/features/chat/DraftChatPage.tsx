@@ -175,6 +175,11 @@ function DraftChatPage({ draftFor, onOpened }: { draftFor: DraftFor; onOpened?: 
 /** /cards/$entityId/chat: a new chat with a card. */
 export function CardDraftChatPage() {
   const { entityId } = useParams({ strict: false }) as { entityId: EntityId }
+  return <CardDraftChat entityId={entityId} />
+}
+
+/** A new chat with a card of the user's, wherever its page is (a card source's card they hold, too). */
+export function CardDraftChat({ entityId }: { entityId: EntityId }) {
   return <DraftChatPage draftFor={`card:${entityId}`} />
 }
 

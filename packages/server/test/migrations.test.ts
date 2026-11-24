@@ -241,6 +241,33 @@ describe("0004_workshop_branches", () => {
   )
 })
 
+describe("0014_pending_chats", () => {
+  it.effect("files the old new-chat pages' first messages to recovered texts, keeping a card source page's", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(upTo(13))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, field, content, updated_at) VALUES
+        ('card', 'u', 'user_field', 'pending-chat:e1', 'First message', 'Hello, lighthouse keeper.', 5),
+        ('group', 'u', 'user_field', 'pending-group-chat:e1,e2:Crew', 'First message', 'Hello, crew.', 6),
+        ('blank', 'u', 'user_field', 'pending-chat:e2', 'First message', '  ', 7),
+        ('source', 'u', 'user_field', 'pending-chat:src:s1:r1', 'First message', 'Hello, stranger.', 8)`
+      yield* migrate(migrationDefinitions)
+      assert.deepStrictEqual(
+        yield* sql`SELECT source_id, source_label, content, created_at FROM recovered_texts ORDER BY created_at`,
+        [
+          { source_id: "pending-chat:e1", source_label: "New chat", content: "Hello, lighthouse keeper.", created_at: 5 },
+          { source_id: "pending-group-chat:e1,e2:Crew", source_label: "New chat", content: "Hello, crew.", created_at: 6 }
+        ]
+      )
+      assert.deepStrictEqual(
+        (yield* sql<{ id: string }>`SELECT id FROM drafts ORDER BY id`).map((row) => row.id),
+        ["source"]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("the migrator", () => {
   it.effect("refuses a ledger that skipped a migration numbered below its newest", () =>
     Effect.gen(function* () {

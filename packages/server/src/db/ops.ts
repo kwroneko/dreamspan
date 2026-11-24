@@ -763,7 +763,9 @@ const StartChatFields = {
         Schema.Struct({
           index: Schema.Int,
           text: Schema.String,
-          frozen: Schema.NullOr(FrozenMacros)
+          frozen: Schema.NullOr(FrozenMacros),
+          /** Offered only with two characters or more (a pending chat's cast change drops it with fewer). */
+          groupOnly: Schema.optionalKey(Schema.Boolean)
         })
       )
     })
@@ -2949,17 +2951,26 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: StorageError
   }),
   /**
-   * A pending chat's greetings follow its cast (DESIGN §2.1; a group start's rule): `greeters`
-   * are the characters it has now (who the user plays left out), in cast order, each with the
-   * greetings offered to it now (ordinary, and group-only with two characters or more). A
-   * greeter without a greeting message gets one, its offered greetings its versions; one no
-   * longer in the cast loses its message; a greeting no longer offered is removed, and one shown
-   * then falls back to the card's first. Greetings start nothing. Nothing for a chat that isn't
-   * pending. `fellBack`: a greeting shown was no longer offered.
+   * A cast change of a pending chat and its greetings, in one transaction (DESIGN §2.1; a group
+   * start's rule), so a first send or another change sees both or neither: `events` are written
+   * at the chat's start, then each character it has (who the user plays left out), in cast
+   * order, has a greeting message with the greetings offered to it now. `candidates` are drawn
+   * for everyone the change may leave in the cast (a group-only greeting is dropped with one
+   * character); a character without one (another change's, written since) keeps its message. A
+   * message made again keeps its greetings' frozen macros and the edits typed into them; a
+   * removed greeting's edit goes to recovered texts; a greeting shown and no longer offered
+   * falls back to the card's first (`fellBack`). Every greeting records the cast it starts
+   * with. `pending: false`: the chat isn't pending (it started), and nothing was written.
    */
   Rpc.make("SyncPendingGreetings", {
-    payload: { userId: UserId, chatId: ChatId, greeters: StartChatFields.greeters },
-    success: Schema.Struct({ changed: Schema.Boolean, fellBack: Schema.Boolean }),
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      events: Schema.Array(StoredStateEventData),
+      candidates: StartChatFields.greeters
+    },
+    success: Schema.Struct({ pending: Schema.Boolean, changed: Schema.Boolean, fellBack: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("AgentStartChat", {

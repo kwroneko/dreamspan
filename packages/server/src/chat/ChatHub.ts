@@ -89,6 +89,8 @@ export class ChatHub extends Context.Service<
     readonly held: (chatId: ChatId, graceMs: number) => boolean
     /** The chat was just given to a tab that hasn't subscribed yet: `held` counts it as just left. */
     readonly touch: (chatId: ChatId) => void
+    /** When the chat was last given out (`touch`), 0 if not lately: a leave keeps a chat given out since. */
+    readonly touchedAt: (chatId: ChatId) => number
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -105,6 +107,8 @@ export class ChatHub extends Context.Service<
         // forgotten, so a long-running server holds only the chats left lately.
         const left = new Map<ChatId, number>()
         const startedAt = Date.now()
+        // When each chat was last given out, kept as `left` is.
+        const touched = new Map<ChatId, number>()
         const leave = (chatId: ChatId) => {
           const now = Date.now()
           left.delete(chatId)
@@ -155,8 +159,16 @@ export class ChatHub extends Context.Service<
             (subscribers.get(chatId)?.size ?? 0) > 0 ||
             Date.now() - Math.max(startedAt, left.get(chatId) ?? 0) < Math.min(graceMs, HELD_MAX_MS),
           touch: (chatId) => {
+            const now = Date.now()
+            touched.delete(chatId)
+            touched.set(chatId, now)
+            for (const [id, at] of touched) {
+              if (now - at < HELD_MAX_MS) break
+              touched.delete(id)
+            }
             if ((subscribers.get(chatId)?.size ?? 0) === 0) leave(chatId)
           },
+          touchedAt: (chatId) => touched.get(chatId) ?? 0,
           listen: (listener) =>
             Effect.acquireRelease(
               Effect.sync(() => listeners.add(listener)),

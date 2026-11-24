@@ -352,7 +352,9 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
             SELECT e.id FROM entities e JOIN family f ON e.forked_from_entity_id = f.id
             WHERE e.owner_user_id = ${userId})
         SELECT e.id, e.forked_from_entity_id AS parent, e.forked_from_revision_id AS revision,
-          e.forked_in_chat_id AS chat, e.forked_at, e.archived_at, e.deleted_at, e.purged_at,
+          -- A chat not started yet is reachable only by its URL: the fork names it once it starts.
+          CASE WHEN EXISTS (SELECT 1 FROM chats pc WHERE pc.id = e.forked_in_chat_id AND pc.status = 'pending' /* chat:includes-pending: hides it */)
+            THEN NULL ELSE e.forked_in_chat_id END AS chat, e.forked_at, e.archived_at, e.deleted_at, e.purged_at,
           r.id AS ref_id, r.label, r.subtitle, (SELECT id FROM root) AS root,
           (SELECT json_object('chats', count(DISTINCT c.id), 'last', max(c.last_message_at))
             FROM card_chat_membership s CROSS JOIN chats c ON c.id = s.chat_id

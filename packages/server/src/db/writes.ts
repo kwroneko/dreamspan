@@ -16,6 +16,7 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@dreamspan/shared/chatName.ts"
 import { composerKey, type DraftKey, parseDraftTarget } from "@dreamspan/shared/drafts.ts"
+import { legacyPendingDraft } from "./migrationPendingChats.ts"
 import type { Bin } from "./bin.ts"
 import { EDIT_THINKING_FIELD, NotAmendable } from "@dreamspan/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
@@ -174,7 +175,7 @@ export const makeWriteHandlers = (bin: Bin) =>
     }: Parameters<WriteHandlers["SaveDraft"]>[0]) =>
       Effect.gen(function* () {
         if (images !== undefined) yield* checkImages(userId, images)
-        return yield* drafts.save({
+        const saved = yield* drafts.save({
           userId,
           key,
           draftId,
@@ -187,6 +188,26 @@ export const makeWriteHandlers = (bin: Bin) =>
           editingFrom,
           images
         })
+        // An old new-chat page's first message (a browser's copy sent on, or a tab from before):
+        // nothing reads its draft any more, so its text goes to recovered texts (0014_pending_chats).
+        if (key.targetKind === "user_field" && legacyPendingDraft(key.targetId, key.field)) {
+          yield* fileLate(userId, key, content, "New chat")
+          yield* sql`DELETE FROM drafts WHERE user_id = ${userId} AND target_kind = 'user_field'
+            AND target_id = ${key.targetId} AND field = ${key.field}`
+        }
+        return saved
+      })
+
+    /** Text for a draft that's gone, to recovered texts, unless the latest from there already holds it. */
+    const fileLate = (userId: UserId, key: DraftKey, content: string, label: string) =>
+      Effect.gen(function* () {
+        if (content.trim() === "") return false
+        const [latest] = yield* sql<{ content: string }>`SELECT content FROM recovered_texts
+          WHERE user_id = ${userId} AND source_kind = ${key.targetKind} AND source_id = ${key.targetId}
+          ORDER BY created_at DESC, id DESC LIMIT 1`
+        if (latest?.content === content) return false
+        yield* bin.recover(userId, key, [content], "discard", label)
+        return true
       })
     const saveComposer = ({
       userId,
@@ -199,13 +220,22 @@ export const makeWriteHandlers = (bin: Bin) =>
       content
     }: Parameters<WriteHandlers["SaveComposer"]>[0]) =>
       Effect.gen(function* () {
-        yield* found(
-          Effect.orDie(
-            sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
-          ),
-          "chat",
-          chatId
+        // A pending chat swept since (another device opened a new chat): what the tab typed after
+        // its last save still reaches recovered texts, under the name the sweep filed it with.
+        const [live] = yield* Effect.orDie(
+          sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId}`
         )
+        if (live?.n === 0) {
+          const [swept] = yield* sql<{ label: string }>`
+            SELECT label FROM swept_pending_chats WHERE chat_id = ${chatId} AND user_id = ${userId}`
+          if (swept === undefined) return yield* new NotFound({ entity: "chat", id: chatId })
+          const [done] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM swept_pending_saves
+            WHERE chat_id = ${chatId} AND operation_id = ${operationId}`
+          if ((done?.n ?? 0) > 0) return { draft: null, recovered: true }
+          yield* sql`INSERT INTO swept_pending_saves (chat_id, operation_id) VALUES (${chatId}, ${operationId})`
+          yield* fileLate(userId, composerKey(chatId, null), content, swept.label)
+          return { draft: null, recovered: content.trim() !== "" }
+        }
         return yield* drafts.saveComposer(userId, chatId, { draftId, rowVersion, session, next, operationId }, content)
       })
 

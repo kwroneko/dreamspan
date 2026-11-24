@@ -190,6 +190,7 @@ export const drawGreeters = <E>(
           options: (only === "all" ? options : options.filter((option) => option.index === picked)).map((option) => ({
             index: option.index,
             text: option.text,
+            ...(option.groupOnly ? { groupOnly: true } : {}),
             frozen: freezeTemplate(option.text, fields, names, option.index === picked ? (greeter.frozen ?? {}) : {})
           }))
         }
@@ -826,12 +827,75 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return made.ref
       }).pipe(internal("ForkCardForChat")),
 
-    ChangeCast: ({ chatId, slotId, change, forkId }) =>
+    ChangeCast: ({ chatId, slotId: asked, change, forkId }) =>
       Effect.gen(function* () {
+        let slotId = asked
         const id = yield* userId
         const call = yield* OperationCall
         const displayEnd =
           (call?.expected as { proof?: { storyAt?: unknown } } | undefined)?.proof?.storyAt === undefined
+        // A pending chat's greetings follow who's in it, as a group start's would (DESIGN §2.1):
+        // its cast change and its greetings are written together, so a first send or another
+        // change from another tab sees both or neither.
+        if (
+          ["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag) &&
+          (yield* reader.GetChat({ userId: id, chatId })).status === "pending"
+        ) {
+          const before = yield* castAt(id, chatId, null, forkId, displayEnd)
+          const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
+          const events =
+            change._tag === "Persona"
+              ? [
+                  ...(before.participants.includes(change.entityId)
+                    ? []
+                    : [toEvent({ _tag: "Join", entityId: change.entityId })]),
+                  toEvent({ _tag: "PlayedByMe", entityIds: [change.entityId] }),
+                  ...before.playedByMe
+                    .filter((e) => e !== change.entityId && before.participants.includes(e) && persona.has(e))
+                    .map((e) => toEvent({ _tag: "Leave", entityId: e }))
+                ]
+              : [toEvent(change as Exclude<CastChange, { readonly _tag: "Persona" }>)]
+          // Greetings for everyone the change may leave in the cast; the writer takes the cast's.
+          const player =
+            change._tag === "Persona"
+              ? change.entityId
+              : change._tag === "PlayedByMe"
+                ? (change.entityIds[0] ?? null)
+                : (before.playedByMe[0] ?? null)
+          const playing = new Set<string>(
+            change._tag === "Persona" ? [change.entityId] : change._tag === "PlayedByMe" ? change.entityIds : before.playedByMe
+          )
+          const joining =
+            change._tag === "Join" || change._tag === "Swap" ? [change.entityId] : []
+          const candidates = [...new Set([...before.participants, ...joining])].filter((entity) => !playing.has(entity))
+          const drawn = yield* drawGreeters(
+            reader,
+            id,
+            {
+              cards: candidates,
+              persona: player,
+              greeting: null,
+              frozen: undefined,
+              greeters: candidates.map((entityId) => ({ entityId, greeting: 0 }))
+            },
+            (entityId) => reader.GetCardForChat({ userId: id, entityId })
+          )
+          const synced = yield* writer.SyncPendingGreetings({
+            userId: id,
+            chatId,
+            forkId: forkId ?? null,
+            events,
+            candidates: drawn
+          })
+          if (synced.pending) {
+            if (synced.changed) hub.publish(chatId, { _tag: "Reload" })
+            hub.publish(chatId, { _tag: "State" })
+            return yield* castAt(id, chatId, slotId, forkId, displayEnd)
+          }
+          // It started since (a first send from another tab): an ordinary cast change, after what
+          // was said, not at a start that has its greetings now.
+          slotId = (yield* reader.GetChat({ userId: id, chatId })).activeLeafSlotId
+        }
         if (change._tag === "Persona") {
           const before = yield* castAt(id, chatId, slotId, forkId, displayEnd)
           const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
@@ -905,27 +969,6 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             scope: change._tag === "SummaryModel" ? "summarizer" : null,
             data: toEvent(change)
           })
-        }
-        // A pending chat's greetings follow who's in it, as a group start's would (DESIGN §2.1).
-        const greets = ["Join", "Leave", "Swap", "PlayedByMe", "Persona"].includes(change._tag)
-        if (greets && (yield* reader.GetChat({ userId: id, chatId })).status === "pending") {
-          const start = yield* castAt(id, chatId, null, forkId, displayEnd)
-          const playing = new Set<string>(start.playedByMe)
-          const characters = [...new Set(start.participants.filter((entity) => !playing.has(entity)))]
-          const greeters = yield* drawGreeters(
-            reader,
-            id,
-            {
-              cards: characters,
-              persona: start.playedByMe[0] ?? null,
-              greeting: null,
-              frozen: undefined,
-              greeters: characters.map((entityId) => ({ entityId, greeting: 0 }))
-            },
-            (entityId) => reader.GetCardForChat({ userId: id, entityId })
-          )
-          const synced = yield* writer.SyncPendingGreetings({ userId: id, chatId, greeters })
-          if (synced.changed) hub.publish(chatId, { _tag: "Reload" })
         }
         hub.publish(chatId, { _tag: "State" })
         return yield* castAt(id, chatId, slotId, forkId, displayEnd)

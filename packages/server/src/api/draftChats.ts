@@ -98,9 +98,15 @@ export const makeDraftChatHandlers = Effect.gen(function* () {
         const id = yield* userId
         // Someone else's chat is not found, as anywhere else; a committed one stays as it is.
         yield* reader.GetChat({ userId: id, chatId })
-        // The tab's own subscription ends as it goes: whoever still has it then keeps it.
+        // The tab's own subscription ends as it goes: whoever still has it then keeps it, and so
+        // does a tab it was given to since, which hasn't subscribed yet.
+        const leftAt = Date.now()
         yield* Effect.sleep(PENDING_LEFT_MS).pipe(
-          Effect.andThen(Effect.suspend(() => (hub.held(chatId, 0) ? Effect.void : sweep(id, chatId)))),
+          Effect.andThen(
+            Effect.suspend(() =>
+              hub.held(chatId, 0) || hub.touchedAt(chatId) >= leftAt ? Effect.void : sweep(id, chatId)
+            )
+          ),
           Effect.catchCause((cause) => Effect.logWarning("LeaveDraftChat's sweep failed", cause)),
           (effect) => Effect.forkIn(effect, scope)
         )

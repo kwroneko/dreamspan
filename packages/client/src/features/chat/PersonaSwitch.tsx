@@ -66,6 +66,17 @@ export function PersonaSwitch({
     const outcome = await session.changeCast({ _tag: "Persona", entityId: card.entityId })
     setError(outcome.ok ? null : outcome.error)
   }
+  // No persona: a persona card played leaves first, so it never greets as a character.
+  const none = async () => {
+    if (cast === null || persona === null) return
+    const card = cast.cards.find((item) => item.entityId === persona)
+    if (card?.persona) {
+      const left = await session.changeCast({ _tag: "Leave", entityId: persona })
+      if (!left.ok) return setError(left.error)
+    }
+    const outcome = await session.changeCast({ _tag: "PlayedByMe", entityIds: [] })
+    setError(outcome.ok ? null : outcome.error)
+  }
   return (
     <>
       <CastContext value={view}>
@@ -77,6 +88,8 @@ export function PersonaSwitch({
           trigger={trigger}
           place={`${place}:${session.chatId}`}
           onPick={(card) => void pick(card)}
+          // A new chat can start with no persona, as the new-chat page's could.
+          {...(isPendingChat(chat) ? { onNone: () => void none() } : {})}
           // A new chat's, as the new-chat page's: the account default says so until it starts.
           markDefault={isPendingChat(chat)}
           header={<ChatPersonaPickerRows session={session} />}
