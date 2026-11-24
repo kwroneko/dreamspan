@@ -194,7 +194,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         version.libraryPins !== undefined || version.library?.length || version.sourceVersionId
           ? {
               ...inserted,
-              library_json: (yield* sql<{ library_json: string }>`SELECT ${sql.literal(libraryJson("v"))} AS library_json
+              library_json: (yield* sql<{
+                library_json: string
+              }>`SELECT ${sql.literal(libraryJson("v"))} AS library_json
                 FROM versions v WHERE v.id = ${inserted.id}`)[0]!.library_json
             }
           : inserted

@@ -37,20 +37,22 @@ export const composerLibrary = (sql: SqlClient.SqlClient) => {
     userId: UserId,
     chatId: string,
     draftId: string,
-    add: MessageLibrary,
+    add: ReadonlyArray<string>,
     remove: ReadonlyArray<string>
   ) =>
     Effect.gen(function* () {
       yield* owned(userId, chatId, draftId, add.length > 0)
       for (const refId of remove) yield* sql`DELETE FROM composer_library WHERE draft_id=${draftId} AND ref_id=${refId}`
-      for (const item of add) {
-        const [ref] = yield* sql`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-          WHERE r.id = ${item.refId} AND e.owner_user_id = ${userId} AND e.kind = ${item.kind}
+      for (const refId of add) {
+        const [ref] = yield* sql<{
+          kind: string
+        }>`SELECT e.kind FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+          WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook', 'preset')
             AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
-        if (!ref) return yield* new NotFound({ entity: "ref", id: item.refId })
+        if (!ref) return yield* new NotFound({ entity: "ref", id: refId })
         // After the last one there: several at once keep the order they were picked in.
         yield* sql`INSERT INTO composer_library (draft_id, ref_id, kind, position)
-          VALUES (${draftId}, ${item.refId}, ${item.kind},
+          VALUES (${draftId}, ${refId}, ${ref.kind},
             (SELECT coalesce(max(position), 0) + 1 FROM composer_library WHERE draft_id = ${draftId}))
           ON CONFLICT DO NOTHING`
       }

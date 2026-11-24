@@ -1615,7 +1615,9 @@ export class ChatSession {
     /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
     round: ReadonlyArray<EntityId> = [],
     /** Auto picked `replySpeaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
-    autoPick = false
+    autoPick = false,
+    /** Cards, lorebooks and presets a workshop's message carries (spec/WORKSHOP-CARDS.md §4). */
+    library?: import("@dreamspan/shared/chat.ts").MessageLibrary
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1634,6 +1636,7 @@ export class ChatSession {
           content,
           ...(images === undefined ? {} : { images }),
           ...(imageDraftIds === undefined ? {} : { imageDraftIds }),
+          ...(library?.length ? { library } : {}),
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
           replySpeakerEntityId: replySpeaker,

@@ -1,7 +1,7 @@
 // A workshop composer's attached cards, lorebooks and presets (spec/WORKSHOP-CARDS.md §4.4) at
 // the RPC boundary: they survive a reload in attach order, a send takes off only the items it
 // carries, and the message then shows them by the name they had when sent. A story's composer and
-// another kind's id are refused; an archived item is left out. Synthetic cards only.
+// an id the library doesn't have are refused; an archived item is left out. Synthetic cards only.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -26,19 +26,13 @@ describe("composer library items", () => {
 
       yield* api.SetComposerLibrary({
         ...key,
-        add: [
-          { kind: "card", refId: tide.id },
-          { kind: "lorebook", refId: book.id }
-        ],
+        add: [tide.id, book.id],
         remove: []
       })
       // Attached again: it stays where it was; a new one goes last.
       const after = yield* api.SetComposerLibrary({
         ...key,
-        add: [
-          { kind: "card", refId: tide.id },
-          { kind: "card", refId: wren.id }
-        ],
+        add: [tide.id, wren.id],
         remove: []
       })
       assert.deepStrictEqual(
@@ -47,15 +41,19 @@ describe("composer library items", () => {
       )
       assert.deepStrictEqual(yield* api.GetComposerLibrary(key), after)
 
-      // Refused: a card id given as a lorebook, and anything in a story's composer.
-      yield* notFound(api.SetComposerLibrary({ ...key, add: [{ kind: "lorebook", refId: wren.id }], remove: [] }))
+      assert.deepStrictEqual(
+        after.map((item) => item.kind),
+        ["card", "lorebook", "card"]
+      )
+      // Refused: an id the library doesn't have, and anything in a story's composer.
+      yield* notFound(api.SetComposerLibrary({ ...key, add: ["ref_missing" as typeof wren.id], remove: [] }))
       const story = yield* api.CreateChat({ title: "Story" })
       const storyDraft = yield* api.OpenComposer({ chatId: story.id, forkId: null })
       yield* notFound(
         api.SetComposerLibrary({
           chatId: story.id,
           draftId: storyDraft.id,
-          add: [{ kind: "card", refId: wren.id }],
+          add: [wren.id],
           remove: []
         })
       )
@@ -80,7 +78,12 @@ describe("composer library items", () => {
         [wren.id]
       )
       // The message shows them by the names they had when sent, a rename after or not.
-      yield* api.RenameRef({ refId: tide.id, label: "Tide Clerk (old)", subtitle: "", expectedRowVersion: tide.rowVersion })
+      yield* api.RenameRef({
+        refId: tide.id,
+        label: "Tide Clerk (old)",
+        subtitle: "",
+        expectedRowVersion: tide.rowVersion
+      })
       const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
       const shown = path.entries.find((row) => row.slotId === entry.slotId)!
       assert.deepStrictEqual(entry.version.library, [
@@ -90,7 +93,7 @@ describe("composer library items", () => {
       assert.deepStrictEqual(shown.version.library, entry.version.library)
 
       // Archived, it's left out of the composer's list; removed, it's gone.
-      yield* api.SetComposerLibrary({ ...key, add: [{ kind: "card", refId: tide.id }], remove: [] })
+      yield* api.SetComposerLibrary({ ...key, add: [tide.id], remove: [] })
       yield* api.SetRefArchived({ refId: tide.id, archived: true })
       assert.deepStrictEqual(
         (yield* api.GetComposerLibrary(key)).map((item) => item.refId),

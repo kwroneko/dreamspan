@@ -6,7 +6,7 @@
 // never just the fork: the server saves the text onto that draft (ARCHITECTURE §3.10).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, EntityId, ForkId, MessageLibrary, SlotId } from "./chat.ts"
+import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
 import { Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { RefId } from "./library.ts"
@@ -110,8 +110,8 @@ export const ComposerLibraryItem = Schema.Struct({
 export type ComposerLibraryItem = typeof ComposerLibraryItem.Type
 export const SetComposerLibraryFields = {
   ...ComposerImageKey,
-  /** Attached after those there; one already there stays where it is. */
-  add: MessageLibrary,
+  /** Attached after those there, by id (the server knows each one's kind); one already there stays where it is. */
+  add: Schema.Array(RefId).check(Schema.isMaxLength(16)),
   remove: Schema.Array(RefId).check(Schema.isMaxLength(16))
 }
 

@@ -80,6 +80,9 @@ export function PickerPopover({
   )
 }
 
+/** A list's rows: radios, or checkboxes where several can be ticked. */
+const ROWS = "[role=radio],[role=checkbox]"
+
 /** The filter above a picker's list. */
 export function PickerSearch({
   label,
@@ -116,7 +119,7 @@ export function PickerSearch({
           return
         }
         // Down goes into the list (at the checked row when it's shown); Enter takes the first row.
-        const rows = document.getElementById(controls)?.querySelectorAll<HTMLElement>("[role=radio]")
+        const rows = document.getElementById(controls)?.querySelectorAll<HTMLElement>(ROWS)
         if (!rows?.length) return
         if (event.key === "ArrowDown") {
           event.preventDefault()
@@ -134,8 +137,8 @@ export function PickerSearch({
 /** Up and Down move between a list's rows; Home and End go to its first and last shown row. */
 const moveInList = (event: KeyboardEvent<HTMLElement>, search: HTMLElement | null | undefined) => {
   const target = event.target as HTMLElement
-  if (target.getAttribute("role") !== "radio") return
-  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=radio]")]
+  if (!target.matches(ROWS)) return
+  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(ROWS)]
   const at = rows.indexOf(target)
   const next =
     event.key === "ArrowDown"
@@ -176,8 +179,9 @@ export interface PickerItem {
 }
 
 /**
- * The rows, as radios. An action that takes its row out of the list (archiving) moves focus to
- * the row that takes its place, so the keyboard stays in the list and the popover stays open.
+ * The rows, as radios, or with `ticked` as checkboxes (several chosen at once, choosing toggles).
+ * An action that takes its row out of the list (archiving) moves focus to the row that takes its
+ * place, so the keyboard stays in the list and the popover stays open.
  */
 export function PickerList({
   id,
@@ -188,11 +192,14 @@ export function PickerList({
   empty,
   focusRef,
   fallbackFocus,
+  ticked,
   rowSize = 48
 }: {
   id: string
   title: string
   items: ReadonlyArray<PickerItem>
+  /** Several can be chosen: the rows ticked. `value` is then where focus starts. */
+  ticked?: ((value: string) => boolean) | undefined
   /** A row's usual height in px, for the rows not yet measured. */
   rowSize?: number
   value: string
@@ -224,12 +231,13 @@ export function PickerList({
     const rows = [...element.querySelectorAll<HTMLElement>("[data-picker-row]")]
     const same = rows.find((row) => row.dataset.pickerRow === wanted.value)
     const next = same ?? rows[Math.min(wanted.index, rows.length - 1)]
-    const target = next?.querySelector<HTMLElement>("[data-picker-action]") ?? next?.querySelector("[role=radio]")
+    const target = next?.querySelector<HTMLElement>("[data-picker-action]") ?? next?.querySelector(ROWS)
     ;(target ?? fallbackFocus?.current)?.focus()
   }, [values]) // eslint-disable-line react-hooks/exhaustive-deps -- once the rows have changed
+  const group = ticked ? "group" : "radiogroup"
   if (items.length === 0)
     return (
-      <div id={id} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col p-2">
+      <div id={id} role={group} aria-label={title} className="flex min-h-0 flex-col p-2">
         <div className="px-2 py-1.5 text-sm text-muted">{empty}</div>
       </div>
     )
@@ -237,7 +245,7 @@ export function PickerList({
   return (
     <WindowedList
       id={id}
-      role="radiogroup"
+      role={group}
       aria-label={title}
       className="flex min-h-0 flex-col overflow-y-auto p-2"
       items={items}
@@ -250,7 +258,8 @@ export function PickerList({
       )}
       onKeyDown={(event) => moveInList(event, fallbackFocus?.current)}
       renderItem={(item, index) => {
-        const checked = item.value === value
+        const current = item.value === value
+        const checked = ticked ? ticked(item.value) : current
         return (
           <div
             data-picker-row={item.value}
@@ -258,9 +267,9 @@ export function PickerList({
           >
             <Tooltip label={item.tooltip}>
               <button
-                ref={checked ? (focusRef as RefObject<HTMLButtonElement | null> | undefined) : undefined}
+                ref={current ? (focusRef as RefObject<HTMLButtonElement | null> | undefined) : undefined}
                 type="button"
-                role="radio"
+                role={ticked ? "checkbox" : "radio"}
                 aria-checked={checked}
                 aria-label={item.label}
                 {...(item.detail ? { "aria-description": item.detail } : {})}
@@ -268,7 +277,17 @@ export function PickerList({
                 className={`grid w-full min-w-0 items-start gap-x-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus aria-checked:font-medium ${item.leading ? "grid-cols-[1rem_auto_minmax(0,1fr)]" : "grid-cols-[1rem_1fr]"}`}
               >
                 <span className={`pt-0.5 text-accent ${item.leading ? "row-span-2 self-center" : ""}`}>
-                  {checked && <Icon name="check" size={14} />}
+                  {ticked ? (
+                    // A box on every row where several can be ticked, so an unticked one reads as one.
+                    <span
+                      aria-hidden
+                      className={`flex size-4 items-center justify-center rounded-sm border ${checked ? "border-accent" : "border-border"}`}
+                    >
+                      {checked && <Icon name="check" size={12} />}
+                    </span>
+                  ) : (
+                    checked && <Icon name="check" size={14} />
+                  )}
                 </span>
                 {item.leading && (
                   <span aria-hidden className="row-span-2 flex self-center">

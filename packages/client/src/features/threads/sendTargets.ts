@@ -146,6 +146,22 @@ const planThread = async (
 /** Sends to the thread shown and each ticked one, in one write (`SendToThreads`). */
 export const sendToThreads = async (send: PlannedSend) => {
   const { session, view } = send
+  // Library items go with one message on one branch (spec/WORKSHOP-CARDS.md §4.4): never dropped.
+  if (send.library?.length)
+    return {
+      sent: false,
+      outcome: {
+        ok: false,
+        error: {
+          tag: "ThreadsRefused",
+          message: "Cards, lorebooks and presets go to one thread at a time. Untick the other threads, or remove them.",
+          problems: [],
+          reason: null
+        }
+      },
+      draft: null,
+      recovered: 0
+    } as const
   const others = ticked(view)
   const planned = await Promise.all(others.map((other) => planThread(session, other.forkId, other.writesAs, send)))
   const failed = planned.find((result) => !result.ok)

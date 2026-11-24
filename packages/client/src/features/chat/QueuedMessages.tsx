@@ -1,6 +1,6 @@
 import { SlotOutlet } from "../../slots.tsx"
 import { queuedPreviews } from "./presentation.tsx"
-import type { QueuedMessage, MessageImages } from "@dreamspan/shared/chat.ts"
+import type { QueuedMessage, MessageImages, MessageLibrary } from "@dreamspan/shared/chat.ts"
 import type { DraftState } from "@dreamspan/shared/drafts.ts"
 import { useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
@@ -246,7 +246,7 @@ function Withdraw({
 }: {
   queued: QueuedMessage
   session: ChatSession
-  onRecovered: (text: string, images?: MessageImages) => void
+  onRecovered: (text: string, images?: MessageImages, library?: MessageLibrary) => void
 }) {
   const [error, setError] = useState<AppError | null>(null)
   return (
@@ -259,7 +259,8 @@ function Withdraw({
           if (result.ok)
             onRecovered(
               result.value.kind === "message" ? result.value.content : (result.value.direction ?? ""),
-              result.value.images
+              result.value.images,
+              result.value.library
             )
           else setError(result.error)
         }}

@@ -60,6 +60,16 @@ const lines = (items: ReadonlyArray<string>): ReactNode => (
   </span>
 )
 
+/**
+ * Several ticked at once (attaching items to a workshop's message): choosing a row toggles it and
+ * the list stays open; `rowHint` says what choosing it does there.
+ */
+export interface PickerTicks {
+  readonly ticked: (value: RefId) => boolean
+  readonly toggle: (value: RefId) => void
+  readonly rowHint: (value: RefId) => string
+}
+
 /** A document a header switcher offers: a library entry, or a chat's note or snippet. */
 export interface DocumentChoice {
   readonly value: RefId
@@ -77,6 +87,7 @@ export interface DocumentPickerProps extends PickerBodyProps {
   readonly onChoose: (value: RefId) => void
   /** The row at the end of the list making a new one, where the kind has a way to make one. */
   readonly create?: NewDocument | undefined
+  readonly ticks?: PickerTicks | undefined
 }
 
 /** "New card…", "New snippet": what the row says, what it makes, and making it. */
@@ -140,7 +151,8 @@ export function DocumentPicker({
   create,
   onChosen,
   focus,
-  focusRef
+  focusRef,
+  ticks
 }: DocumentPickerProps) {
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
@@ -165,7 +177,11 @@ export function DocumentPicker({
         }
       : {}),
     tooltip: lines([
-      choice.value === value ? "Shown in this editor" : `Opens this ${subject} in this editor`,
+      ticks
+        ? ticks.rowHint(choice.value)
+        : choice.value === value
+          ? "Shown in this editor"
+          : `Opens this ${subject} in this editor`,
       ...(choice.updatedAt === undefined ? [] : [`Edited ${exactTime(choice.updatedAt)}`])
     ])
   }))
@@ -192,13 +208,15 @@ export function DocumentPicker({
         title={`${subject[0]!.toUpperCase()}${subject.slice(1)}s`}
         items={items}
         value={value}
+        ticked={ticks ? (next) => ticks.ticked(next as RefId) : undefined}
         onChoose={(next) => {
+          if (ticks) return ticks.toggle(next as RefId)
           onChosen()
           if (next !== value) onChoose(next as RefId)
         }}
         focusRef={focus === "current" ? focusRef : undefined}
         fallbackFocus={focus === "search" ? focusRef : search}
-        empty={`Nothing is called “${query.trim()}”.`}
+        empty={choices.length === 0 ? `No ${subject}s yet.` : `Nothing is called “${query.trim()}”.`}
       />
       <NewRow create={create} onChosen={onChosen} />
     </>
@@ -217,6 +235,7 @@ export interface CardPickerProps extends PickerBodyProps {
   readonly personasOnly?: boolean | undefined
   /** A row's first tooltip line where choosing does something else than opening it in an editor. */
   readonly rowHint?: ((card: { readonly persona: boolean; readonly current: boolean }) => string) | undefined
+  readonly ticks?: PickerTicks | undefined
 }
 
 /** The registered card and persona switcher body (`card.picker`). */
@@ -281,7 +300,8 @@ export function CardPicker({
   focus,
   focusRef,
   personasOnly = false,
-  rowHint
+  rowHint,
+  ticks
 }: CardPickerProps) {
   const shell = useAtomValue(shellAtom)
   const [remembered, update] = useCardSwitcherView()
@@ -307,11 +327,13 @@ export function CardPicker({
     ),
     ...(marked && card.persona ? { badge: <PersonaBadge /> } : {}),
     tooltip: lines([
-      rowHint
-        ? rowHint({ persona: card.persona, current: card.card.refId === value })
-        : card.card.refId === value
-          ? "Shown in this editor"
-          : `Opens this ${card.persona ? "persona" : "card"} in this editor`,
+      ticks
+        ? ticks.rowHint(card.card.refId)
+        : rowHint
+          ? rowHint({ persona: card.persona, current: card.card.refId === value })
+          : card.card.refId === value
+            ? "Shown in this editor"
+            : `Opens this ${card.persona ? "persona" : "card"} in this editor`,
       `Created ${exactTime(card.createdAt)}`,
       card.recentAt === null ? "In no chat yet" : `Last chat ${exactTime(card.recentAt)}`
     ])
@@ -343,7 +365,9 @@ export function CardPicker({
         items={items}
         rowSize={CARD_ROW_SIZE}
         value={value}
+        ticked={ticks ? (next) => ticks.ticked(next as RefId) : undefined}
         onChoose={(next) => {
+          if (ticks) return ticks.toggle(next as RefId)
           onChosen()
           if (next !== value) onChoose(next as RefId)
         }}
