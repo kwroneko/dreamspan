@@ -351,4 +351,29 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       assert.lengthOf(yield* h.texts(h.workshop.id, h.w), 3)
     })
   )
+
+  it.effect("restoring the first of two deleted story branches reopens its workshop", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      // A third branch, without a pairing to the workshop used in this test.
+      const c = yield* h.branchStory(h.s1.slotId)
+      const workshop = yield* h.api.CreateWorkshop({ attachTo: h.story.id, attachFork: h.main })
+      yield* h.append(workshop.id, workshop.currentForkId!, "On A.")
+      const b = yield* h.branchStory(h.s3.slotId)
+      const [onB] = yield* h.pairedIn(workshop, b.fork)
+      yield* h.append(workshop.id, onB!, "Only on B.")
+      assert.deepStrictEqual(yield* h.pairedIn(workshop, c.fork), [])
+
+      const aItem = yield* h.api.DeleteFork({ forkId: h.main })
+      const bItem = yield* h.api.DeleteFork({ forkId: b.fork })
+      assert.strictEqual(yield* outcome(h.api.GetChat({ chatId: workshop.id })), "NotFound")
+      yield* h.api.RestoreBinItem({ itemId: aItem.id })
+      assert.strictEqual((yield* h.api.GetChat({ chatId: workshop.id })).currentForkId, workshop.currentForkId)
+      assert.deepStrictEqual(yield* h.pairedIn(workshop, b.fork), [])
+      assert.deepStrictEqual(yield* h.texts(workshop.id, workshop.currentForkId!), ["On A."])
+
+      yield* h.api.RestoreBinItem({ itemId: bItem.id })
+      assert.deepStrictEqual(yield* h.texts(workshop.id, onB!), ["On A.", "Only on B."])
+    })
+  )
 })
