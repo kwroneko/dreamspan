@@ -19,10 +19,14 @@ test.describe("row menus in a scrolling list", () => {
     await trigger.click()
     const menu = page.getByRole("menu", { name: label, exact: true })
     await expect(menu.getByRole("menuitem", { name: "Set as default persona" })).toBeVisible()
-    // Scrolling the row out of the list closes it (inside the menu, or the row still in view, it stays).
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight
-    })
+    // One pixel at a time still closes the menu when the row leaves view.
+    await list.evaluate(async (element, name) => {
+      const button = element.querySelector(`[aria-label="${name}"]`)!
+      while (button.getBoundingClientRect().bottom > element.getBoundingClientRect().top) {
+        element.scrollTop++
+        await new Promise(requestAnimationFrame)
+      }
+    }, label)
     await expect(menu).toHaveCount(0)
     await expect(picker).toBeVisible()
 
