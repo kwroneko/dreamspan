@@ -154,6 +154,23 @@ test("an open panel can still be closed once the header's panel toggle is disabl
   await expect(page.getByRole("button", { name: "Hide panel", exact: true })).toHaveCount(1)
 })
 
+test("closing the panel by keyboard returns focus to its chat", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { chat } = await fixture("Keyboard panel close")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${url}/chats/${chat.id}`)
+  const composer = page.getByRole("textbox", { name: "Message", exact: true })
+  await expect(composer).toBeEditable()
+  await toggle(page, "disable", "chatHeaderActions")
+  await page.getByRole("button", { name: /^Show Mira.*'s card$/ }).click()
+  await panel(page).getByRole("button", { name: "More tools", exact: true }).focus()
+  await page.keyboard.press("Tab")
+  await expect(panel(page).getByRole("button", { name: "Hide panel", exact: true })).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(panel(page)).toHaveCount(0)
+  await expect(composer).toBeFocused()
+})
+
 test("a chat not made yet keeps its panel's close when its panel toggle is disabled", async ({ page }) => {
   test.setTimeout(120_000)
   // A card source's card before its first send.

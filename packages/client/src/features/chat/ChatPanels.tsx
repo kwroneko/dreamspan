@@ -10,7 +10,7 @@ import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Away } from "../../ui/away.ts"
-import { useTabShown } from "../workbench/tab.tsx"
+import { useTabShown, useWorkbenchTab } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedBranchShown, UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs } from "../../ui/PanelTabs.tsx"
@@ -33,6 +33,7 @@ import {
 import type { PendingChat } from "./pendingChat.ts"
 import { chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 import { isPendingChat, NOT_STARTED } from "./chatStarted.ts"
+import { composerTextbox } from "./composerFocus.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
 declare module "@tanstack/react-router" {
@@ -207,7 +208,7 @@ export function ChatSidePanel({
   /** The chat's title, so a phone's sheet says which chat it's about. */
   title: string
   onTab: (tab: PanelTab) => void
-  onClose: () => void | Promise<void>
+  onClose: (restoreFocus?: boolean) => void | Promise<void>
   /** Beside the workbench's frames rather than beside the chat (features/workbench). */
   host?: HTMLElement | null
 } & SidePanelContent) {
@@ -306,7 +307,7 @@ export function ChatSidePanel({
             aria-expanded
             aria-pressed
             className="shrink-0 bg-surface-raised text-text"
-            onClick={() => void onClose()}
+            onClick={(event) => void onClose(event.detail === 0)}
           />
         )}
       </div>
@@ -522,6 +523,9 @@ const followed = (tab: PanelTab | null, cast: ChatView["cast"], follows: Readonl
 export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const navigate = useNavigate()
   const router = useRouter()
+  const workbenchTab = useWorkbenchTab()
+  const chatMain = useRef<HTMLDivElement>(null)
+  const restoreFocusOnClose = useRef(false)
   const [pathname] = useState(() => router.state.location.pathname)
   const wide = useWide()
   const userId = useSession().user.id
@@ -533,6 +537,18 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const follow = useCastFollow(asked, view)
   const candidate = follow.tab ?? asked
   const panel = usePanelHere(candidate === "display" ? "interface" : candidate, view)
+  useLayoutEffect(() => {
+    if (panel !== null || !restoreFocusOnClose.current) return
+    restoreFocusOnClose.current = false
+    if (document.activeElement !== document.body) return
+    const main = chatMain.current
+    if (!main) return
+    composerTextbox(main)?.focus({ preventScroll: true })
+    if (document.activeElement === document.body) main.focus({ preventScroll: true })
+    // The panel can outlive the chat's visibility when one of its editors covers the chat.
+    if (document.activeElement === document.body && workbenchTab)
+      document.querySelector<HTMLElement>(`[data-tab="${CSS.escape(workbenchTab.tabId)}"] [role="tab"]`)?.focus()
+  }, [panel, workbenchTab])
   usePlaceNotice(
     follow.tab === null && urlPanel !== null && urlPanel !== "display" && view.cast !== null && panel !== urlPanel
       ? "This panel is no longer available in this chat."
@@ -593,6 +609,10 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     },
     [navigate, userId]
   )
+  const close = (restoreFocus = false) => {
+    restoreFocusOnClose.current = restoreFocus
+    return show(null)
+  }
   // A phone's sheet covers everything: once this chat's tab is behind another (an editor opened
   // from it, or a resize below the breakpoint while it was) the sheet closes rather than coming
   // back over the chat, as opening a large editor from it closes it. The layout says so, not
@@ -608,5 +628,5 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     const shown = latest.current.panel
     return { ...latest.current.router.state.location.search, ...search, panel: shown ?? undefined }
   }, [])
-  return { panel, show, withPanel, wide, userId }
+  return { panel, show, close, chatMain, withPanel, wide, userId }
 }
