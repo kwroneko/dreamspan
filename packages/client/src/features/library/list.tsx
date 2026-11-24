@@ -5,12 +5,12 @@ import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
 // item shows what identifies it, a direct action or two, and the rest in its menu.
 import { useAtomValue } from "@effect/atom-react"
-import type { CastCard } from "@dreamspan/shared/chat.ts"
+import type { CastCard, EntityId } from "@dreamspan/shared/chat.ts"
 import type { LibraryRef } from "@dreamspan/shared/library.ts"
 import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { Link, useLocation, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { type ReactElement, useEffect, useRef, useState, type ReactNode } from "react"
 import { CARD_DRAG, carryOnDrag } from "../../ui/appDrags.ts"
 import { AsyncView } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -18,6 +18,16 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
+import {
+  OPEN_BESIDE_HINT,
+  OPEN_HERE_HINT,
+  OPEN_NEW_TAB_HINT,
+  PAGE_BESIDE_HINT,
+  openBeside,
+  openPageBeside,
+  useCanOpenBeside
+} from "../../ui/openBeside.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
@@ -196,6 +206,57 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   )
 }
 
+/**
+ * A card's right-click menu in the Library (owner, 2026-11-24): the Characters tiles' items.
+ * Open, beside and in a new browser tab go where a click goes (the card's page); Edit beside
+ * opens its editor as the side pane's preview tab, to read card after card.
+ */
+function CardOpenMenu({
+  label,
+  entityId,
+  refId,
+  children
+}: {
+  label: string
+  entityId: EntityId
+  refId: string
+  children: ReactElement
+}) {
+  const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const canBeside = useCanOpenBeside()
+  const href = `/cards/${encodeURIComponent(entityId)}`
+  return (
+    <ContextMenu label={`Actions for ${label}`} open={open} onOpenChange={setOpen} trigger={children}>
+      <MenuItem
+        icon="person"
+        description={OPEN_HERE_HINT}
+        onClick={() => void navigate({ to: "/cards/$entityId", params: { entityId } })}
+      >
+        Open
+      </MenuItem>
+      {canBeside && (
+        <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(href)}>
+          Open beside
+        </MenuItem>
+      )}
+      <MenuItem icon="external" description={OPEN_NEW_TAB_HINT} onClick={() => window.open(href, "_blank", "noopener")}>
+        Open in a new browser tab
+      </MenuItem>
+      {canBeside && (
+        <MenuItem
+          icon="edit"
+          description={PAGE_BESIDE_HINT}
+          onClick={() => openPageBeside(`/library/${encodeURIComponent(refId)}`)}
+        >
+          Edit beside
+        </MenuItem>
+      )}
+      <CardSurface placement="tile-menu" entityId={entityId} />
+    </ContextMenu>
+  )
+}
+
 /** Where an item's picture and name lead: a character's page, else its editor. The picture's
  * link repeats the name's for a pointer, so it's skipped by the keyboard and screen readers. */
 function OpenLink({
@@ -210,6 +271,7 @@ function OpenLink({
   children: ReactNode
 }) {
   const { entry } = item
+  const canBeside = useCanOpenBeside()
   const props = picture
     ? {
         tabIndex: -1,
@@ -219,19 +281,21 @@ function OpenLink({
       }
     : { title: itemName(entry), className }
   return entry.kind === "card" ? (
-    <Tooltip label={`Opens ${entry.label}’s card.`}>
-      <Link
-        to="/cards/$entityId"
-        params={{ entityId: entry.entityId }}
-        // Dropped on a frame, the card's full-size editor opens there (owner, 2026-11-07).
-        onDragStart={(event) =>
-          carryOnDrag(event.dataTransfer, CARD_DRAG.id, `/library/${encodeURIComponent(entry.id)}`)
-        }
-        {...props}
-      >
-        {children}
-      </Link>
-    </Tooltip>
+    <CardOpenMenu label={entry.label} entityId={entry.entityId} refId={entry.id}>
+      <Tooltip label={`Opens ${entry.label}’s card.${canBeside ? " Right-click to open it beside." : ""}`}>
+        <Link
+          to="/cards/$entityId"
+          params={{ entityId: entry.entityId }}
+          // Dropped on a frame, the card's full-size editor opens there (owner, 2026-11-07).
+          onDragStart={(event) =>
+            carryOnDrag(event.dataTransfer, CARD_DRAG.id, `/library/${encodeURIComponent(entry.id)}`)
+          }
+          {...props}
+        >
+          {children}
+        </Link>
+      </Tooltip>
+    </CardOpenMenu>
   ) : (
     <Tooltip label={`Opens ${entry.label}’s editor.`}>
       <Link to="/library/$refId" params={{ refId: entry.id }} {...props}>

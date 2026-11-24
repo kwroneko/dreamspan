@@ -129,6 +129,40 @@ test("library cards: Edit beside replaces the side pane's preview", async ({ pag
   }
 })
 
+test("Library rows: the card menu's Edit beside replaces the side pane's preview", async ({ page }) => {
+  const server = await startServer(withAdmin)
+  try {
+    const names = ["Ava Shelf", "Bela Shelf", "Cora Shelf", "Dina Shelf"]
+    await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        for (const name of names) yield* api.CreateCard({ label: name, name })
+      })
+    )
+    await setup(page, server)
+    await page.goto(`${server.url}/library`)
+    const rows = page
+      .getByRole("main")
+      .locator("li")
+      .filter({ has: page.locator('a[href^="/cards/"]') })
+    await expect(rows).toHaveCount(4)
+    const shown = await rows.evaluateAll((items) =>
+      items.map((li) => (li.querySelector('a[href^="/cards/"][title]')?.textContent ?? "").trim())
+    )
+    // The app's menu, not the browser's: the Characters tiles' items.
+    await rows.nth(0).getByRole("link").first().click({ button: "right" })
+    const items = await page.getByRole("menuitem").allTextContents()
+    expect(items[0]).toMatch(/^Open(?! beside| in)/)
+    expect(items[1]).toMatch(/^Open beside/)
+    expect(items[2]).toMatch(/^Open in a new browser tab/)
+    expect(items[3]).toMatch(/^Edit beside/)
+    await page.getByRole("menuitem", { name: /^Open in a new browser tab/ }).click()
+    expect((await opened(page)).at(-1)).toMatch(/^\/cards\/[^/]+$/)
+    await walk(page, rows, shown, /^Edit beside/, "library-rows")
+  } finally {
+    await server.stop()
+  }
+})
+
 test("cardex cards: View beside replaces the side pane's preview; a new browser tab opens the click's chat", async ({
   page
 }) => {
