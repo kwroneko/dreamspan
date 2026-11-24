@@ -1114,19 +1114,17 @@ export const layer = Layer.effect(
             return { _tag: "Sent", failure, entry } as const
           })
         const first = yield* attempt(attribution.attempt)
-        // The owner's first connect of this process for the connection lists its tools again, after
-        // the call.
-        if (first._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
-          listedHere.add(connectionId)
-          const key = keyOf(connectionId, userId)
-          const entry = pool.get(key)
-          if (entry !== undefined) runFork(relist(userId, ready, key, entry))
-        }
         const settled =
           // The server refused it unprocessed: reconnect once and send it again (spec/MCP.md §7.2).
           first._tag === "Sent" && first.failure instanceof McpRequestFailed && first.failure.deadSession
             ? yield* attempt(attribution.attempt + 1, first.entry)
             : first
+        // The owner's first usable client in this process lists its tools again after the call.
+        if (settled._tag !== "NotSent" && ready.connection.owned && !listedHere.has(connectionId)) {
+          const key = keyOf(connectionId, userId)
+          const entry = pool.get(key)
+          if (entry !== undefined) runFork(relist(userId, ready, key, entry, true))
+        }
         if (settled._tag === "Done") return { _tag: "Result", result: settled.result, scrub: ready.scrub } as const
         const failure = settled.failure
         // Refused unprocessed both times, or never sent at all: nothing can have happened.
@@ -1200,15 +1198,15 @@ export const layer = Layer.effect(
     // against an older `cache_revision` is dropped. One listing of a connection at a time.
     const listedHere = new Set<string>()
     const listLocks = keyedLocks()
-    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled) => {
+    const relist = (userId: UserId, prepared: McpPrepared, key: string, entry: Pooled, firstOnly = false) => {
       const connectionId = prepared.connection.id
       return listLocks
         .withLock(
           connectionId,
           Effect.gen(function* () {
-            if (entry.dead || entry.retired) return
+            if (entry.dead || entry.retired || (firstOnly && listedHere.has(connectionId))) return
             const before = yield* reader.GetMcpConnection({ userId, connectionId })
-            if (!before.owned || before.cacheRevision !== entry.revision) return
+            if (entry.dead || entry.retired || !before.owned || before.cacheRevision !== entry.revision) return
             entry.users += 1
             if (entry.timer !== null) clearTimeout(entry.timer)
             entry.timer = null
@@ -1224,6 +1222,7 @@ export const layer = Layer.effect(
               outcome: { server: listed.server, tools },
               at: Date.now()
             })
+            listedHere.add(connectionId)
           })
         )
         .pipe(

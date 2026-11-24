@@ -40,7 +40,7 @@ export interface FakeMcpState {
   /** Every request gets this status, its body naming the request's Authorization header. */
   failStatus: number | null
   /** A transport failure for a tools/call POST, if the callback returns one. */
-  failCall: (() => { status: number; body: string } | null) | null
+  failCall: (() => { status: number; body: string } | "disconnect" | null) | null
   /** Every request is redirected here. */
   redirect: string | null
   /** The instructions `initialize` answers with. */
@@ -218,6 +218,10 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
         return
       }
       const failure = methodsOf(body).includes("tools/call") ? state.failCall?.() : null
+      if (failure === "disconnect") {
+        response.destroy()
+        return
+      }
       if (failure) {
         response.writeHead(failure.status).end(failure.body)
         return

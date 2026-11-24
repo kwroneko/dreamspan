@@ -236,6 +236,27 @@ const until = <E, R>(check: Effect.Effect<boolean, E, R>) =>
   })
 
 describe("listing a server's tools again", () => {
+  it.live("first connect still refreshes the catalog after an initial tool request loses its connection", () =>
+    Effect.gen(function* () {
+      const { api, server, call, connection } = yield* setup()
+      server.state.tools = [fakeTool("echo"), fakeTool("paint")]
+      server.state.failCall = () => "disconnect"
+      assert.strictEqual((yield* call("first"))._tag, "Failed")
+      server.state.failCall = null
+      const outcomes = yield* Effect.all([call("second"), call("third")], { concurrency: 2 })
+      assert.isTrue(outcomes.every((outcome) => outcome._tag === "Result"))
+      yield* until(Effect.map(api.GetMcpConnection({ connectionId: connection.id }), (c) => c.catalogRevision === 2))
+      assert.deepStrictEqual(
+        (yield* api.GetMcpConnection({ connectionId: connection.id })).tools.map((tool) => tool.name),
+        ["echo", "paint"]
+      )
+      assert.lengthOf(
+        server.methods().filter((method) => method === "tools/list"),
+        1
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("the first connect of a process lists again after the call, and a changed-tools notice lists at once", () =>
     Effect.gen(function* () {
       const { api, server, call, connection } = yield* setup()
