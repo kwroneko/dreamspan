@@ -12,7 +12,7 @@ const server = serverPerFile({
   FAKE_GENERATOR_SEED: "17"
 })
 
-const openStream = async (page: Page, width: number, compact = false) => {
+const openHistory = async (page: Page, width: number, compact: boolean, historySize: number) => {
   await page.setViewportSize({ width, height: 850 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const { chatId, lastSlot } = await asPage(page, server(), (api) =>
@@ -21,7 +21,7 @@ const openStream = async (page: Page, width: number, compact = false) => {
       const chat = yield* api.CreateChat({ title: "Continuous reply after long synthetic history" })
       yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
       let parent: SlotId | null = null
-      for (let i = 1; i <= 80; i++) {
+      for (let i = 1; i <= historySize; i++) {
         const sent: SendResult = yield* api.SendMessage({
           chatId: chat.id,
           parentSlotId: parent,
@@ -38,8 +38,13 @@ const openStream = async (page: Page, width: number, compact = false) => {
   await page.goto(`${server().url}/chats/${chatId}`)
   const list = page.getByTestId("messages")
   const fromEnd = () => list.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)
-  await expect(list.getByText(/^Log entry 80\./)).toBeInViewport()
+  await expect(list.getByText(new RegExp(`^Log entry ${historySize}\\.`))).toBeInViewport()
   await expect.poll(fromEnd).toBeLessThanOrEqual(1)
+  return { chatId, lastSlot, list, fromEnd }
+}
+
+const openStream = async (page: Page, width: number, compact = false) => {
+  const { chatId, lastSlot, list, fromEnd } = await openHistory(page, width, compact, 80)
   const startHeight = await list.evaluate((node) => node.scrollHeight)
   await asPage(page, server(), (api) => api.Generate({ chatId, parentSlotId: lastSlot, branch: false }))
   const generating = list.getByRole("article", { name: "Reply" }).getByText("generating", { exact: true })
@@ -144,6 +149,51 @@ scrollbarTest.describe("native scrollbar", () => {
     await page.mouse.up()
     await expectReadingHistory(stream)
   })
+
+  for (const width of [1440, 390])
+    scrollbarTest(
+      `releasing the scrollbar short of the end keeps the reading position at ${width}px`,
+      async ({ page }) => {
+        const { list, fromEnd } = await openHistory(page, width, true, 14)
+        await page.evaluate(async () => {
+          await document.fonts.ready
+        })
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1)
+        const thumb = await bottomThumb(list)
+        const y = thumb.y - 20
+        const gapAfterPaint = () =>
+          list.evaluate(
+            (node) =>
+              new Promise<number>((resolve) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => resolve(node.scrollHeight - node.scrollTop - node.clientHeight))
+                )
+              )
+          )
+
+        await page.mouse.move(thumb.x, y)
+        await page.mouse.down()
+        await page.mouse.move(thumb.x, y - 20)
+        await expect.poll(fromEnd).toBeGreaterThan(48)
+        // One thumb pixel moves by different distances at each width. Approach the end a pixel at a time.
+        let gap = await fromEnd()
+        for (let dy = 19; dy >= 0 && gap > 48; dy--) {
+          await page.mouse.move(thumb.x, y - dy)
+          gap = await gapAfterPaint()
+        }
+        expect(gap).toBeGreaterThan(5)
+        expect(gap).toBeLessThanOrEqual(48)
+        await page.mouse.up()
+        expect(await gapAfterPaint()).toBe(gap)
+
+        // Exercise the delayed follow checks with a small scroll after their 300 ms intent window.
+        await page.waitForTimeout(350)
+        await list.evaluate((node) => {
+          node.scrollTop += 2
+        })
+        expect(await gapAfterPaint()).toBe(gap - 2)
+      }
+    )
 
   for (const width of [1440, 390])
     scrollbarTest(

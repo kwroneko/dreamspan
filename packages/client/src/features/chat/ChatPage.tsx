@@ -96,6 +96,8 @@ export interface Flashes {
 const EDGE = 5
 /** Within this many pixels of the end counts as at the end. */
 const END_PX = 48
+/** Allow for rounding when comparing the native scroll offset with the end. */
+const EXACT_END_PX = 1
 
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
@@ -142,6 +144,10 @@ export function MessageList({
   const settled = useRef(false)
   /** Whether the list stays at the end as messages grow or arrive (below). */
   const [follow] = useState({ stuck: true })
+  const scrollbarPointer = useRef<number | null>(null)
+  // A scrollbar drag chooses a specific offset. Require the actual end until follow resumes.
+  const scrollbarNeedsEnd = useRef(false)
+  const followEndTolerance = useCallback(() => (scrollbarNeedsEnd.current ? EXACT_END_PX : END_PX), [])
   const { entries } = view
   const { prefs } = useViewPrefs()
   // The spacing shown follows the account's choice one commit later, once what's being read
@@ -238,7 +244,8 @@ export function MessageList({
   const setFollow = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, on: boolean) => {
       follow.stuck = on
-      instance.options.scrollEndThreshold = on ? 1 : -1
+      if (on) scrollbarNeedsEnd.current = false
+      instance.options.scrollEndThreshold = on ? EXACT_END_PX : -1
     },
     [follow]
   )
@@ -304,7 +311,7 @@ export function MessageList({
     gap: metrics.gap,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
-    scrollEndThreshold: follow.stuck ? 1 : -1
+    scrollEndThreshold: follow.stuck ? EXACT_END_PX : -1
   })
   const hold = useCallback((on: boolean) => setFollow(virtualizer, on), [setFollow, virtualizer])
 
@@ -613,7 +620,6 @@ export function MessageList({
   // streaming reply carried the menu up with its row, then closed it as the row left the view.
   // It holds on again after, unless the user scrolled away meanwhile.
   const intent = useRef(0)
-  const scrollbarPointer = useRef<number | null>(null)
   const menus = useRef({ open: 0, resume: false, since: 0 })
   useEffect(() => {
     const list = parent.current
@@ -649,7 +655,10 @@ export function MessageList({
     }
     const onPointerDown = (event: PointerEvent) => {
       const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
-      if (onScrollbar && event.button === 0) scrollbarPointer.current = event.pointerId
+      if (onScrollbar && event.button === 0) {
+        scrollbarPointer.current = event.pointerId
+        scrollbarNeedsEnd.current = true
+      }
       if (onScrollbar || event.button === 1) letGo()
     }
     const onPointerEnd = (event: PointerEvent) => {
@@ -659,7 +668,7 @@ export function MessageList({
       // Read the native position before stream growth or virtualizer measurements move the end.
       if (
         event.type === "pointerup" &&
-        list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX &&
+        list.scrollHeight - list.scrollTop - list.clientHeight <= EXACT_END_PX &&
         !revealing.current &&
         menus.current.open === 0 &&
         session.snapshot().newer === null
@@ -672,12 +681,12 @@ export function MessageList({
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
       const fromEnd = list.scrollHeight - list.scrollTop - list.clientHeight
-      if (fromEnd > END_PX) {
+      if (fromEnd > followEndTolerance()) {
         if (follow.stuck && virtualizer.options.followOnAppend) virtualizer.scrollToEnd()
         return
       }
       // Capture reaching the end before the virtualizer measures its newly mounted rows.
-      // Their corrected estimates can grow the list beyond END_PX in that same commit.
+      // Their corrected estimates can grow the list beyond the threshold in that same commit.
       if (
         spacing === "compact" &&
         !revealing.current &&
@@ -709,7 +718,7 @@ export function MessageList({
       window.removeEventListener("pointercancel", onPointerEnd, true)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, virtualizer, session])
+  }, [hold, spacing, follow, followEndTolerance, virtualizer, session])
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
@@ -741,11 +750,11 @@ export function MessageList({
       !revealing.current &&
       menus.current.open === 0 &&
       scrollbarPointer.current === null &&
-      fromEnd <= END_PX &&
+      fromEnd <= followEndTolerance() &&
       performance.now() - intent.current > 300
     )
       hold(true)
-    if (follow.stuck && fromEnd > 1) virtualizer.scrollToEnd()
+    if (follow.stuck && fromEnd > EXACT_END_PX) virtualizer.scrollToEnd()
   })
 
   useEffect(() => {
@@ -827,7 +836,8 @@ export function MessageList({
     if (first < EDGE && (!summaries || lcm === null || (entries[0] ? positionOf(entries[0]) : 0) > lcmCursor(lcm) + 1))
       void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
-    if (view.newer === null && virtualizer.isAtEnd(END_PX)) session.followAtBottom()
+    if (view.newer === null && scrollbarPointer.current === null && virtualizer.isAtEnd(followEndTolerance()))
+      session.followAtBottom()
   })
 
   // What the summaries cover, for the marks on the messages and the rail.
