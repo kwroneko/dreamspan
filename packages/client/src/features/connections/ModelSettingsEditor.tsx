@@ -47,6 +47,7 @@ import {
 import {
   copyInto,
   type Draft,
+  afterSave,
   draftOf,
   flagOf,
   getAt,
@@ -305,7 +306,7 @@ export function ModelSettingsEditor({
         }
         return result.ok
       },
-      (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion, drafts: {}, rows: {}, clamped: {} })
+      (text) => afterSave(values, savedVersion)(text)
     )
     if (ok) {
       setSubmitted(false)
