@@ -6,6 +6,7 @@ import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -48,17 +49,13 @@ const deleteMessage = async (page: Page, text: string) => {
 const expectCornerClose = async (toast: Locator) => {
   const card = (await toast.boundingBox())!
   const close = (await toast.locator("[data-toast-close]").boundingBox())!
-  // The title's text as laid out (its element's box spans the reserved room too).
-  const title = await toast
-    .locator("div")
-    .first()
-    .locator(":scope > :first-child")
-    .evaluate((element) => {
-      const range = document.createRange()
-      range.selectNodeContents(element)
-      const rects = [...range.getClientRects()]
-      return { x: 0, width: Math.max(...rects.map((rect) => rect.right)), lines: rects.length }
-    })
+  // The title's text as laid out (its element's box can be wider than its text).
+  const title = await toast.locator("[data-toast-text] > :first-child").evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    const rects = [...range.getClientRects()]
+    return { x: 0, width: Math.max(...rects.map((rect) => rect.right)), lines: rects.length }
+  })
   const padding = 12
   expect(card.x + card.width - (close.x + close.width)).toBeLessThanOrEqual(padding)
   expect(close.y - card.y).toBeLessThanOrEqual(padding)
@@ -106,7 +103,7 @@ for (const [width, height] of [
       const shown = toasts.filter({ visible: true })
       await expect(shown).toHaveCount(Math.min(left, 3))
       const last = shown.last()
-      const name = await last.locator("div").first().innerText()
+      const name = await last.locator("[data-toast-text]").innerText()
       await last.hover()
       await last.locator("[data-toast-close]").click()
       await expect(toasts.filter({ hasText: name.split("\n")[0]! })).toHaveCount(0)
@@ -118,6 +115,66 @@ for (const [width, height] of [
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect(message(page, "The lamp is lit.")).toBeVisible()
     await expect(toasts).toHaveCount(0)
+  })
+}
+
+/** No line of the toast's text, wrapped or cut short, reaches under the ×'s box. */
+const expectTextClearOfClose = async (toast: Locator) => {
+  const found = await toast.evaluate((card) => {
+    const close = card.querySelector("[data-toast-close]")!.getBoundingClientRect()
+    const column = card.querySelector("[data-toast-text]")!
+    const lines: Array<{ left: number; right: number; top: number; bottom: number }> = []
+    for (const element of column.children) {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      // A cut-short line's text runs on past its box: count only what its box shows.
+      const box = element.getBoundingClientRect()
+      for (const rect of range.getClientRects())
+        lines.push({ left: rect.left, right: Math.min(rect.right, box.right), top: rect.top, bottom: rect.bottom })
+    }
+    return {
+      close: { left: close.left, right: close.right, top: close.top, bottom: close.bottom, width: close.width },
+      lines
+    }
+  })
+  expect(found.close.width).toBe(28)
+  expect(found.lines.length).toBeGreaterThan(1)
+  for (const line of found.lines) {
+    const overlaps =
+      line.left < found.close.right &&
+      line.right > found.close.left &&
+      line.top < found.close.bottom &&
+      line.bottom > found.close.top
+    expect(overlaps, `text line ${JSON.stringify(line)} under the × ${JSON.stringify(found.close)}`).toBe(false)
+  }
+}
+
+for (const [width, height] of [
+  [390, 844],
+  [1920, 1080]
+] as const) {
+  test(`at ${width}px a long unbroken title wraps clear of the ×`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height })
+    await page.emulateMedia({ colorScheme: "dark" })
+    const title = `Lighthouse${"W".repeat(160)}`
+    const chatId = await chatWith(title, ["The lamp is lit.", "A ship answers."])
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(message(page, "A ship answers.")).toBeVisible()
+    await deleteMessage(page, "A ship answers.")
+    const toast = page.locator("[data-toast]")
+    await expect(toast).toContainText("moved to the bin.")
+    await expectLayout(page, info, `toast-long-${width}`, { scope: "[data-toast]" })
+    await expectTextClearOfClose(toast)
+    // Hovered, the × keeps its size and the text stays clear of it.
+    await toast.locator("[data-toast-close]").hover()
+    await expectTextClearOfClose(toast)
+    if (SHOTS) {
+      await page.mouse.move(0, 0)
+      await page.screenshot({ path: `${SHOTS}/toast-long-${width}-dark.png` })
+      await page.emulateMedia({ colorScheme: "light" })
+      await page.screenshot({ path: `${SHOTS}/toast-long-${width}-light.png` })
+    }
   })
 }
 

@@ -1143,9 +1143,11 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
         aria-label="Authors"
         // Each row: the name filling and truncating, then the site, the count in a fixed
         // right-aligned column and the mark, with one gap between them however wide the list.
+        // In a popover the rows sit 8px in from the list's edge and its scrollbar's room, the
+        // names 24px in, as before.
         className={`flex flex-col ${
           popover
-            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 pl-1.5 [scrollbar-gutter:stable] ${selected.length ? "border-b" : "-mb-3"}`
+            ? `-mx-3 max-h-80 min-h-0 overflow-y-auto overscroll-contain border-t border-border py-1 px-2 [scrollbar-gutter:stable] ${selected.length ? "border-b" : "-mb-3"}`
             : ""
         }`}
       >
@@ -1161,15 +1163,19 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
                   creatorNames.set(item.value, item.label)
                   set(creatorPatch(c, mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value]))
                 }}
-                className={`flex h-8 min-w-0 flex-1 items-center gap-3 rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-[1.125rem]" : "px-3"}`}
+                className={`flex min-h-8 min-w-0 flex-1 items-center gap-3 rounded-md py-1 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:min-h-11 ${popover ? "pr-1 pl-4" : "px-3"}`}
               >
-                <span
-                  className={`min-w-0 flex-1 truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
-                >
-                  {item.label}
-                </span>
-                <span className="shrink-0 rounded border border-border px-1.5 text-xs leading-5 text-muted">
-                  {siteName(item.value.slice(0, item.value.indexOf("/")))}
+                {/* Where the name and the site don't fit on one line (a narrow sheet), the site
+                    goes under the name, at the end, rather than cutting a short name. */}
+                <span className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-x-3 gap-y-0.5">
+                  <span
+                    className={`max-w-full min-w-0 grow truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
+                  >
+                    {item.label}
+                  </span>
+                  <span className="shrink-0 rounded border border-border px-1.5 text-xs leading-5 text-muted">
+                    {siteName(item.value.slice(0, item.value.indexOf("/")))}
+                  </span>
                 </span>
                 <span className="w-14 shrink-0 text-right text-xs text-muted tabular-nums">
                   {item.count !== undefined ? count(item.count) : ""}
