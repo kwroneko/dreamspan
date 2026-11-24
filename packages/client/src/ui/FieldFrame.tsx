@@ -59,7 +59,9 @@ export function FieldFrame({
           }
         >
           {status && (
-            <span className="mr-auto flex min-w-0 items-center gap-2 pl-1 text-xs whitespace-nowrap text-muted">
+            // One row as tall as the "edited" badge: a part with no room left beside the controls
+            // wraps out of sight instead of running under them.
+            <span className="mr-auto flex h-5 min-w-0 flex-wrap content-start items-center gap-x-2 overflow-hidden pr-0.5 pl-1 text-xs whitespace-nowrap text-muted">
               {status}
             </span>
           )}
