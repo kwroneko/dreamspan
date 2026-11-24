@@ -164,6 +164,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             model: usable,
             reply: built,
             settings,
+            configuredStyle: state.lcm?.style ?? defaults.lcm?.style,
             chatId
           })
         )
@@ -347,7 +348,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             reason: "invalid_document",
             message: "Summary style selection is unavailable."
           })
-        const style = selector.select(resolveLcm(state.lcm, defaults.lcm).style)
+        const style = selector.select(state.lcm.style ?? defaults.lcm?.style)
         const outputInstruction = instructions === undefined ? undefined : instructions[style]
         if (instructions !== undefined && (!Object.hasOwn(instructions, style) || outputInstruction === undefined))
           return yield* new AssemblyFailed({

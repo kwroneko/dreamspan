@@ -12,6 +12,7 @@ export interface SummaryInstruction {
 }
 export interface SummaryStyleSelector {
   readonly id: string
+  /** The chat's style or the account default. When both are unset, the selector supplies the fallback. */
   readonly select: (style: string | undefined) => string
 }
 export const defaultSummaryStyle: SummaryStyleSelector = { id: "settings", select: (style) => style ?? "direct" }
