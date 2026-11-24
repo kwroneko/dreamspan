@@ -746,6 +746,30 @@ function Outline({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * Calls `align` every frame for `ms`, so `target` stays put while what's above it finishes
+ * laying out; the user scrolling, pressing a key or touching the list stops it at once.
+ */
+function holdWhileSettling(scroll: HTMLElement, target: HTMLElement, align: () => void, ms = 1500) {
+  const until = performance.now() + ms
+  let stopped = false
+  let frame = 0
+  const stop = () => {
+    stopped = true
+    cancelAnimationFrame(frame)
+    for (const type of USER_SCROLL) scroll.removeEventListener(type, stop)
+  }
+  for (const type of USER_SCROLL) scroll.addEventListener(type, stop, { passive: true })
+  const tick = () => {
+    if (stopped) return
+    if (!target.isConnected || performance.now() > until) return stop()
+    align()
+    frame = requestAnimationFrame(tick)
+  }
+  frame = requestAnimationFrame(tick)
+}
+const USER_SCROLL = ["wheel", "touchstart", "pointerdown", "keydown"] as const
+
 export function PromptDocument({
   store,
   context,
@@ -849,8 +873,17 @@ export function PromptDocument({
       }
       const scroll = root.current?.closest<HTMLElement>("[data-preset-scroll]")
       if (scroll) {
-        const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
-        scroll.scrollTop += target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - margin
+        // The editors above it can still grow after this frame (a long prompt's text measuring
+        // as it mounts), which pushed the target down and left the view mid-way through the
+        // prompt below (owner, 2026-11-24): its header is held at the top until the layout
+        // settles, unless the user scrolls first.
+        const align = () => {
+          const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+          const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - margin
+          if (Math.abs(delta) >= 1) scroll.scrollTop += delta
+        }
+        align()
+        holdWhileSettling(scroll, target, align)
       } else target.scrollIntoView({ block: column ? "nearest" : "start" })
       if (landed) flashItem(target)
     })
