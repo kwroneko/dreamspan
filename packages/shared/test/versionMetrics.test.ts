@@ -83,13 +83,13 @@ describe("version metrics", () => {
   })
 
   it("lists the separate reasoning rates the costs used, each once", () => {
-    const priced = (reasoningRate?: number) =>
-      request({ cost: { ...usd(0.01), ...(reasoningRate === undefined ? {} : { reasoningRate }) }, reasoning: 5 })
+    const priced = (reasoningRate?: number, reasoning: number | null = 5) =>
+      request({ cost: { ...usd(0.01), ...(reasoningRate === undefined ? {} : { reasoningRate }) }, reasoning })
     expect(versionMetricsOf(id, [priced(2), priced(2), priced(3)]).reasoningRates).toEqual([
       { amount: 2, currency: "USD" },
       { amount: 3, currency: "USD" }
     ])
-    expect(versionMetricsOf(id, [priced()]).reasoningRates).toEqual([])
+    expect(versionMetricsOf(id, [priced(), priced(7, 0), priced(8, null)]).reasoningRates).toEqual([])
   })
 
   it("never adds up currencies, counts requests without a cost, and keeps unknown counts unknown", () => {
