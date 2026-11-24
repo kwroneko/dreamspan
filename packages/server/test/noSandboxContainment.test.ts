@@ -9,7 +9,7 @@ import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { makeNoSandbox, noSandbox } from "../src/sandbox/none.ts"
-import type { CgroupLimiter } from "../src/sandbox/cgroupLimits.ts"
+import { selectLimiter, type CgroupLimiter } from "../src/sandbox/cgroupLimits.ts"
 import type { CommandSandbox, RunSpec } from "../src/sandbox/registry.ts"
 import { CommandRefused } from "../src/sandbox/refused.ts"
 
@@ -126,6 +126,26 @@ it.live.skipIf(!linux)(
   "falls back to a PID namespace when a command's cgroup can't be opened",
   () => escapes(makeNoSandbox(makeRegistry([broken]))),
   60_000
+)
+
+it.live("shares an in-flight cgroup probe among callers", () =>
+  Effect.promise(async () => {
+    const gate = Promise.withResolvers<{ ok: true }>()
+    let probes = 0
+    const limiter: CgroupLimiter = {
+      ...broken,
+      available: () => {
+        probes++
+        return gate.promise
+      }
+    }
+    const registry = makeRegistry([limiter])
+    const first = selectLimiter(registry)
+    const second = selectLimiter(registry)
+    gate.resolve({ ok: true })
+    assert.deepStrictEqual(await Promise.all([first, second]), [limiter, limiter])
+    assert.strictEqual(probes, 1)
+  })
 )
 
 it.live.skipIf(!linux)("refuses a command that must be held when neither a cgroup nor a namespace can be had", () =>
