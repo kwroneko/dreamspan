@@ -380,7 +380,6 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "Installed source/API closure and worker stamp hash, confined checked-plugin artifacts in the data volume, and lstat-only fingerprints of confined plugin .git and build folders (symbolic links are never followed).",
     expressions: [
       "readdir(dir, { withFileTypes: true })",
-      "readdir(dir)",
       "readFile(file)",
       'readFile(join(root, "package-lock.json"))',
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
@@ -409,10 +408,10 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/repo.ts": {
     reason:
-      "Confined plugin repositories in the configured data volume; source/manifest size and symlink checks precede execution.",
+      "Confined plugin repositories and checked builds in the configured data volume. The bounded directory iterator lists entry names for Git metadata validation and build fingerprints. Source and manifest size and symlink checks precede execution.",
     expressions: [
       "readdir(dir, { withFileTypes: true })",
-      "readdir(dir)",
+      "opendir(dir)",
       "readFile(join(dir, entry.name))",
       "readdir(folder)",
       'readFile(file, "utf8")'
