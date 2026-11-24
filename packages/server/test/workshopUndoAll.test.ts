@@ -182,6 +182,32 @@ describe("undo all of a reply", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("undoing a cast join preserves an existing away mark", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const story = yield* api.CreateChat({ title: "Cast undo" })
+      const away = yield* api.CreateCard({ label: "Away", name: "Away" })
+      const added = yield* api.CreateCard({ label: "Added", name: "Added" })
+      const changeCast = (change: Parameters<typeof api.ChangeCast>[0]["change"]) =>
+        api.ChangeCast({ chatId: story.id, slotId: null, change })
+      yield* changeCast({ _tag: "Join", entityId: away.entityId })
+      yield* changeCast({ _tag: "Away", entityId: away.entityId, away: true })
+      const before = yield* api.GetCast({ chatId: story.id, slotId: null })
+      assert.deepStrictEqual(before.away, [away.entityId])
+      const result = yield* f.run(
+        "change_chat",
+        { chat: story.id, change: { _tag: "Join", entityId: added.entityId } },
+        "add-cast"
+      )
+      assert.isUndefined(result.isError, result.text)
+      const [effect] = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+      yield* api.UndoRolloutEffect(effect!)
+      assert.deepStrictEqual((yield* api.GetCast({ chatId: story.id, slotId: null })).away, before.away)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("undoes consecutive tool-selection changes including reset to the app default", () => {
     const config = testConfig()
     return Effect.gen(function* () {

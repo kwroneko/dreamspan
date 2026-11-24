@@ -216,6 +216,8 @@ export interface SnapshotInputs {
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
   readonly presence?: import("@dreamspan/shared/knowledge.ts").VersionPresence
+  /** The resolved context view, including when it reads the whole path without a viewer. */
+  readonly contextView?: string
   /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
   readonly viewer?: string
   /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */

@@ -36,6 +36,16 @@ export interface CacheKey {
   readonly id: string
 }
 
+export const draftBaseKey = (
+  user: string,
+  { sourceId, remoteId }: { sourceId: string; remoteId: string }
+): CacheKey => ({
+  user,
+  source: sourceId,
+  kind: "card",
+  id: remoteId
+})
+
 export interface CacheEntry {
   readonly key: CacheKey
   /** Small JSON values live in the entry itself; bytes in a blob. */
@@ -117,18 +127,26 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     await release(entry.blob)
   }
 
-  /** Entries the last `sweepKeeping` named (cards with unsaved edits): pinned until the next. */
-  let keeping: ReadonlySet<string> = new Set()
+  /** Active drafts from the last sweep, plus saves the sweep may not have seen yet. */
+  let keeping = new Set<string>()
+  const recentDrafts = new Map<string, number>()
+  let sequence = 0
+  let lastSweep = 0
+  const pinned = (k: string) => pins.has(k) || keeping.has(k) || recentDrafts.has(k)
 
   /** Expired unpinned entries go; then, past the cap, the least recently used, unpinned first. */
   const enforce = async () => {
     const t = now()
-    const pinned = (k: string) => pins.has(k) || keeping.has(k)
     for (const [k, entry] of [...index]) if (!pinned(k) && expired(entry, t)) await drop(k)
     if (usedBytes() <= cap()) return
-    const order = [...index].sort(([ka, a], [kb, b]) => Number(pinned(ka)) - Number(pinned(kb)) || a.used - b.used)
+    const order = [...index].sort(([, a], [, b]) => a.used - b.used)
     for (const [k] of order) {
-      if (usedBytes() <= cap()) break
+      if (usedBytes() <= cap()) return
+      if (!pinned(k)) await drop(k)
+    }
+    // Pinned entries still count toward the hard cap.
+    for (const [k] of order) {
+      if (usedBytes() <= cap()) return
       await drop(k)
     }
   }
@@ -157,7 +175,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
       const k = keyString(key)
       const entry = index.get(k)
       if (!entry) return null
-      if (expired(entry) && !pins.has(k) && !keeping.has(k)) {
+      if (expired(entry) && !pinned(k)) {
         await drop(k)
         return null
       }
@@ -224,6 +242,25 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     })
   }
 
+  /** Hold bases during a draft write, then keep those whose drafts became or stayed active. */
+  const withDraftBases = <A, E, R>(
+    keys: ReadonlyArray<CacheKey | undefined>,
+    save: Effect.Effect<A, E, R>,
+    active: (result: A, index: number) => boolean
+  ) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => keys.flatMap((key) => (key === undefined ? [] : [pin(key)]))),
+      () =>
+        Effect.tap(save, (result) =>
+          Effect.sync(() => {
+            keys.forEach((key, index) => {
+              if (key && active(result, index)) recentDrafts.set(keyString(key), ++sequence)
+            })
+          })
+        ),
+      (releases) => Effect.forEach(releases, (release) => release, { discard: true })
+    ).pipe(Effect.uninterruptible)
+
   const clearUser = (user: string, source: string | null) =>
     Effect.promise(async () => {
       for (const [k, entry] of [...index])
@@ -272,11 +309,16 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     await enforce()
   })
 
-  /** A sweep that keeps `keys` as if pinned, and keeps them so until the next such sweep. */
-  const sweepKeeping = (keys: ReadonlyArray<CacheKey>) =>
-    Effect.promise(() => {
+  /** Reconcile draft pins from the database, keeping saves made while the read was in flight. */
+  const sweepKeeping = <E, R>(read: Effect.Effect<ReadonlyArray<CacheKey>, E, R>) =>
+    Effect.gen(function* () {
+      const started = ++sequence
+      const keys = yield* read
+      if (started < lastSweep) return
+      lastSweep = started
       keeping = new Set(keys.map(keyString))
-      return enforce()
+      for (const [key, saved] of recentDrafts) if (saved < started) recentDrafts.delete(key)
+      yield* Effect.promise(enforce)
     })
 
   return {
@@ -288,6 +330,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     remove: (key: CacheKey) => Effect.promise(() => drop(keyString(key))),
     noteDerivative,
     pin,
+    withDraftBases,
     clearUser,
     scan,
     /** The index rebuilt as `scan` does, with no sweep: the caller sweeps, keeping what it must. */

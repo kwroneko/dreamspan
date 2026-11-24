@@ -39,52 +39,49 @@ function ApprovalDialog() {
   const call = useCaller()
   // What the server listed for which request: a new request shows nothing until its list arrives.
   const [loaded, setLoaded] = useState<{
-    readonly key: string
+    readonly request: NonNullable<typeof request>
     readonly hosts: ReadonlyArray<MediaApprovalHost> | null
     readonly error: AppError | null
   } | null>(null)
   const [choices, setChoices] = useState<Readonly<Record<string, MediaChoice>>>({})
   const [pending, setPending] = useState(false)
   const [applyError, setError] = useState<AppError | null>(null)
-  const refIds = request?.refIds ?? null
-  const key = request === null ? null : JSON.stringify(refIds)
-  const current = loaded !== null && loaded.key === key ? loaded : null
+  const current = loaded?.request === request ? loaded : null
   const hosts = current?.hosts ?? null
   const error = applyError ?? current?.error ?? null
 
   useEffect(() => {
-    if (key === null) return
+    if (request === null) return
+    const { refIds } = request
     let active = true
     void call((client) => client("ListMediaApproval", { refIds: refIds === null ? null : [...refIds] })).then(
       (result) => {
         if (!active) return
         // Nothing new to decide: no dialog at all.
         if (result.ok && result.value.length === 0) closeApproval()
-        else if (result.ok) setLoaded({ key, hosts: result.value, error: null })
-        else setLoaded({ key, hosts: null, error: result.error })
+        else if (result.ok) setLoaded({ request, hosts: result.value, error: null })
+        else setLoaded({ request, hosts: null, error: result.error })
       }
     )
     return () => {
       active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands for the request
-  }, [key, call])
+  }, [request, call])
 
   if (request === null || (hosts === null && error === null)) return null
   const close = () => {
     closeApproval()
     setChoices({})
   }
-  const decided = Object.entries(choices)
+  const decided = (hosts ?? []).flatMap(({ host, urls }) => {
+    const choice = choices[host]
+    return choice ? [{ host, choice, urls }] : []
+  })
   const apply = async () => {
     setPending(true)
     setError(null)
     const result = await call(
-      (client) =>
-        client("DecideMediaApproval", {
-          refIds: refIds === null ? null : [...refIds],
-          decisions: decided.map(([host, choice]) => ({ host, choice }))
-        }),
+      (client) => client("DecideMediaApproval", { decisions: decided }),
       ["mediaHosts", "savedMedia"]
     )
     setPending(false)

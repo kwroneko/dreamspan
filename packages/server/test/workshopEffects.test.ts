@@ -154,6 +154,9 @@ describe("workshop setup effects", () => {
         mode: "off"
       })
       assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
+      const fresh = { ...key, toolCallId: "consume-fresh" }
+      const freshRequest = { ...request, ...fresh, prompt: { ...prompt, toolCallId: fresh.toolCallId } }
+      assert.strictEqual(yield* outcome(f.writer.RequestToolApproval(freshRequest)), "ApprovalRefused")
       yield* f.writer.SetWorkshopGrant({
         userId: f.user.id,
         chatId: f.chat.id,
@@ -161,8 +164,7 @@ describe("workshop setup effects", () => {
         mode: "ask"
       })
       assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
-      const fresh = { ...key, toolCallId: "consume-fresh" }
-      yield* f.writer.RequestToolApproval({ ...request, ...fresh, prompt: { ...prompt, toolCallId: fresh.toolCallId } })
+      yield* f.writer.RequestToolApproval(freshRequest)
       yield* f.writer.AnswerToolApproval({ ...fresh, digest: "digest", answer: "allow", note: null })
       assert.isTrue(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))
       assert.isFalse(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))

@@ -18,7 +18,7 @@ import { PluginId, PluginPins, PluginData, PluginRejected } from "@dreamspan/sha
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@dreamspan/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
-  MediaChoice,
+  MediaApprovalDecision,
   MediaHost,
   MediaHosts,
   MediaKind,
@@ -820,6 +820,8 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("RecordSavedMediaResult", {
     payload: {
       id: Schema.Int,
+      ownerUserId: UserId,
+      url: Schema.String,
       at: Schema.Int,
       saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
       failure: Schema.NullOr(Schema.String)
@@ -836,8 +838,7 @@ const SavedMediaWriteOps = RpcGroup.make(
   Rpc.make("DecideMediaApproval", {
     payload: {
       userId: UserId,
-      refIds: Schema.NullOr(Schema.Array(RefId)),
-      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      decisions: Schema.Array(MediaApprovalDecision),
       at: Schema.Int
     },
     success: MediaHosts,
@@ -1730,7 +1731,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       expectedRowVersion: Schema.Int,
       threads: ThreadStarts
     },
-    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat, continuingChoice: Schema.NullOr(ComposerChoice) }),
     error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
   }),
   /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */
