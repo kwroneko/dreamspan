@@ -67,7 +67,15 @@ import {
   queuedPreviews,
   type ChatSurfaceProps
 } from "./presentation.tsx"
-import { adoptImages, dropImage, keepImage, readImages, type ImageDraftEntry } from "./imageDraft.ts"
+import {
+  adoptImages,
+  adoptImagesWhere,
+  dropImage,
+  isGroupCopyOf,
+  keepImage,
+  readImages,
+  type ImageDraftEntry
+} from "./imageDraft.ts"
 import { draftEntryOf } from "./chatStarted.ts"
 import { pendingChatCopy } from "../editor/backup.ts"
 import { pendingAttachments, PendingAttachmentsContext, type PendingAttachments } from "./pendingComposerControls.tsx"
@@ -756,9 +764,12 @@ function ImageScope({
   }
 
   const loading = attacher === "loading"
+  // A group's new chat adopts what its old page kept by its characters: its cast first.
+  const waitsForCast =
+    view.chat?.status === "pending" && draftEntryOf(session.chatId)?.startsWith("group:") === true && !view.cast
   useEffect(() => {
     // Uploads replay where they belong: wait until it's known whether files go to Files.
-    if (resolvedDraftId === null || loading) return
+    if (resolvedDraftId === null || loading || waitsForCast) return
     let live = true
     void enqueue(async () => {
       try {
@@ -766,6 +777,12 @@ function ImageScope({
         // pending-chat key, before new chats were pending chats) is this chat's now.
         const entry = view.chat?.status === "pending" ? draftEntryOf(session.chatId) : null
         if (entry?.startsWith("card:")) await adoptImages(`${user}:pending:${pendingChatCopy(entry.slice(5))}`, scope)
+        // The empty chat's page kept its own under "new"; a group's under its characters and
+        // name (`pending-group-chat:<sorted ids>:<name>`): those of this chat's characters.
+        if (entry === "empty") await adoptImages(`${user}:pending:${pendingChatCopy("new")}`, scope)
+        const cast = new Set<string>(view.cast?.participants ?? [])
+        if (entry?.startsWith("group:") && cast.size > 0)
+          await adoptImagesWhere((from) => isGroupCopyOf(`${user}:pending:`, from, cast), scope)
         const stored = await readImages(scope)
         draftId.current = resolvedDraftId
         const remote = await session.call((client) =>
@@ -803,7 +820,7 @@ function ImageScope({
     }
     // The keyed provider owns one fork; opening it replays its durable upload queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedDraftId, loading])
+  }, [resolvedDraftId, loading, waitsForCast])
   /** Attaches files from this device, or (`paths`) files already in Files. */
   const add = (picked: File[], paths: ReadonlyArray<string> = []) => {
     if (!ready) {
