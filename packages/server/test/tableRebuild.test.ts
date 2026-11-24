@@ -394,6 +394,23 @@ describe("table rebuilds", () => {
     }).pipe(Effect.provide(layer()))
   )
 
+  it.effect("keeps an unrelated view's insert-only trigger with a single-quoted name", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* migrate(
+        withSteps([
+          "CREATE TABLE spare (id INTEGER PRIMARY KEY)",
+          "CREATE TABLE notes (body TEXT)",
+          "CREATE VIEW editable AS SELECT body FROM notes",
+          "CREATE TRIGGER 'keep edit' INSTEAD OF INSERT ON editable BEGIN INSERT INTO notes VALUES (NEW.body); END",
+          { table: "spare", create: "CREATE TABLE spare (id INTEGER PRIMARY KEY, label TEXT)" }
+        ])
+      )
+      yield* sql`INSERT INTO editable VALUES ('made it')`
+      assert.deepStrictEqual(yield* sql`SELECT body FROM notes`, [{ body: "made it" }])
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("refuse a rebuild that names what the table doesn't have", () =>
     Effect.gen(function* () {
       yield* migrate(migrationDefinitions)
