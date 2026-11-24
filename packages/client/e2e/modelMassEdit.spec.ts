@@ -203,6 +203,84 @@ test("copy settings from a model fills and ticks its fields; an unticked one isn
   }
 })
 
+// Review of 15a906b99 (3): two tabs on one bulk edit, one a step behind. An untick in one and a
+// tick in the other both stand, and Save uses both.
+test("an untick in one tab and a tick in another, a step behind, both stand", async ({ page }) => {
+  test.setTimeout(120_000)
+  const id = await connectionWithModels()
+  const before = await listed(id)
+  const other = await page.context().newPage()
+  // The other tab's draft saves wait until released: it types on the start it saw.
+  let hold = false
+  const held: Array<() => void> = []
+  await other.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
+      if (hold && request?.tag === "SaveUserDraft") held.push(() => upstream.send(data))
+      else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  // This tab's draft saves, as the server answers them.
+  const asked = new Set<string>()
+  let answered = 0
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+      if (request?.tag === "SaveUserDraft" && request.id) asked.add(request.id)
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      const reply = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+      if (reply?._tag === "Exit" && reply.requestId && asked.has(reply.requestId)) answered++
+      socket.send(data)
+    })
+  })
+  const dialogs = []
+  for (const tab of [page, other]) {
+    await open(tab, id)
+    await filter(tab).fill("claude-0")
+    await headerTick(tab).click()
+    await tab.getByRole("button", { name: "Edit 100…", exact: true }).click()
+    dialogs.push(tab.getByRole("dialog", { name: "Edit 100 models", exact: true }))
+  }
+  const [mine, theirs] = dialogs as [ReturnType<Page["getByRole"]>, ReturnType<Page["getByRole"]>]
+  // The start both tabs share: Temperature and Top P ticked.
+  await mine.getByRole("textbox", { name: "Temperature", exact: true }).fill("0.55")
+  await mine.getByRole("textbox", { name: "Top P", exact: true }).fill("0.8")
+  await expect(tick(other, "Top P")).toBeChecked()
+  await expect(theirs.getByRole("textbox", { name: "Top P", exact: true })).toHaveValue("0.8")
+  hold = true
+  // The other tab ticks Reasoning, its save held; this one unticks Temperature, saved.
+  await tick(other, "Reasoning").click()
+  await expect.poll(() => held.length).toBeGreaterThan(0)
+  const answeredBefore = answered
+  await tick(page, "Temperature").click()
+  await expect(tick(page, "Temperature")).not.toBeChecked()
+  await expect.poll(() => answered).toBeGreaterThan(answeredBefore)
+  hold = false
+  for (const send of held.splice(0)) send()
+  // Both stand, in both tabs.
+  for (const tab of [page, other]) {
+    await expect(tick(tab, "Reasoning")).toBeChecked()
+    await expect(tick(tab, "Temperature")).not.toBeChecked()
+    await expect(tick(tab, "Top P")).toBeChecked()
+  }
+  await mine.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByText("100 models changed")).toBeVisible()
+  const after = await listed(id)
+  for (const [key, model] of after) {
+    if (!key.startsWith("synthetic/claude-0")) continue
+    expect(model.overrides.settings?.samplers?.top_p).toBe(0.8)
+    expect(model.overrides.settings?.samplers?.temperature).toBe(
+      before.get(key)!.overrides.settings?.samplers?.temperature
+    )
+  }
+  await other.close()
+})
+
 for (const [width, height] of [
   [1440, 900],
   [390, 844]
