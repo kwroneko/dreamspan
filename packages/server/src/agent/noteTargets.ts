@@ -4,32 +4,33 @@
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { NOTE_SCHEMA_VERSION, type ReplaceTarget, readReplaceTarget, targetCard } from "@dreamspan/shared/docs/note.ts"
 import type { Doc } from "@dreamspan/shared/library.ts"
+import { type FoldableEvent, swappedCard } from "@dreamspan/shared/state.ts"
 import type { Writer } from "../db/Database.ts"
 import type { NoteView } from "./tools/notes.ts"
 
 type NoteWrite = NonNullable<Parameters<Writer["Service"]["ApplyRolloutEffect"]>[0]["notes"]>[number]
 
-const sameTarget = (a: ReplaceTarget, owner: string | null, b: ReplaceTarget) =>
+const sameTarget = (a: ReplaceTarget, owner: string | null, b: ReplaceTarget, events: ReadonlyArray<FoldableEvent>) =>
   a.kind === "preset_prompt"
     ? b.kind === "preset_prompt" && a.identifier === b.identifier
-    : b.kind === "card_field" && a.field === b.field && targetCard(a, owner) === targetCard(b, null)
+    : b.kind === "card_field" &&
+      a.field === b.field &&
+      swappedCard(events, targetCard(a, owner)) === targetCard(b, null)
 
 /**
  * The note at the position that replaces `target`, if any: an on one first (the assembler's
  * choice), else one that's off, which an edit turns back on rather than adding a second.
  */
-export const replacing = (notes: ReadonlyArray<NoteView>, target: ReplaceTarget) => {
+export const replacing = (
+  notes: ReadonlyArray<NoteView>,
+  target: ReplaceTarget,
+  events: ReadonlyArray<FoldableEvent>
+) => {
   const candidates = notes.filter((n) => {
     const replaces = readReplaceTarget(n.doc["replaces"])
-    return replaces !== null && sameTarget(replaces, n.card, target)
+    return replaces !== null && sameTarget(replaces, n.card, target, events)
   })
   return candidates.find((n) => n.active) ?? candidates[0] ?? null
-}
-
-/** The target's current text at the position: its on replacing note's, else its own. */
-export const currentText = (notes: ReadonlyArray<NoteView>, target: ReplaceTarget, own: string) => {
-  const note = replacing(notes, target)
-  return note?.active ? note.content : own
 }
 
 /**
@@ -37,12 +38,11 @@ export const currentText = (notes: ReadonlyArray<NoteView>, target: ReplaceTarge
  * in its place, or a revision of the one replacing it (turned on if it was off).
  */
 export const replaceEffects = (
-  notes: ReadonlyArray<NoteView>,
+  note: NoteView | null,
   target: ReplaceTarget,
   text: string,
   title: string
 ): { readonly notes: ReadonlyArray<NoteWrite>; readonly activate: ReadonlyArray<EntityId> } => {
-  const note = replacing(notes, target)
   if (note === null)
     return {
       notes: [

@@ -9,7 +9,7 @@ import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { NOTE_SCHEMA_VERSION, REPLACEABLE_CARD_FIELDS, type ReplaceableCardField } from "@dreamspan/shared/docs/note.ts"
 import { permissionKey } from "@dreamspan/shared/state.ts"
 import { Effect } from "effect"
-import { currentText, replaceEffects, replacing } from "../noteTargets.ts"
+import { replaceEffects, replacing } from "../noteTargets.ts"
 import type { RolloutTool } from "../tools.ts"
 import { safely } from "./history.ts"
 import { castMember, noteRefusal, notesAt, replaceOnce } from "./notes.ts"
@@ -57,7 +57,7 @@ export const editCard: RolloutTool<{
     safely(
       "edit_card",
       Effect.gen(function* () {
-        const { notes, state } = yield* notesAt(context)
+        const { notes, state, events } = yield* notesAt(context)
         const member = yield* castMember(context, state, args.character)
         if (!member.ok) return member.error
         const place = member.card.entityId as EntityId
@@ -80,11 +80,11 @@ export const editCard: RolloutTool<{
           state.agentPermissions[permissionKey({ card: place, field })!] ?? card.editableFields.includes(field)
         if (!allowed) return { text: `You may not change ${member.name}'s ${label}.`, isError: true }
         const target = { kind: "card_field", field, card: place } as const
-        const owner = replacing(notes, target)
+        const owner = replacing(notes, target, events)
         if (owner && !owner.editable)
           return { text: `A note you may not change replaces ${member.name}'s ${label}.`, isError: true }
         if (owner?.linked) return { text: noteRefusal(owner)!, isError: true }
-        const current = currentText(notes, target, card.fields[field] ?? "")
+        const current = owner?.active ? owner.content : (card.fields[field] ?? "")
         const tailTitle = `${member.name}'s current ${label}`
         const tail = notes.find((n) => n.card === null && n.title === tailTitle) ?? null
         const wrapped = (args.wrap ?? DEFAULT_WRAP)
@@ -97,7 +97,7 @@ export const editCard: RolloutTool<{
           const refused = tail && args.replace.trim() ? noteRefusal(tail) : null
           if (refused) return { text: refused, isError: true }
           const inPlace = replaceEffects(
-            notes,
+            owner,
             target,
             fromField.text.replace(/\n{3,}/g, "\n\n").trim(),
             `${member.name}'s ${label}`
