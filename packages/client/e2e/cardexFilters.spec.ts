@@ -48,6 +48,24 @@ test("the NSFW controls show the account rating in a fresh tab", async ({ page }
   }
 })
 
+test("the cover checkbox follows an explicit setting in a saved search", async ({ page }) => {
+  const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: "0" })
+  try {
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const url = new URL("/?show=src.cardex", server.url)
+    url.searchParams.set("sf", JSON.stringify({ has_cover: "true" }))
+    await page.goto(url.href)
+    const cover = page.getByRole("main").getByRole("checkbox", { name: "Only cards with a cover", exact: true })
+    await expect(cover).toBeChecked()
+    await cover.click()
+    await expect(cover).not.toBeChecked()
+    await expect.poll(() => new URL(page.url()).searchParams.get("sf")).toBe('{"has_cover":"false"}')
+  } finally {
+    await server.stop()
+  }
+})
+
 for (const width of [1440, 390])
   test(`${width}: the archive's filter bar applies, clears and round-trips the URL`, async ({ page }, info) => {
     test.setTimeout(240_000)

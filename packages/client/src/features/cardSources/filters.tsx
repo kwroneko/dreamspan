@@ -1272,10 +1272,11 @@ function Switches({
         const hidden = browse.caps?.hiddenByDefault?.find((d) => d.filterId === filter.id && d.toggle)
         if (hidden) {
           if (moot(hidden, filters)) return null
+          const value = filters[filter.id]
           return (
             <Checkbox
               key={filter.id}
-              checked={active.includes(hidden)}
+              checked={value === undefined ? active.includes(hidden) : value === true || value === "true"}
               labelHelp={
                 <AboutHint heading={hidden.toggle!} info>
                   {filter.about ?? hidden.about}
