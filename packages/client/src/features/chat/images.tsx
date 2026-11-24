@@ -12,7 +12,7 @@ import {
   type ReactNode
 } from "react"
 import { positionOf } from "./position.ts"
-import { type ChatId, imagesOnly, type MessageImages, type PathEntry } from "@dreamspan/shared/chat.ts"
+import { imagesOnly, type MessageImages, type PathEntry } from "@dreamspan/shared/chat.ts"
 import type { ImagesLeftOut } from "@dreamspan/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
@@ -756,9 +756,23 @@ function ImageScope({
   }
 
   const loading = attacher === "loading"
+  // A group's new chat: the old page's key for the group it was made from, once its cast is read.
+  const groupEntry = view.chat?.status === "pending" && (draftEntryOf(session.chatId)?.startsWith("group:") ?? false)
+  const [groupKey, setGroupKey] = useState<string | null>(null)
+  // Taken once, as the chat is first read: a rename or cast change later doesn't change it.
+  if (groupEntry && groupKey === null && view.chat !== null && view.cast !== null) {
+    const playing = new Set<string>(view.cast.playedByMe)
+    setGroupKey(
+      legacyGroupScope(`${user}:pending:`, {
+        name: view.chat.title,
+        members: view.cast.participants.filter((entity) => !playing.has(entity))
+      })
+    )
+  }
+  const waitsForGroup = groupEntry && groupKey === null
   useEffect(() => {
     // Uploads replay where they belong: wait until it's known whether files go to Files.
-    if (resolvedDraftId === null || loading) return
+    if (resolvedDraftId === null || loading || waitsForGroup) return
     let live = true
     void enqueue(async () => {
       try {
@@ -767,19 +781,10 @@ function ImageScope({
         const entry = view.chat?.status === "pending" ? draftEntryOf(session.chatId) : null
         if (entry?.startsWith("card:")) await adoptImages(`${user}:pending:${pendingChatCopy(entry.slice(5))}`, scope)
         // The empty chat's page kept its own under "new"; a group's under the group's characters
-        // and name (`legacyGroupScope`), read from the group as it is: that key only.
+        // and name (`legacyGroupScope`): the group as this chat was made from it, its title and
+        // characters, never the group as it is now (renamed since in another tab: rev-dd2 #3).
         if (entry === "empty") await adoptImages(`${user}:pending:${pendingChatCopy("new")}`, scope)
-        if (entry?.startsWith("group:")) {
-          const group = await session.call((client) => client("ListGroupChats", { chatId: entry.slice(6) as ChatId }))
-          if (group.ok)
-            await adoptImages(
-              legacyGroupScope(`${user}:pending:`, {
-                name: group.value.group.name,
-                members: group.value.group.members.map((member) => member.entityId)
-              }),
-              scope
-            )
-        }
+        if (entry?.startsWith("group:") && groupKey !== null) await adoptImages(groupKey, scope)
         const stored = await readImages(scope)
         draftId.current = resolvedDraftId
         const remote = await session.call((client) =>
@@ -817,7 +822,7 @@ function ImageScope({
     }
     // The keyed provider owns one fork; opening it replays its durable upload queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedDraftId, loading])
+  }, [resolvedDraftId, loading, waitsForGroup])
   /** Attaches files from this device, or (`paths`) files already in Files. */
   const add = (picked: File[], paths: ReadonlyArray<string> = []) => {
     if (!ready) {

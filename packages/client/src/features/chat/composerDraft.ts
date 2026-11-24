@@ -25,6 +25,7 @@ import type { AppError } from "../../errors.ts"
 import {
   browserEnv,
   type Copy,
+  copiesOf,
   copiesOfUser,
   dropCopy,
   keepCopy,
@@ -87,7 +88,15 @@ interface Leftover {
   readonly content: string
   readonly save: ComposerSave
   readonly copy: Copy
+  /**
+   * The copies it replaced that may still be in this browser: until the transaction that puts
+   * `copy` is seen to have kept it (one that aborts keeps them), each later replacement or a
+   * clear deletes them too (rev-dd2 #5).
+   */
+  readonly superseded: Array<Copy>
 }
+/** A leftover's copy and those it may not have replaced yet. */
+const copiesOfLeftover = (left: Leftover) => [left.copy, ...left.superseded]
 /**
  * By chat, then by composer: two panes showing the same swept chat each keep their own text,
  * under a copy and an operation of its own, so neither replaces the other's.
@@ -112,7 +121,7 @@ export const fileLeftover = (chatId: string, save: (payload: ComposerSave) => Pr
   for (const left of takeLeftover(chatId))
     void save(left.save).then(
       (saved) => {
-        if (saved.ok) void dropCopy(left.copy)
+        if (saved.ok) for (const copy of copiesOfLeftover(left)) void dropCopy(copy)
       },
       () => {}
     )
@@ -384,11 +393,7 @@ export class ComposerDraft {
       // This box's own copy holds it now: the swept chat's copies go in the same transaction
       // that keeps it, so a failed one keeps them, and they're replayed as any other copy.
       const mine = this.pending
-      if (mine !== null)
-        void replaceCopies(
-          mine,
-          left.map((one) => one.copy)
-        )
+      if (mine !== null) void replaceCopies(mine, left.flatMap(copiesOfLeftover))
     }
     if (this.unsaved) this.schedule(0)
   }
@@ -445,8 +450,14 @@ export class ComposerDraft {
     const answered = before.some(
       (copy) => copy.refId.startsWith(COPIES) && copy.field === opened.id && !keys.has(copy.key)
     )
+    // What's carried into this box is its own: replayed to the swept chat too, it would be both
+    // here and in recovered texts (rev-dd2 #6). The box's copy takes their place.
+    const reserved = new Set((carried.get(this.chatId) ?? []).flatMap(copiesOfLeftover).map((copy) => copy.key))
     const copies = kept.filter(
-      (copy) => copy.refId.startsWith(COPIES) && (copy.field === opened.id || now - copy.at > STALE_COPY_MS)
+      (copy) =>
+        copy.refId.startsWith(COPIES) &&
+        !reserved.has(copy.key) &&
+        (copy.field === opened.id || now - copy.at > STALE_COPY_MS)
     )
     copies.sort((a, b) => {
       const first = pendingOf(a)
@@ -540,7 +551,7 @@ export class ComposerDraft {
     // text is this box's, kept from now on as the text typed after the sweep, or not at all.
     const stale = this.pending
     this.pending = null
-    const replaced = [previous?.copy, stale].filter((copy) => copy != null)
+    const replaced = [...(previous === null ? [] : copiesOfLeftover(previous)), stale].filter((copy) => copy != null)
     if (this.text.trim() === "" || this.text === this.filed) {
       mine.delete(this)
       if (mine.size === 0) leftovers.delete(this.chatId)
@@ -558,8 +569,12 @@ export class ComposerDraft {
     )
     const save = pendingOf(copy)
     if (save?.kind !== "composer") return
-    mine.set(this, { content: this.text, save: save.payload, copy })
-    void replaceCopies(copy, replaced)
+    const entry: Leftover = { content: this.text, save: save.payload, copy, superseded: replaced }
+    mine.set(this, entry)
+    void replaceCopies(copy, replaced).then(async () => {
+      // Kept: the copies it replaced went in the same transaction.
+      if ((await copiesOf(this.userId, copy.refId)).some((there) => there.key === copy.key)) entry.superseded.splice(0)
+    })
   }
 
   private cancelTimer() {
