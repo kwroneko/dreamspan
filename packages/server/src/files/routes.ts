@@ -77,8 +77,7 @@ const MAX_FILE_UPLOAD_BYTES = 4 * 1024 ** 3
 const UPLOAD_IDLE_MS = 30_000
 /**
  * Bytes of a refused upload's body still read (and dropped) before answering, so the browser
- * gets the answer rather than a reset connection. Past it the connection is dropped; the upload
- * screen checks the quota first (GetFilesUsage).
+ * gets the answer rather than a reset connection. Past it the connection is dropped.
  */
 const REFUSED_DRAIN_BYTES = 32 * 1024 * 1024
 /** Entries a listing returns at most. */

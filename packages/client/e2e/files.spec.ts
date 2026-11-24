@@ -257,7 +257,35 @@ test.describe("files", () => {
         await check("page-text", "main")
       })
 
-  // The storage line on the Files page, its details and Reset, and an upload that doesn't fit refused before it starts.
+  test("offers Replace when a file fits only with credit for the old file", async ({ page }) => {
+    const mib = 1024 ** 2
+    const password = "quota-replacement-password"
+    const handle = "replacement"
+    const account = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.CreateUser({ handle, displayName: "Replacement", role: "user", password })
+    )
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetFilesQuota({ userId: account.id, quotaBytes: 24 * mib })
+    )
+    await apiLogin(page.request, server(), handle, password)
+    const files = filesOf(page.request, server().url)
+    await files.put("/files/archive.bin", Buffer.alloc(20 * mib))
+    await page.goto(`${server().url}/files`)
+    const browser = page.locator("[data-files-browser]")
+    await expect(browser.locator("[data-files-usage]")).toHaveText(/^.+ of 24 MB used$/)
+    await browser.getByLabel("Files to upload").setInputFiles({
+      name: "archive.bin",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.alloc(8 * mib, 1)
+    })
+    const conflict = page.getByRole("dialog", { name: "A name is taken" })
+    await conflict.getByRole("button", { name: "Replace" }).click()
+    await expect
+      .poll(async () => (await files.list("/files")).entries.find((file) => file.name === "archive.bin")?.size)
+      .toBe(8 * mib)
+  })
+
+  // The storage line on the Files page, its details and Reset, and an upload that doesn't fit.
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
       test(`storage usage and a refused upload at ${width} ${theme}`, async ({ page }, info) => {
