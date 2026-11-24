@@ -7,7 +7,7 @@
 import { assert, describe, it } from "vitest"
 import { mkdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { locateFolder, pathAfterMoves } from "../src/files/workingFolder.ts"
+import { locateFolder } from "../src/files/workingFolder.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const tree = () => {
@@ -63,10 +63,23 @@ describe("locateFolder", () => {
       { from: "/files/thesis/drafts", to: "/files/paper/notes" },
       { from: "/files/paper", to: "/files/journal" }
     ]
-    assert.strictEqual(pathAfterMoves(stored.path, moves), "/files/journal/notes")
     assert.isNull(await locateFolder(root, stored))
     assert.strictEqual(await locateFolder(root, stored, moves), "/files/journal/notes")
     // A move that ends at a different folder (another inode) isn't followed.
     assert.isNull(await locateFolder(root, { ...stored, inode: ino("journal") }, moves))
+  })
+
+  it("follows the later move when the original path was reused", async () => {
+    const { root, ino } = tree()
+    mkdirSync(join(root, "A"))
+    renameSync(join(root, "A"), join(root, "B"))
+    mkdirSync(join(root, "A"))
+    const stored = { path: "/files/A", inode: ino("A") }
+    renameSync(join(root, "A"), join(root, "C"))
+    const moves = [
+      { from: "/files/A", to: "/files/B" },
+      { from: "/files/A", to: "/files/C" }
+    ]
+    assert.strictEqual(await locateFolder(root, stored, moves), "/files/C")
   })
 })
