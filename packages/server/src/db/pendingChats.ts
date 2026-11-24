@@ -6,10 +6,12 @@
 import type { ChatId } from "@dreamspan/shared/chat.ts"
 import { DraftKey } from "@dreamspan/shared/drafts.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import { NotFound } from "@dreamspan/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { chatCast, chatStateAt } from "./cards.ts"
+import { personaInStory } from "./workshopDefaults.ts"
 
 /**
  * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
@@ -83,6 +85,16 @@ export const commitPendingChat = (sql: SqlClient.SqlClient, chatId: string, at: 
   Effect.gen(function* () {
     const chat = yield* pendingRow(sql, chatId)
     if (chat === null) return false
+    // A workshop beside a story never starts as the story's persona or one of its cards, which
+    // the story may have taken since the persona was picked (rev-dfu1 #6): refused, the
+    // composer kept, so another persona can be picked and the message sent again.
+    if ((chat.draft_for ?? "").startsWith("side:")) {
+      const story = chat.draft_for!.split(":")[1]!
+      const state = yield* chatStateAt(sql, chat.id, chat.active_leaf_slot_id)
+      for (const persona of state.playedByMe)
+        if (yield* personaInStory(sql, chat.owner_user_id, story, persona))
+          return yield* new NotFound({ entity: "story-persona", id: persona })
+    }
     // A group's new chat keeps the group's name, a workshop its own ("Workshop", or the one given).
     const retitle =
       chat.title_source === "auto" &&
