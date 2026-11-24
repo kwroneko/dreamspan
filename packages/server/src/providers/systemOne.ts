@@ -10,6 +10,27 @@ import type { DecisionWire, ProviderKindEntry } from "./registry.ts"
 /** Cap on the response body read: a decision response is a few KB. */
 const MAX_RESPONSE_BYTES = 1_000_000
 
+const readBody = async (body: Response["body"]): Promise<string | null> => {
+  if (body === null) return ""
+  const reader = body.getReader()
+  const chunks: Array<Uint8Array> = []
+  let size = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return new TextDecoder().decode(Buffer.concat(chunks, size))
+      size += value.byteLength
+      if (size > MAX_RESPONSE_BYTES) {
+        void reader.cancel().catch(() => {})
+        return null
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 const notChat = (): never => {
   throw new Error("This connection answers decision questions only; choose another connection for replies.")
 }
@@ -31,10 +52,10 @@ const systemOneWire: DecisionWire = {
     })
     const retryAfter = response.headers.get("retry-after")
     const seconds = retryAfter === null ? Number.NaN : Number(retryAfter)
-    const text = await response.text()
+    const text = await readBody(response.body)
     let parsed: unknown = null
     try {
-      parsed = text.length > MAX_RESPONSE_BYTES ? null : (JSON.parse(text) as unknown)
+      if (text !== null) parsed = JSON.parse(text) as unknown
     } catch {
       parsed = null
     }
@@ -42,7 +63,7 @@ const systemOneWire: DecisionWire = {
       status: response.status,
       body: parsed,
       retryAfterMs: Number.isFinite(seconds) ? seconds * 1000 : null,
-      ...(response.ok ? {} : { detail: text.slice(0, 300) })
+      ...(response.ok ? {} : { detail: text?.slice(0, 300) ?? "Decision response exceeded the byte limit." })
     }
   }
 }
