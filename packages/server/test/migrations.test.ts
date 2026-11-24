@@ -182,7 +182,8 @@ describe("0002_files", () => {
           "change_reversals",
           "bin_reply_edits",
           "library_classes",
-          "composer_library_carries"
+          "composer_library_carries",
+          "composer_library_handovers"
         ]
       )
       // The existing row is kept, an image by default.
@@ -539,7 +540,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0025_change_reversals",
       "0026_bin_reply_edits",
       "0027_library_classes",
-      "0028_composer_library_carries"
+      "0028_composer_library_carries",
+      "0029_composer_library_handovers"
     ])
   }).pipe(Effect.provide(layer()))
 )

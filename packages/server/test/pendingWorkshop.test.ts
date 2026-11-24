@@ -178,6 +178,47 @@ describe("a new workshop's pending chat", () => {
     )
   )
 
+  it.live("a URL replay and a carry share the removal in their latest destination (rev-dd7 #1)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId, quill } = yield* setup
+        const book = yield* api.CreateLorebook({ label: "Piers" })
+        const removed = yield* api.CreateLorebook({ label: "Old piers" })
+        const open = (reopen?: Parameters<typeof api.OpenDraftChat>[0]["reopen"]) =>
+          Effect.gen(function* () {
+            const chat = yield* api.OpenDraftChat({ draftFor: `workshop:${quill}:`, ...(reopen ? { reopen } : {}) })
+            const composer = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+            return { chatId: chat.id, draftId: composer.id }
+          })
+        const first = yield* open()
+        const handover = { originChatId: first.chatId, operationId: "piers" }
+        const add = { add: [book.id, removed.id], remove: [], handover }
+        yield* api.SetComposerLibrary({ ...first, ...add })
+        yield* api.SetComposerLibrary({ ...first, add: [], remove: [removed.id] })
+        assert.deepStrictEqual(
+          (yield* api.SetComposerLibrary({ ...first, ...add })).map((item) => item.refId),
+          [book.id]
+        )
+
+        const writer = yield* Writer
+        yield* writer.SweepPendingChat({ userId, chatId: first.chatId })
+        const second = yield* open(first.chatId)
+        assert.deepStrictEqual(
+          (yield* api.SetComposerLibrary({ ...second, add: [book.id], remove: [], carriedFrom: first.chatId })).map(
+            (item) => item.refId
+          ),
+          [book.id]
+        )
+        yield* api.SetComposerLibrary({ ...second, add: [], remove: [book.id] })
+        assert.deepStrictEqual(yield* api.SetComposerLibrary({ ...second, ...add }), [])
+
+        yield* writer.SweepPendingChat({ userId, chatId: second.chatId })
+        const third = yield* open(second.chatId)
+        assert.deepStrictEqual(yield* api.SetComposerLibrary({ ...third, ...add }), [])
+      })
+    )
+  )
+
   it.live("ten new workshops opened and left make the seeds once, and nothing more in the library", () =>
     run(
       Effect.gen(function* () {

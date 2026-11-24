@@ -460,9 +460,9 @@ export const makeWriteHandlers = (bin: Bin) =>
             ...(path !== undefined ? { path } : {})
           })
           .pipe(transaction("SetComposerImage")),
-      SetComposerLibrary: ({ userId, chatId, draftId, add, remove, carriedFrom }) =>
+      SetComposerLibrary: ({ userId, chatId, draftId, add, remove, carriedFrom, handover }) =>
         composerLibrary(sql)
-          .set(userId, chatId, draftId, add, remove, carriedFrom)
+          .set(userId, chatId, draftId, add, remove, carriedFrom, handover)
           .pipe(transaction("SetComposerLibrary")),
       SetComposerChoice: ({
         userId,

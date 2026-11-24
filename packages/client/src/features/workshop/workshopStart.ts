@@ -5,7 +5,8 @@ export const WORKSHOP_CARD_KEY = "workshopCard"
 export const WORKSHOP_PERSONA_KEY = "workshopPersona"
 /**
  * Library items its first message carries ("Work on in a workshop" → A new workshop,
- * spec/WORKSHOP-CARDS.md §4.1 point 3): ref ids joined by commas.
+ * spec/WORKSHOP-CARDS.md §4.1 point 3): ref ids joined by commas. Once a draft opens,
+ * the page prefixes the original chat and operation ids.
  */
 export const WORKSHOP_ATTACH_KEY = "workshopAttach"
 export const NO_PERSONA = "none"
