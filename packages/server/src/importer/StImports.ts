@@ -31,7 +31,7 @@ import {
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { Context, Deferred, Effect, Exit, Layer, Schedule, Schema } from "effect"
+import { Context, Effect, Exit, Layer, Schedule, Schema, Semaphore } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
@@ -266,6 +266,7 @@ interface Session extends FolderContext {
   readonly importedAt: number
   settingsModifiedAt: number | null
   readonly id: string
+  readonly files: Semaphore.Semaphore
   touched: number
   readonly report: Report
   settings: StSettings | null
@@ -356,14 +357,19 @@ export class StImports extends Context.Service<
       importId: string,
       path: string,
       bytes: Uint8Array,
-      chat: ChatRequest
+      chat: ChatRequest,
+      onArrival?: (outcome: StFileResult | { readonly failed: string }) => Effect.Effect<void>
     ) => Effect.Effect<StFileResult, NotFound | StImportFailed>
     readonly unhidden: (user: User, chatId: ChatId) => void
     readonly exists: (user: User, importId: string) => boolean
     /** Ends the user's import if it's this one: its files are refused from now on. */
     readonly end: (user: User, importId: string) => void
-    /** Refuses later files and lets an already started new-chat write finish before Stop. */
-    readonly stopAfterChatWrite: (user: User, importId: string) => Effect.Effect<void>
+    /** Runs a job transition after the admitted file and its progress update have finished. */
+    readonly withFilesPaused: <A, E, R>(
+      user: User,
+      importId: string,
+      transition: Effect.Effect<A, E, R>
+    ) => Effect.Effect<A, E, R>
     /** Where the import found the library entry of an entity, by an earlier import's records too. */
     readonly sourcesOf: (user: User, importId: string, entityId: EntityId) => ReadonlyArray<string>
     /** The folder-file handlers by kind, for a plugin to register into, wrap or disable. */
@@ -381,25 +387,24 @@ export class StImports extends Context.Service<
       const { holding } = yield* MediaHolds
       const hub = yield* ChatHub
       const sessions = new Map<string, Session>()
-      const stopping = new Set<string>()
-      const chatWrites = new Map<string, Deferred.Deferred<void>>()
       const handlers = makeRegistry<StFolderHandler>()
 
       yield* removeOldStaging(config.dataDir)
 
-      const sessionOf = (user: User, importId: string, readingReport = false) => {
+      const sessionOf = (user: User, importId: string) => {
         const session = sessions.get(user.id)
-        if (
-          session === undefined ||
-          session.id !== importId ||
-          (stopping.has(importId) && !readingReport) ||
-          Date.now() - session.touched > IDLE_MS
-        ) {
+        if (session === undefined || session.id !== importId || Date.now() - session.touched > IDLE_MS) {
           return Effect.fail(new NotFound({ entity: "import", id: importId }))
         }
         session.touched = Date.now()
         return Effect.succeed(session)
       }
+
+      const withFilesPaused: StImports["Service"]["withFilesPaused"] = (user, importId, transition) =>
+        Effect.suspend(() => {
+          const session = sessions.get(user.id)
+          return session?.id === importId ? session.files.withPermit(transition) : transition
+        })
 
       const start = (user: User, unsupported: ReadonlyArray<string>, expect: StPlanExpect | undefined) =>
         Effect.gen(function* () {
@@ -407,6 +412,7 @@ export class StImports extends Context.Service<
           const session: Session = {
             userId: user.id,
             id: uuidv7(),
+            files: Semaphore.makeUnsafe(1),
             importedAt: Date.now(),
             arrivalRefs: new Map(),
             settingsModifiedAt: null,
@@ -1298,7 +1304,7 @@ export class StImports extends Context.Service<
       /**
        * A confirmed import's new chat, once its last part is in: all of it was held, so nothing
        * was written yet. New-file contents were not previewed. Its record and chat are claimed
-       * once, while the run goes on (a Stop before then writes nothing); then its batches go in a
+       * once, while the run has the lease; then its batches go in a
        * transaction each, as an import writes a new chat, so no one write holds the writer for
        * long; then its finish. Once started it goes on to the end, Stop or not. One that stops
        * part way (the run lost to a newer one, a card deleted meanwhile) stays marked unfinished,
@@ -1307,9 +1313,6 @@ export class StImports extends Context.Service<
       const commitNewChat = (session: Session, user: User, progress: ChatProgress) =>
         Effect.gen(function* () {
           const castJson = castOf(stateChangeOf(session, progress).events)
-          // Set before dispatching the claim: Stop can arrive while its reply is in flight.
-          // The chat handler releases this only after the file's report has been updated.
-          chatWrites.set(session.id, Deferred.makeUnsafe<void>())
           const target = yield* startChat(session, user, progress, true)
           const stopped = () =>
             Effect.sync(() => {
@@ -1831,14 +1834,7 @@ export class StImports extends Context.Service<
               // A chat left between parts is the only one kept; one that failed, or whose
               // request was interrupted, gives back what it held.
               Effect.onExit((exit) =>
-                Effect.gen(function* () {
-                  if (Exit.isFailure(exit) && session.chat?.path === path) yield* dropChat(session)
-                  const writing = chatWrites.get(session.id)
-                  if (writing !== undefined) {
-                    chatWrites.delete(session.id)
-                    yield* Deferred.succeed(writing, undefined)
-                  }
-                })
+                Exit.isFailure(exit) && session.chat?.path === path ? dropChat(session) : Effect.void
               ),
               Effect.catchTag("StImportFailed", (error) =>
                 error.reason === undefined ? Effect.fail(error) : Effect.succeed(result("failed", error.reason))
@@ -2072,28 +2068,33 @@ export class StImports extends Context.Service<
             )
           ),
         report: (user, importId) =>
-          Effect.map(sessionOf(user, importId, true), (session) => session.report.build(globalWorldIssues(session))),
-        file: (user, importId, path, bytes, request) =>
-          file(user, importId, path, bytes, request).pipe(
-            Effect.catch((error): Effect.Effect<never, NotFound | StImportFailed> =>
-              error instanceof NotFound
-                ? Effect.fail(error)
-                : Effect.logError("an ST import failed", error).pipe(Effect.andThen(Effect.fail(new StImportFailed())))
+          Effect.map(sessionOf(user, importId), (session) => session.report.build(globalWorldIssues(session))),
+        file: (user, importId, path, bytes, request, onArrival) =>
+          withFilesPaused(
+            user,
+            importId,
+            file(user, importId, path, bytes, request).pipe(
+              Effect.catch((error): Effect.Effect<never, NotFound | StImportFailed> =>
+                error instanceof NotFound
+                  ? Effect.fail(error)
+                  : Effect.logError("an ST import failed", error).pipe(
+                      Effect.andThen(Effect.fail(new StImportFailed()))
+                    )
+              ),
+              Effect.tap((answer) => onArrival?.(answer) ?? Effect.void),
+              Effect.tapError((error) =>
+                error._tag === "StImportFailed" && onArrival !== undefined
+                  ? onArrival({ failed: error.message })
+                  : Effect.void
+              )
             )
           ),
         unhidden: (user, chatId) => void sessions.get(user.id)?.report.hiddenRuns.delete(chatId),
         exists: (user, importId) => sessions.get(user.id)?.id === importId,
         end: (user, importId) => {
           if (sessions.get(user.id)?.id === importId) sessions.delete(user.id)
-          stopping.delete(importId)
         },
-        stopAfterChatWrite: (user, importId) =>
-          Effect.suspend(() => {
-            if (sessions.get(user.id)?.id !== importId) return Effect.void
-            stopping.add(importId)
-            const writing = chatWrites.get(importId)
-            return writing === undefined ? Effect.void : Deferred.await(writing)
-          }),
+        withFilesPaused,
         sourcesOf: (user, importId, entityId) => {
           const session = sessions.get(user.id)
           if (session?.id !== importId) return []

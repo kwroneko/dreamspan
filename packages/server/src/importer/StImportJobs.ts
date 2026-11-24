@@ -148,7 +148,7 @@ export class StImportJobs extends Context.Service<
       const lives = new Map<string, Live>()
       /** A path job's chats linked after its own run ended: the run that re-read the folder for them. */
       const helpers = new Map<string, string>()
-      // Starting, and linking (which starts a run), one at a time: each fences the run before it.
+      // Serialize job transitions that may replace, finish or remove the current upload.
       const starting = yield* Semaphore.make(1)
 
       /** Storage failing is the server's fault: logged, and said plainly. */
@@ -233,7 +233,7 @@ export class StImportJobs extends Context.Service<
           yield* write(live, { report: true, end: { status, error } })
           lives.delete(live.id)
           publish(live, status)
-        })
+        }).pipe(Effect.uninterruptible)
 
       const notSent = (live: Live, path: string, message: string) => {
         if (live.notSent.length < MAX_NOT_SENT) live.notSent.push(new StNotSent({ path, message }))
@@ -535,31 +535,54 @@ export class StImportJobs extends Context.Service<
         })
 
       const finishUpload = (user: User, importId: string, sent: ReadonlyArray<StNotSent>) =>
+        starting
+          .withPermit(
+            imports.withFilesPaused(
+              user,
+              importId,
+              Effect.gen(function* () {
+                const live = lives.get(importId)
+                if (live === undefined || live.user.id !== user.id) {
+                  // Already over (cancelled, or ended by another run): nothing to finish.
+                  yield* reader.GetStImportJob({ userId: user.id, id: importId })
+                  return
+                }
+                const known = new Set(live.notSent.map((entry) => entry.path))
+                for (const entry of sent) if (!known.has(entry.path)) notSent(live, entry.path, entry.message)
+                live.filesDone = live.filesTotal
+                live.bytesDone = live.bytesTotal
+                yield* end(live, "complete", null)
+              })
+            )
+          )
+          .pipe(stored("Finishing the import"))
+
+      const stopUpload = (live: Live, status: "cancelled" | "interrupted", error: string | null) =>
         Effect.gen(function* () {
-          const live = lives.get(importId)
-          if (live === undefined || live.user.id !== user.id) {
-            // Already over (cancelled, or ended by another run): nothing to finish.
-            yield* reader.GetStImportJob({ userId: user.id, id: importId })
-            return
-          }
-          const known = new Set(live.notSent.map((entry) => entry.path))
-          for (const entry of sent) if (!known.has(entry.path)) notSent(live, entry.path, entry.message)
-          live.filesDone = live.filesTotal
-          live.bytesDone = live.bytesTotal
-          yield* end(live, "complete", null)
-        }).pipe(stored("Finishing the import"))
+          yield* end(live, status, error)
+          imports.end(live.user, live.id)
+        }).pipe(Effect.uninterruptible)
 
       // An upload whose files stopped arriving is over: its tab was closed, or it lost the server.
       const sweep = Effect.gen(function* () {
         const now = Date.now()
         for (const live of [...lives.values()]) {
           if (live.mode !== "upload" || now - live.lastActivity < UPLOAD_IDLE_MS) continue
-          yield* end(
-            live,
-            "interrupted",
-            "Its files stopped arriving for 10 minutes: the tab sending them was closed or lost the server. Import the folder again to go on."
+          yield* starting.withPermit(
+            imports.withFilesPaused(
+              live.user,
+              live.id,
+              Effect.suspend(() =>
+                live.ended || Date.now() - live.lastActivity < UPLOAD_IDLE_MS
+                  ? Effect.void
+                  : stopUpload(
+                      live,
+                      "interrupted",
+                      "Its files stopped arriving for 10 minutes: the tab sending them was closed or lost the server. Import the folder again to go on."
+                    )
+              )
+            )
           )
-          imports.end(live.user, live.id)
         }
       })
       yield* Effect.forkIn(Effect.repeat(sweep, Schedule.spaced(SWEEP_MS)), scope)
@@ -581,22 +604,22 @@ export class StImportJobs extends Context.Service<
         }).pipe(stored("Reading the import"))
 
       const cancel = (user: User, importId: string) =>
-        Effect.gen(function* () {
-          const live = lives.get(importId)
-          if (live === undefined || live.user.id !== user.id) {
-            // A finished import has nothing to stop.
-            yield* reader.GetStImportJob({ userId: user.id, id: importId })
-            return
-          }
-          live.cancelled = true
-          // An upload stops now: the files still on their way are refused. A path import
-          // stops after the file it's on.
-          if (live.mode === "upload") {
-            yield* imports.stopAfterChatWrite(user, importId)
-            yield* end(live, "cancelled", null)
-            imports.end(user, importId)
-          }
-        }).pipe(stored("Cancelling the import"))
+        starting
+          .withPermit(
+            Effect.gen(function* () {
+              const live = lives.get(importId)
+              if (live === undefined || live.user.id !== user.id) {
+                // A finished import has nothing to stop.
+                yield* reader.GetStImportJob({ userId: user.id, id: importId })
+                return
+              }
+              live.cancelled = true
+              // A path import stops after the file it's on.
+              if (live.mode === "upload")
+                yield* imports.withFilesPaused(user, importId, stopUpload(live, "cancelled", null))
+            })
+          )
+          .pipe(stored("Cancelling the import"))
 
       /** A run that knows the folder again, for linking a chat of an import whose run is gone. */
       const rebuild = (user: User, root: string, card: EntityId | "none") =>

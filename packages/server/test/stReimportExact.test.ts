@@ -896,11 +896,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const imports = yield* StImports
       const entered = Deferred.makeUnsafe<void>()
       const release = Deferred.makeUnsafe<void>()
-      const cancelEntered = Deferred.makeUnsafe<void>()
-      const stop = imports.stopAfterChatWrite
-      const stopHook = vi
-        .spyOn(imports, "stopAfterChatWrite")
-        .mockImplementation((...args) => Effect.andThen(Deferred.succeed(cancelEntered, undefined), stop(...args)))
+      const stopHook = vi.spyOn(imports, "withFilesPaused")
       const original = writer.StImportCommitBatch
       let first = true
       const hook = vi.spyOn(writer, "StImportCommitBatch").mockImplementation((input) =>
@@ -922,7 +918,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )!
       assert.isDefined(chat)
       const cancelling = yield* Effect.forkScoped(api.CancelStImport({ importId }))
-      yield* Deferred.await(cancelEntered)
+      yield* Effect.promise(() =>
+        vi.waitFor(() => assert.isTrue(stopHook.mock.calls.some(([, id]) => id === importId)))
+      )
       yield* Deferred.succeed(release, undefined)
       const answer = yield* Fiber.join(sending)
       yield* Fiber.join(cancelling)

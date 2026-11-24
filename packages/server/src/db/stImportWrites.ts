@@ -1115,8 +1115,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
 
     StImportStartChat: (input) =>
       Effect.gen(function* () {
-        // A confirmed import starts a new chat only while its run goes on: a Stop before then
-        // leaves nothing. Once started, the chat's batches go in whatever comes.
+        // A confirmed import claims a new chat while its run has the lease.
         if (input.once === true) yield* stagingCurrent(input.userId, input.lease, input.source)
         return yield* startChat(input, input.once === true)
       }).pipe(
