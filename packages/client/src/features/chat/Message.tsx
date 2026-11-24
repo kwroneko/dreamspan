@@ -38,6 +38,7 @@ import {
   useSyncExternalStore
 } from "react"
 import type { AppError } from "../../errors.ts"
+import { useEditorFocus } from "../../textActions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -555,6 +556,10 @@ const onControl = (target: EventTarget | null) =>
 
 /** A double-click this close to its first press is on the spot pressed. */
 const SAME_SPOT_PX = 8
+const inEditFocusScope = (article: HTMLElement, node: Node | null) =>
+  node instanceof Element &&
+  article.contains(node) &&
+  node.closest("[data-message-edit-text], [data-message-edit-controls]") !== null
 
 /** Where an edit of `source` opens for a double-click on `spot` (ui/editCaret.ts); null where unknown. */
 const locateSpot = (spot: CaretSpot | null, source: string): EditCaret | null => spot && locateEditCaret(spot, source)
@@ -664,6 +669,7 @@ export const Message = memo(function Message({
   // A fresh one per edit, so an edit never starts with the last one's selection.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const selection = useMemo(() => editSelection(), [inPlace])
+  const editFocus = useEditorFocus(inEditFocusScope)
   // Edits and versions the user writes keep the message's speaker; older ones may have none,
   // and then another version's names it, or the first version's, deleted or not, so deleting
   // the original never makes a character's message the model's.
@@ -910,6 +916,7 @@ export const Message = memo(function Message({
                 onScrollIntoView()
               }}
               selection={selection}
+              selectionScopeFocused={editFocus.focused}
             />
           )
         : null
@@ -1027,6 +1034,8 @@ export const Message = memo(function Message({
 
   return (
     <article
+      onFocus={inPlace ? editFocus.onFocus : undefined}
+      onBlur={inPlace ? editFocus.onBlur : undefined}
       onFocusCapture={(event) => {
         if (
           density === "compact" &&

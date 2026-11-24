@@ -309,15 +309,17 @@ const trackPresses = () => {
  * the press ends and its click has landed: the bar going away moves what's below it, which would
  * otherwise move the button out from under the pointer before the click.
  */
-export const useEditorFocus = () => {
+export const useEditorFocus = (contains = (wrapper: HTMLElement, node: Node | null) => wrapper.contains(node)) => {
   const [focused, setFocused] = useState(false)
   trackPresses()
   return {
     focused,
-    onFocus: () => setFocused(true),
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (contains(event.currentTarget, event.target)) setFocused(true)
+    },
     onBlur: (event: FocusEvent<HTMLElement>) => {
       const next = event.relatedTarget as Node | null
-      if (event.currentTarget.contains(next) || inActionMenu(next)) return
+      if (contains(event.currentTarget, next) || inActionMenu(next)) return
       if (!pressed) return setFocused(false)
       const wrapper = event.currentTarget
       const release = () => {
@@ -325,7 +327,7 @@ export const useEditorFocus = () => {
         document.removeEventListener("pointercancel", release, true)
         // After the click the release makes, unless focus came back meanwhile.
         setTimeout(
-          () => !wrapper.contains(document.activeElement) && !inActionMenu(document.activeElement) && setFocused(false)
+          () => !contains(wrapper, document.activeElement) && !inActionMenu(document.activeElement) && setFocused(false)
         )
       }
       document.addEventListener("pointerup", release, true)

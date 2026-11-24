@@ -25,7 +25,8 @@ export default function CodeEditorView({ ref, ...props }: CodeEditorProps) {
   // A host placing the selection's actions itself (`bare`) hears the same: the selection while
   // the box has focus, none once it's left for another box, which keeps it unseen.
   const reportSelection = props.onSelectionChange
-  useEffect(() => reportSelection?.(selection), [reportSelection, selection])
+  const reported = (props.selectionScopeFocused ?? focused) ? selected : ""
+  useEffect(() => reportSelection?.(reported), [reportSelection, reported])
   const [reverting, setReverting] = useState(false)
   // A corner grip sets the box's height, as a textarea's corner does; a box filling its place
   // (`fill`, a field's own tab) takes that place's height instead.
