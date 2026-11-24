@@ -19,6 +19,7 @@ import { deletedSince } from "@dreamspan/shared/drafts.ts"
 import type { ForkId } from "@dreamspan/shared/chat.ts"
 import type { SendResult } from "@dreamspan/shared/chatApi.ts"
 import { Draft, type DraftState } from "@dreamspan/shared/drafts.ts"
+import type { ComposerBeacon } from "@dreamspan/shared/composerApi.ts"
 import type { ReplayConflict } from "../editor/backup.ts"
 import type { AppError } from "../../errors.ts"
 import {
@@ -71,6 +72,30 @@ export type Sent =
 const COPIES = "composer:"
 const copyTarget = (chatId: string) => `${COPIES}${chatId}`
 /** The draft's text as the box would show it: an ended draft holds none. */
+type ComposerSave = typeof ComposerBeacon.Type
+
+/**
+ * Text typed into a composer after its chat was swept (its saving stopped), by that chat, with
+ * the save the server filed last: carried into the fresh chat the tab opens in its place
+ * (`carryLeftover`), or filed to the recovered texts once as the tab leaves (`takeLeftover`).
+ */
+const leftovers = new Map<string, { readonly content: string; readonly save: ComposerSave }>()
+/** Text carried into a fresh chat's composer, by that chat: its box starts with it. */
+const carried = new Map<string, string>()
+
+/** The text typed after `chatId` was swept, taken: none when nothing was typed since. */
+export const takeLeftover = (chatId: string) => {
+  const left = leftovers.get(chatId) ?? null
+  leftovers.delete(chatId)
+  return left
+}
+
+/** The tab opened `to` in place of the swept `from`: what was typed after the sweep goes there. */
+export const carryLeftover = (from: string, to: string) => {
+  const left = takeLeftover(from)
+  if (left !== null) carried.set(to, left.content)
+}
+
 const shown = (draft: Draft | null) => (draft?.status === "active" ? draft.content : "")
 const forkOf = (draft: Draft) => (draft.key.field === "" ? null : (draft.key.field as ForkId))
 
@@ -86,6 +111,10 @@ export class ComposerDraft {
   private error: AppError | null = null
   /** A send is on its way: the box holds the next message, saved once the send is answered. */
   private held = false
+  /** Its chat was swept: the save the server filed last, and nothing is saved from here on. */
+  private stopped: ComposerSave | null = null
+  /** The text that save filed. */
+  private filed = ""
   /** The pending save of the send on its way, and whether the server has it. */
   private sending: { saved: boolean; readonly copy: Copy | null } | null = null
   /** This tab's copy of the box's text not sent to the server yet, for `base`. */
@@ -319,6 +348,17 @@ export class ComposerDraft {
     this.conflict = conflict
     this.ready = true
     this.emit()
+    // Opened in place of a swept chat: what was typed there after the sweep starts this box.
+    const left = carried.get(this.chatId)
+    carried.delete(this.chatId)
+    if (left !== undefined)
+      this.type(
+        this.text === ""
+          ? left
+          : `${this.text}
+
+${left}`
+      )
     if (this.unsaved) this.schedule(0)
   }
 
@@ -446,10 +486,23 @@ export class ComposerDraft {
   // --- Typing and saving
 
   type(text: string) {
+    if (this.stopped !== null) {
+      this.text = text
+      this.remember()
+      this.emit()
+      return
+    }
     this.text = text
     this.keep(text)
     this.emit()
     this.schedule(SAVE_DELAY_MS)
+  }
+
+  /** What's in the box past what the sweep filed, kept for the tab's fresh chat. */
+  private remember() {
+    if (this.stopped === null) return
+    if (this.text.trim() === "" || this.text === this.filed) leftovers.delete(this.chatId)
+    else leftovers.set(this.chatId, { content: this.text, save: this.stopped })
   }
 
   private cancelTimer() {
@@ -522,8 +575,12 @@ export class ComposerDraft {
     if (!saved.value.accepted && saved.value.draft === null) {
       // Its chat is gone (a pending chat swept meanwhile): the server filed the text to the
       // recovered texts and there's no draft to save on. Nothing more is saved here; the page
-      // opens a fresh chat in its place.
+      // opens a fresh chat in its place, and what's typed from now on goes with it.
+      const save = pendingOf(copy)
+      if (save?.kind === "composer") this.stopped = save.payload
+      this.filed = sent
       this.base = null
+      this.remember()
       this.emit()
       return
     }
