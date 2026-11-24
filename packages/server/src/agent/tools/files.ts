@@ -1174,6 +1174,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
     wrap: (capability, run) => wrap(capability, (ctx, args, env) => run(ctx, args, env as never)),
     create: (ctx, env, path, name, content) =>
       Effect.gen(function* () {
+        // Library consent may have paused the export after the initial Files check.
+        yield* proof(ctx, "files")
         const account = env as AccountEnv
         const cwd = yield* currentDir(ctx, account)
         const roots = yield* rootsOf(account, ctx)
