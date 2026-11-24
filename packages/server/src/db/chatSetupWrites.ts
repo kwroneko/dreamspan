@@ -516,7 +516,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         yield* graph.checkImages(userId, images ?? [], chatId)
         const libraryPins = kind === "message" ? yield* pinLibrary(sql, userId, chatId, library ?? []) : []
         yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
-        if (kind === "message") yield* composerLibrary(sql).consume(commitDraft?.draftId, library ?? [])
+        if (kind === "message")
+          yield* composerLibrary(sql).consume(userId, chatId, draftForkId, commitDraft?.draftId, library ?? [])
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
         if (parentSlotId !== null) {
