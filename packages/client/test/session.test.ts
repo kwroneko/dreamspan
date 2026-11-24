@@ -126,6 +126,19 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
   })
 
 describe("ChatSession", () => {
+  it("does not rename the physical chat when the split lookup fails", async () => {
+    const { s, registry } = session()
+    const error = { tag: "ServerError", message: "Split lookup failed", problems: [], reason: null } as const
+    const call = vi.spyOn(s, "call").mockResolvedValueOnce({ ok: false, error })
+    try {
+      expect(await s.rename("A different split title")).toEqual({ ok: false, error })
+      expect(call).toHaveBeenCalledOnce()
+    } finally {
+      s.dispose()
+      registry.dispose()
+    }
+  })
+
   it("Stop during a reply hook sends no Generate request", async () => {
     const { replyHooks } = await import("../src/features/chat/replyHooks.ts")
     let release!: () => void
