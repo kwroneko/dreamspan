@@ -396,4 +396,60 @@ describe("a new workshop's pending chat", () => {
       })
     )
   )
+
+  it.live("a side workshop's first send refuses a persona its story swapped in meanwhile (rev-dd3 #4)", () =>
+    run(
+      Effect.gen(function* () {
+        const { api, userId } = yield* setup
+        const made = yield* (yield* Writer).CreateEntity({
+          userId,
+          kind: "card",
+          label: "Ink",
+          subtitle: "",
+          doc: cardDoc("Ink", { first_mes: "Ink dries on the page." }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        const quill = made.entityId as EntityId
+        // Wren is a variant of the story's card, so the story can swap to it.
+        const variant = yield* api.ForkCard({ refId: made.ref.id, name: "Wren", nickname: "", characterVersion: "" })
+        const wren = variant.entityId
+        const story = yield* api.StartChat({
+          cards: [quill],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Quill writes by the window.", speakerEntityId: null },
+          title: "Window"
+        })
+        const draft = yield* api.OpenDraftChat({ draftFor: `side:${story.chat.id}:` })
+        // Wren isn't in the story yet: the workshop may play Wren.
+        yield* api.ChangeCast({
+          chatId: draft.id,
+          slotId: null,
+          forkId: draft.currentForkId!,
+          pending: true,
+          change: { _tag: "Persona", entityId: wren as EntityId }
+        })
+        // Another tab swaps Quill for Wren in the story.
+        const storyChat = yield* api.GetChat({ chatId: story.chat.id })
+        yield* api.ChangeCast({
+          chatId: story.chat.id,
+          slotId: storyChat.activeLeafSlotId,
+          forkId: storyChat.currentForkId!,
+          change: { _tag: "Swap", entityId: wren as EntityId, replaces: quill }
+        })
+        const refused = yield* api
+          .SendMessage({
+            chatId: draft.id,
+            parentSlotId: (yield* api.GetChat({ chatId: draft.id })).activeLeafSlotId!,
+            branch: false,
+            content: "Help me with the window scene."
+          })
+          .pipe(Effect.flip)
+        assert.deepInclude(refused, { _tag: "NotFound", entity: "story-persona" })
+        assert.strictEqual((yield* api.GetChat({ chatId: draft.id })).status, "pending")
+      })
+    )
+  )
 })

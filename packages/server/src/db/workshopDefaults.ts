@@ -45,12 +45,12 @@ export const workshopDefaultsOf = (sql: SqlClient.SqlClient, userId: UserId) =>
     } satisfies WorkshopDefaults
   })
 
-/** Whether a persona is the account's story persona, or a card cast, played or speaking in `story`. */
+/** Whether a persona is the account's story persona, or a card cast (joined or swapped in), played or speaking in `story`. */
 export const personaInStory = (sql: SqlClient.SqlClient, userId: UserId, story: string, persona: string) =>
   Effect.gen(function* () {
     if ((yield* readDefaults(sql, userId)).persona === persona) return true
     const [hit] = yield* sql<{ n: number }>`SELECT 1 AS n FROM state_events
-      WHERE chat_id = ${story} AND key IN ('participant.join', 'played_by_me.set')
+      WHERE chat_id = ${story} AND key IN ('participant.join', 'played_by_me.set', 'card.swap')
         AND (value_json ->> '$.entity' = ${persona}
           OR EXISTS (SELECT 1 FROM json_each(value_json, '$.entities') WHERE value = ${persona}))
       UNION ALL SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
