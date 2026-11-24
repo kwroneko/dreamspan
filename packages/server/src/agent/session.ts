@@ -490,8 +490,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // Under the send tool alone, text is never the reply, so it's never carried on (Resume
       // writes the turn again with its tools, api/agent.ts): this only guards that.
       let continuation = plan.contract === "send_message" ? undefined : run.resume?.continuation
-      /** What this turn streamed into the body: any output, and text in particular. */
-      const body = { text: false, prose: false }
+      /** Whether this turn streamed any output into the body. */
+      const body = { text: false }
       let partialSavedAt = Date.now()
       const streamFn: StreamFn = (piModel, transcript, options) => {
         const events = createAssistantMessageEventStream()
@@ -547,7 +547,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Text streams into the body as it comes; a tool call in the same turn makes it an
         // intermediate step, and the body starts over (DESIGN §7.2: not the message).
         body.text = false
-        body.prose = false
+        let prose = false
         let called = false
         let done: AssistantMessage | undefined
         let rawArguments: Readonly<Record<string, string>> | undefined
@@ -596,7 +596,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     const sending = sends && (event.name === SEND_MESSAGE || event.name === NO_REPLY) && !last
                     // Thinking before the message is the message's reasoning; text before any
                     // call, or thinking before another tool, was a step.
-                    if (!called && (sending ? body.prose : body.text)) emit({ restart: true })
+                    if (!called && body.text && (!sending || prose)) emit({ restart: true })
                     called = true
                     // Kept on a turn cut off after it, so a resume resamples rather than continues it.
                     partial = {
@@ -648,9 +648,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     if (Result.isFailure(decoded) || called) return
                     // Under the send tool alone, a turn's text isn't the reply: it shows in Steps
                     // once the turn ends (spec/REPLY-CONTRACT.md §3.2). The cap's answer is.
-                    if (sendOnly && !last && typeof decoded.success === "string") return
+                    if (typeof decoded.success === "string") {
+                      if (decoded.success.trim()) prose = true
+                      if (sendOnly && !last) return
+                    }
                     body.text = true
-                    if (typeof decoded.success === "string") body.prose = true
                     emit(decoded.success)
                   }
                 })
@@ -1674,7 +1676,6 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             yield* Effect.promise(() => flush())
           } else emit({ restart: true })
           body.text = false
-          body.prose = false
         }
         // Waiting, with no request open: the working message says for how many.
         while (!mailbox.hasMail && mailbox.waitingFor > 0) {

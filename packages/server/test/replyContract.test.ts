@@ -22,7 +22,17 @@ import { anthropicSse, completionChunks, json, type Recorded, sse, startMockProv
 
 const NUDGE = sendNudgeText(true)
 
-const toolCall = (name: string, args: unknown, text = "", id = "call_1") => [
+const toolCall = (name: string, args: unknown, text = "", id = "call_1", reasoning = "") => [
+  ...(reasoning
+    ? [
+        {
+          id: "cmpl-t",
+          object: "chat.completion.chunk",
+          model: "served-model",
+          choices: [{ index: 0, delta: { role: "assistant", reasoning_content: reasoning }, finish_reason: null }]
+        }
+      ]
+    : []),
   {
     id: "cmpl-t",
     object: "chat.completion.chunk",
@@ -112,6 +122,34 @@ const resume = (api: Effect.Success<ReturnType<typeof client>>, versionId: Versi
     const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
     return yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
   })
+
+it.live("keeps reasoning with progress in Steps and reasoning before a bare send in the reply", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const reasoning = "Consider the keeper."
+    const progress = "Let me check."
+    const mock = yield* scriptedMock((n, _body, res) =>
+      sse(res, toolCall("send_message", { message: "Ansel waves." }, n === 0 ? progress : "  ", "send", reasoning))
+    )
+    const api = yield* client()
+    const generate = () =>
+      generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+    const withProgress = (yield* generate()).version
+    assert.strictEqual(withProgress.content, "Ansel waves.")
+    assert.isNotOk(withProgress.reasoning)
+    assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: withProgress.id }), [
+      { kind: "thinking", text: reasoning },
+      { kind: "text", text: progress }
+    ])
+    const bare = (yield* generate()).version
+    assert.strictEqual(bare.reasoning, reasoning)
+    assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: bare.id }), [])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
 
 describe("reply contract", () => {
   it.live("by default a reply is sent with send_message: text before the send is a step, never the body", () => {
