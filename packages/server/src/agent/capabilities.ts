@@ -59,7 +59,7 @@ export interface StandingGrants {
  * How a library class stands in one workshop: the most specific choice wins (§2.5). The
  * workshop's own, else the assistant card's Allow always, else the account's, else the default.
  */
-export const classStanding = (
+const classStanding = (
   registries: CapabilityRegistries,
   grants: ReadonlyMap<string, CapabilityMode>,
   standing: StandingGrants,
