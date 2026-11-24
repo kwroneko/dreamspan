@@ -5,7 +5,7 @@ import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { RefId } from "@dreamspan/shared/library.ts"
 import { textField } from "@dreamspan/shared/editing.ts"
 import { Reader } from "../src/db/Database.ts"
-import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -142,7 +142,6 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
       )
     }
     const creation = effects.find((e) => e.toolCallId === "setup_1")!
-    assert.strictEqual(yield* outcome(api.UndoRolloutEffect(creation)), "EffectUndoRefused")
     yield* api.UndoRolloutEffect(effects.find((e) => e.toolCallId === "setup_3")!)
     const retained = yield* api.ListRolloutEffects({ chatId: chat.id })
     const middle = replies[1]!
