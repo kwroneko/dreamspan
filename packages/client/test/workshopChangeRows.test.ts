@@ -235,5 +235,8 @@ describe("reverted state (spec/WORKSHOP-CARDS.md §8.1)", () => {
     expect(unitOfPath(["description"])).toBe(D)
     expect(unitOfPath(["entries", "uid=3", "content"])).toBe(JSON.stringify(["entries", "uid=3"]))
     expect(unitOfPath(["extensions", "depth"])).toBe(JSON.stringify(["extensions"]))
+    const skills = JSON.stringify(["extensions", "dreamspan", "skills"])
+    expect(unitOfPath(["extensions", "dreamspan"], [skills])).toBe(skills)
+    expect(unitOfPath(["extensions", "dreamspan", "skills"], [skills])).toBe(skills)
   })
 })

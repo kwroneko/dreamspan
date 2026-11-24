@@ -5,6 +5,7 @@
 // state is derived: `undone_at` stays one-shot Undo's. A card file's revert runs on the files host
 // (it's on disk) and records here through `RecordFileReversal`.
 import {
+  CARD_SKILLS_UNIT,
   changedUnits,
   docOfUnits,
   matchesReversalHead,
@@ -14,6 +15,7 @@ import {
   type ReversalPatch,
   revertedFields,
   type ReversalPlan,
+  unitKey,
   valuesOfUnits
 } from "@dreamspan/shared/changeReversal.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
@@ -413,8 +415,12 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
             const original = yield* revisionDoc(ref.entity_id, effect.undo!.before)
             const changed = yield* revisionDoc(ref.entity_id, effect.undo!.head)
             const of = changedUnits(original, changed)
+            const reverted = effect.reversion?.fields ?? []
             const fields = of.filter(
-              (unit) => !effect.reversion?.fields.includes(unit) && (!options.fields || options.fields.includes(unit))
+              (unit) =>
+                !reverted.includes(unit) &&
+                !(unit === CARD_SKILLS_UNIT && reverted.includes(unitKey(["extensions"]))) &&
+                (!options.fields || options.fields.includes(unit))
             )
             patches.push({ original, changed, fields })
             covered.push({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq, of, fields })

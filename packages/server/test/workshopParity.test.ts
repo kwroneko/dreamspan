@@ -4,6 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId, VersionId } from "@dreamspan/shared/chat.ts"
 import { CARD_SKILL_LIMITS } from "@dreamspan/shared/cardSkills.ts"
+import { unitKey } from "@dreamspan/shared/changeReversal.ts"
 import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
@@ -167,6 +168,77 @@ describe("notes and files tools", () => {
       const revert = yield* f.api.RevertChange({ effects: [effect] })
       assert.isEmpty(revert.conflicts)
       assert.deepStrictEqual((yield* open()).doc.extensions, { ...added, other: { later: true } })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("reverts a first skill without reverting later extension edits", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const original = { plugin: { enabled: true } }
+      const card = (yield* f.writer.CreateEntity({
+        userId: f.user.id,
+        kind: "card",
+        label: "First skill card",
+        subtitle: "",
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null,
+        doc: { ...newCardDoc("First skill card"), extensions: original }
+      })).ref
+      const open = () => f.api.OpenEditor({ refId: card.id })
+      const skill = { use: "installed-skill" }
+      const args = { card: card.id, changes: [{ field: "skills", action: "add", skill }] }
+      const skillUnit = unitKey(["extensions", "dreamspan", "skills"])
+      yield* f.ok("edit_card", args, "add-then-undo")
+      yield* f.undo("add-then-undo")
+      assert.deepStrictEqual((yield* open()).doc.extensions, original)
+
+      yield* f.ok("edit_card", args, "first-skill")
+      const effect = (yield* f.effects()).find((e) => e.toolCallId === "first-skill")!
+
+      const later = { plugin: { enabled: false }, dreamspan: { marker: "later" } }
+      const laterWithSkill = { ...later, dreamspan: { ...later.dreamspan, skills: [skill] } }
+      const saveExtensions = (extensions: object) =>
+        Effect.gen(function* () {
+          const saved = yield* open()
+          yield* f.writer.EditRef({
+            userId: f.user.id,
+            refId: card.id,
+            expectedRowVersion: saved.ref.rowVersion,
+            doc: { ...saved.doc, extensions },
+            commitDraft: null,
+            message: "Edit extensions"
+          })
+        })
+      yield* saveExtensions(laterWithSkill)
+      assert.strictEqual(yield* outcome(f.api.UndoRolloutEffect(effect)), "EffectUndoRefused")
+      const second = yield* f.api.RevertChange({ effects: [effect] })
+      assert.isEmpty(second.conflicts)
+      assert.deepStrictEqual((yield* open()).doc.extensions, later)
+      yield* f.api.RedoChange({ reversalId: second.reversalId! })
+      assert.deepStrictEqual((yield* open()).doc.extensions, laterWithSkill)
+
+      yield* saveExtensions({ ...later, dreamspan: { ...later.dreamspan, skills: [{ use: "replacement" }] } })
+      const conflict = yield* f.api.RevertChange({ effects: [effect] })
+      assert.deepStrictEqual(
+        conflict.conflicts.map(({ field }) => field),
+        [skillUnit]
+      )
+      const resolved = yield* f.api.RevertChange({
+        effects: [effect],
+        expectedHead: conflict.head,
+        choices: { [skillUnit]: "before" }
+      })
+      assert.isEmpty(resolved.conflicts)
+      assert.deepStrictEqual((yield* open()).doc.extensions, later)
+
+      yield* saveExtensions(original)
+      yield* f.ok("edit_card", args, "add-then-revert")
+      const latest = (yield* f.effects()).find((e) => e.toolCallId === "add-then-revert")!
+      const first = yield* f.api.RevertChange({ effects: [latest], fields: [skillUnit] })
+      assert.isString(first.reversalId)
+      assert.deepStrictEqual((yield* open()).doc.extensions, original)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

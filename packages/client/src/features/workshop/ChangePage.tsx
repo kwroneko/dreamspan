@@ -5,7 +5,7 @@
 // "Compared with now" sets the turn's result beside the item as it is. A revert that conflicts
 // (or `resolve=1` in the URL) shows the conflicting fields as they are now and as they were before
 // the change, with Keep now / Take before for each, then Revert the rest.
-import { unitPath } from "@dreamspan/shared/changeReversal.ts"
+import { CARD_SKILLS_UNIT, changedUnits, unitKey, unitPath } from "@dreamspan/shared/changeReversal.ts"
 import type { Doc, EntityKind, RefId } from "@dreamspan/shared/library.ts"
 import type { ReversalOutcome } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -55,10 +55,12 @@ const link =
 /** The tab's title: "Mara Quill · changes". */
 export const changeTabName = (name: string) => (name ? `${name} · changes` : "Changes")
 
+const EXTENSIONS_UNIT = unitKey(["extensions"])
+
 /** A field's Revert this field, or once reverted, "Reverted" and Redo (spec/WORKSHOP-CARDS.md §7.4). */
 function FieldAction({
   item,
-  unit,
+  unit: comparisonUnit,
   onConflicts
 }: {
   item: ItemChange
@@ -67,7 +69,10 @@ function FieldAction({
 }) {
   const action = useAction()
   if (item.created || itemUndone(item)) return null
-  const reverted = revertedFieldsOf(item).has(unit)
+  const fields = revertedFieldsOf(item)
+  // Reverts written before skill changes got their own unit used the entire extensions field.
+  const unit = comparisonUnit === CARD_SKILLS_UNIT && fields.has(EXTENSIONS_UNIT) ? EXTENSIONS_UNIT : comparisonUnit
+  const reverted = fields.has(unit)
   const revert = async () => {
     const result = await action.run(
       (client) => client("RevertChange", { effects: liveKeys(item), fields: [unit], message: revertMessage(item) }),
@@ -144,10 +149,11 @@ function Comparisons({
 }) {
   if (changes.length === 0) return <p className="p-2 text-sm text-muted">No fields differ.</p>
   const shown = new Set<string>()
+  const units = actions && kind === "card" ? changedUnits(before, after) : undefined
   return (
     <div aria-label="What changed" className="flex min-w-0 flex-col gap-2">
       {changes.map((change) => {
-        const unit = unitOfPath(change.path)
+        const unit = unitOfPath(change.path, units)
         const first = !shown.has(unit)
         shown.add(unit)
         return (

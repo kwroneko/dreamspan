@@ -243,6 +243,8 @@ export interface RolloutTool<A = never> {
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
   readonly parameters: TSchema
+  /** Additional checks on the original arguments, before asking for approval or running the tool. */
+  readonly validateArguments?: (args: unknown) => string | undefined
   /**
    * A definition that depends on the chat where a new run starts (the `agent` tool's model list,
    * spec/SUBAGENTS.md §5.1): what this run offers in its place, frozen with the run like any

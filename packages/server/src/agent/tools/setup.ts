@@ -1,5 +1,5 @@
 import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
-import { cardSkillChange, changeCardSkill, type CardSkillChange } from "./cardSkillEdits.ts"
+import { cardSkillChange, changeCardSkill, validateCardSkillArguments, type CardSkillChange } from "./cardSkillEdits.ts"
 import { toolResultFrame } from "../toolData.ts"
 import { boundedArguments } from "../operations.ts"
 import { documentDiff, documentChangeRows, executableNotice, validateAgentDocument } from "../../db/agentDocuments.ts"
@@ -30,14 +30,19 @@ const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
             ? Effect.try({
                 try: () => {
                   if (!boundedArguments(args)) throw new Error("Arguments exceed the size limits.")
+                  const invalid = tool.validateArguments?.(args)
+                  if (invalid) throw new ToolInputRefused(invalid)
                   return validateToolArguments(
                     { name: tool.id, description: tool.description, parameters: tool.parameters },
                     { type: "toolCall", id: ctx.toolCallId, name: tool.id, arguments: args as ToolCall["arguments"] }
                   ) as A
                 },
-                catch: () => ({
-                  message: "Invalid tool arguments. Use only the listed fields and stay within their size limits."
-                })
+                catch: (error) =>
+                  error instanceof ToolInputRefused
+                    ? error
+                    : {
+                        message: "Invalid tool arguments. Use only the listed fields and stay within their size limits."
+                      }
               }).pipe(
                 Effect.flatMap((validated) => tool.execute(ctx, validated)),
                 Effect.map((out) =>
@@ -268,6 +273,7 @@ const editCard: RolloutTool<{
 }> = {
   source: import.meta.url,
   id: "edit_card",
+  validateArguments: validateCardSkillArguments,
   storyRead: "library",
   label: "Edited the card",
   titleField: "card",
