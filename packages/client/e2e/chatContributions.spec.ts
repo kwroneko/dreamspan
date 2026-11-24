@@ -77,6 +77,20 @@ const setup = async (page: Page, timeout = 30_000) => {
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout })
 }
 
+test("a synchronous message editor takes the rendered text's place when it commits", async ({ page }) => {
+  await setup(page)
+  await contribution(page, "install", "text-editor")
+  const message = page.getByRole("article", { name: "Your message", exact: true })
+  await showActions(message)
+  await message.getByRole("button", { name: "Edit", exact: true }).click()
+  const editor = message.getByRole("textbox", { name: "Message text", exact: true })
+  await expect(editor).toHaveValue("A synthetic message.")
+  await expect(message.locator("[data-reply-text]")).toBeHidden()
+  await expect(editor).toHaveCSS("pointer-events", "auto")
+  await editor.fill("Synthetic edit.")
+  await expect(editor).toHaveValue("Synthetic edit.")
+})
+
 test("scoped contributions update mounted panels, controls, commands and dialogs, then disappear", async ({ page }) => {
   await setup(page)
   await contribution(page, "install", "plugin")

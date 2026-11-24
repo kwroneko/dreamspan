@@ -38,6 +38,8 @@ export interface CodeEditorProps {
    * browser paints: a host showing it in place of other text swaps then, never showing neither.
    */
   onReady?: (() => void) | undefined
+  /** Let the host's Suspense boundary hold the previous content until the editor commits. */
+  suspend?: boolean | undefined
   /** The snippet editor's own text: its text actions don't offer sending it to a snippet. */
   source?: "snippet" | undefined
   /** False: no text actions under it, for text that isn't prose (a pattern, a template's markers). */
@@ -97,6 +99,7 @@ const Editor = lazy(() => import("./CodeEditorView.tsx"))
 
 /** The code editor is fetched only when a surface actually uses it. */
 export function CodeEditor(props: CodeEditorProps) {
+  if (props.suspend) return <Editor {...props} />
   return (
     <Suspense
       fallback={

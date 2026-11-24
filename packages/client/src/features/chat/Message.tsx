@@ -240,9 +240,10 @@ function VersionBody({
   // of the editor's code the first time: until then the box lies over it, unseen, and both
   // swap in the frame it's drawn, so the message never shows blank (owner, 2026-11-23).
   const [shown, setShown] = useState(false)
+  const showEditor = useCallback(() => setShown(true), [])
   const editing = !!edit?.text && held !== null
   if (!editing && shown) setShown(false)
-  const editText = edit?.text && held !== null ? edit.text(held.height, () => setShown(true)) : null
+  const editText = edit?.text && held !== null ? edit.text(held.height, showEditor) : null
   return (
     <div className="flex flex-col gap-2 compact:gap-1">
       {/* Its thinking panels stay as they are in an edit: the thinking is edited on its own (editThinking.tsx). */}

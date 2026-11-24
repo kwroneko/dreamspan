@@ -19,6 +19,7 @@ export function MessageTextEditor(props: CodeEditorProps) {
   // box's life, so it's never mounted again (its caret and undo with it) once the code arrives.
   const [Loaded] = useState(loadedMessageTextEditor)
   if (Loaded !== null) return <Loaded {...props} html={html} />
+  if (props.suspend) return <Surface {...props} html={html} />
   return (
     <Suspense
       fallback={
