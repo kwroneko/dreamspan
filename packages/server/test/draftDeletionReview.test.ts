@@ -425,6 +425,25 @@ it.live("a late swipe with an image isn't taken as saved, so its browser copy ke
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
+it.live("an empty reply whose swipe of one's own has an image saved stays, with that draft (rev-dd4b #2)", () =>
+  Effect.gen(function* () {
+    const { api, chat, running, empty } = yield* writing
+    const image = yield* uploadImage
+    const target = { _tag: "Write", slotId: running.slotId } as const
+    yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      expectedRowVersion: null,
+      expectedSession: null,
+      content: "",
+      images: [image]
+    })
+    yield* empty
+    const left = yield* api.MessageDrafts({ chatId: chat.id })
+    assert.include(JSON.stringify(left), image.mediaId)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
 it.live("a late save replayed after a newer one is filed once (rev-dd2 #7)", () =>
   Effect.gen(function* () {
     const { api, running, empty, recovered } = yield* writing
