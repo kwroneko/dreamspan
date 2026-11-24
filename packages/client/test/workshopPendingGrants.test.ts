@@ -7,7 +7,7 @@ vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
 })
 
-const { choosePending, chipText, grantKey, withPendingGrants } =
+const { choosePending, chipText, grantKey, offeredPendingGrants, withPendingGrants } =
   await import("../src/features/workshop/capabilities.ts")
 
 const row = (
@@ -53,6 +53,12 @@ describe("grants chosen before a workshop's first message", () => {
       { capability: "chats.read", mode: null },
       { capability: "mcp", mode: "allow", target: "conn-1" }
     ])
+  })
+
+  it("removes a choice when its server disappears and carries the remaining choices forward", () => {
+    const grants = choosePending(choosePending(new Map(), edit, "off"), server, "allow")
+    const refreshed = offeredPendingGrants(grants, [edit, { ...server, target: "conn-2" }])
+    expect([...refreshed.values()]).toEqual([{ capability: "cards.edit", mode: "off" }])
   })
 
   it("keeps the last choice per row, and tells a server's row from the capability's own", () => {
