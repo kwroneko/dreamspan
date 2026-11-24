@@ -10,6 +10,7 @@ import { pictureHref } from "./PicturePage.tsx"
 import type { Stack } from "../../ui/portraitStack.ts"
 import { castPortrait, type CastView } from "./cast.ts"
 import { attachmentOf } from "./attachmentPictures.ts"
+import { portraitSources } from "./portraitSources.ts"
 import { whenDragEnds } from "../../tabLayoutParams.ts"
 
 /** A share's bounds: a crafted URL can't make the stack's sum overflow or a viewer vanish. */
@@ -126,6 +127,9 @@ export function ChatPortraitProvider({
       current={(portrait) => gallery[portrait.id] ?? castPortrait(cast, portrait.id) ?? attachmentOf(portrait.id)}
       stack={portraits}
       onStackChange={change}
+      onSharedChange={
+        wide && tab ? (id, action) => portraitSources(tab.store).changeOtherViews(tab.tabId, id, action) : undefined
+      }
       tabHref={tab ? pictureHref : undefined}
     >
       {children}
