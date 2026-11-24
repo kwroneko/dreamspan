@@ -1019,7 +1019,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         yield* lib.loadDoc(ref.head_revision_id),
                         yield* lib.loadDoc(String(value.revisionId))
                       ),
-                      message: "Restored in the workshop",
+                      message:
+                        agentMessage(typeof value.message === "string" ? value.message : undefined) ??
+                        "Restored in the workshop",
                       commitDraft: null,
                       agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
                     })
