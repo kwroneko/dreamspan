@@ -153,57 +153,81 @@ export interface ReversalPlan {
   readonly kept: ReadonlyArray<string>
 }
 
-/**
- * Takes a change back on `now`: `changed` is the document after the change (A) and `original`
- * before it (B), both whole or holding only the fields named. `fields` limits it to those (all
- * the change's otherwise); `choices` settles conflicts. Redo is the same with a revert's after
- * as `changed` and its before as `original`.
- */
-export const planReversal = (input: {
+export interface ReversalPatch {
   readonly original: unknown
   readonly changed: unknown
-  readonly now: Record<string, unknown>
   readonly fields: ReadonlyArray<string>
-  readonly choices?: Readonly<Record<string, ConflictChoice>>
-}): ReversalPlan => {
-  let doc = input.now
-  const fields: Array<string> = []
-  const before: Record<string, unknown> = {}
-  const after: Record<string, unknown> = {}
-  const conflicts: Array<ReversalConflict> = []
-  const kept: Array<string> = []
-  for (const field of input.fields) {
-    const a = unitValue(input.changed, field)
-    const b = unitValue(input.original, field)
-    const h = unitValue(input.now, field)
-    const merged = merge3(a, h, b)
-    const choice = input.choices?.[field]
-    let value: unknown
-    if (merged.conflicts.length === 0) value = merged.value
-    else if (choice === "before") value = b
-    else if (choice === "now") {
-      kept.push(field)
-      continue
-    } else {
-      conflicts.push({
-        field,
-        ...(h === undefined ? {} : { now: h }),
-        ...(b === undefined ? {} : { before: b })
-      })
-      continue
-    }
-    fields.push(field)
-    if (h !== undefined) before[field] = h
-    if (value !== undefined) after[field] = value
-    const [top] = unitPath(field)
-    doc = withUnit(
-      doc,
-      field,
-      value,
-      top === undefined ? undefined : own(isObject(input.original) ? input.original : {}, top)
-    )
+}
+
+/** Applies one inverse patch using the same planner as a group of changes. */
+export const planReversal = (
+  input: ReversalPatch & {
+    readonly now: Record<string, unknown>
+    readonly choices?: Readonly<Record<string, ConflictChoice>>
   }
-  return { doc: conflicts.length > 0 ? null : doc, fields, before, after, conflicts, kept }
+): ReversalPlan => planGroupedReversal([input], input.now, input.choices)
+
+/** Apply the selected inverse patches newest first, on a tentative document. */
+export const planGroupedReversal = (
+  patches: ReadonlyArray<ReversalPatch>,
+  now: Record<string, unknown>,
+  choices?: Readonly<Record<string, ConflictChoice>>
+): ReversalPlan => {
+  let doc = now
+  const fields = new Set<string>()
+  const conflicts = new Set<string>()
+  const kept = new Set<string>()
+  for (const patch of patches) {
+    for (const field of patch.fields) {
+      if (kept.has(field)) continue
+      const a = unitValue(patch.changed, field)
+      const b = unitValue(patch.original, field)
+      const h = unitValue(doc, field)
+      const merged = merge3(a, h, b)
+      const choice = choices?.[field]
+      let value = merged.value
+      if (merged.conflicts.length > 0) {
+        if (choice === "before") value = b
+        else if (choice === "now") {
+          kept.add(field)
+          fields.delete(field)
+          doc = withUnit(doc, field, unitValue(now, field), own(now, unitPath(field)[0]!))
+          continue
+        } else {
+          // Compute the result of Take before for the preview without committing it.
+          conflicts.add(field)
+          value = b
+        }
+      }
+      fields.add(field)
+      const [top] = unitPath(field)
+      doc = withUnit(
+        doc,
+        field,
+        value,
+        top === undefined || !isObject(patch.original) ? undefined : own(patch.original, top)
+      )
+    }
+  }
+  const values = (source: Record<string, unknown>) =>
+    Object.fromEntries(
+      [...fields].flatMap((field) => {
+        const value = unitValue(source, field)
+        return value === undefined ? [] : [[field, value]]
+      })
+    )
+  return {
+    doc: conflicts.size > 0 ? null : doc,
+    fields: [...fields].filter((field) => !conflicts.has(field)),
+    before: values(now),
+    after: values(doc),
+    conflicts: [...conflicts].map((field) => {
+      const current = unitValue(now, field)
+      const before = unitValue(doc, field)
+      return { field, ...(current === undefined ? {} : { now: current }), ...(before === undefined ? {} : { before }) }
+    }),
+    kept: [...kept]
+  }
 }
 
 /**

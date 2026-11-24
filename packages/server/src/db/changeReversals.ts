@@ -8,7 +8,9 @@ import {
   changedUnits,
   docOfUnits,
   pickedUnits,
+  planGroupedReversal,
   planReversal,
+  type ReversalPatch,
   revertedFields,
   type ReversalPlan
 } from "@dreamspan/shared/changeReversal.ts"
@@ -317,36 +319,28 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           const first = rows[0]!
           if (rows.some((r) => r.kind !== "library.revise" || r.target_id !== first.target_id))
             return yield* refuse("Only edits of one library item are reverted together.")
-          const recipes = rows.map((r) => JSON.parse(r.undo_json ?? "{}") as Record<string, unknown>)
-          const refId = String(recipes[0]!.refId)
+          const effects = rows.map(toRolloutEffect)
+          const refId = String(effects[0]!.undo?.refId)
           const ref = yield* lib.ownedRef(userId, refId)
           if (ref.entity_id !== first.target_id) return yield* new NotFound({ entity: "ref", id: refId })
-          const original = yield* revisionDoc(ref.entity_id, recipes[0]!.before)
-          const changed = yield* revisionDoc(ref.entity_id, recipes.at(-1)!.head)
-          const now = yield* lib.loadDoc(ref.head_revision_id)
-          const units = changedUnits(original, changed)
-          const fields = options.fields ? units.filter((u) => options.fields!.includes(u)) : units
-          const plan = planReversal({
-            original,
-            changed,
-            now,
-            fields,
-            ...(options.choices ? { choices: options.choices } : {})
-          })
+          if (effects.some((effect) => effect.undo?.refId !== refId))
+            return yield* refuse("Only edits of one library ref are reverted together.")
+          // The ref version orders its writes even when two effect timestamps tie.
+          const ordered = effects.toSorted((a, b) => Number(a.undo!.rowVersion) - Number(b.undo!.rowVersion))
+          const standing = yield* withReversions(sql, ordered)
           const covered: Array<CoveredEffect> = []
-          for (const [at, row] of rows.entries()) {
-            const own = changedUnits(
-              yield* revisionDoc(ref.entity_id, recipes[at]!.before),
-              yield* revisionDoc(ref.entity_id, recipes[at]!.head)
+          const patches: Array<ReversalPatch> = []
+          for (const effect of standing) {
+            const original = yield* revisionDoc(ref.entity_id, effect.undo!.before)
+            const changed = yield* revisionDoc(ref.entity_id, effect.undo!.head)
+            const of = changedUnits(original, changed)
+            const fields = of.filter(
+              (unit) => !effect.reversion?.fields.includes(unit) && (!options.fields || options.fields.includes(unit))
             )
-            covered.push({
-              rolloutId: row.rollout_id,
-              toolCallId: row.tool_call_id,
-              seq: row.seq,
-              of: own,
-              fields: own
-            })
+            patches.push({ original, changed, fields })
+            covered.push({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq, of, fields })
           }
+          const plan = planGroupedReversal(patches.reverse(), yield* lib.loadDoc(ref.head_revision_id), options.choices)
           return yield* apply(
             userId,
             ref.id,

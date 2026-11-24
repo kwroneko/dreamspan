@@ -3,7 +3,7 @@ import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { HostFolderRefusal } from "../files/hostFolders.ts"
 import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
-import { changedUnits, combinedFileEdits, docOfUnits } from "@dreamspan/shared/changeReversal.ts"
+import { changedUnits, docOfUnits } from "@dreamspan/shared/changeReversal.ts"
 import type { User } from "@dreamspan/shared/domain.ts"
 import { EffectUndoRefused, HostFolderRefused } from "@dreamspan/shared/workshopApi.ts"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
@@ -181,15 +181,18 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         return yield* new EffectUndoRefused({ message: "This change was undone already." })
       if (edits.some((e) => e.card === null || e.effect.targetId !== path))
         return yield* new EffectUndoRefused({ message: "Only edits of one item are reverted together." })
-      const { before, after } = combinedFileEdits(edits.map((e) => e.card!))
-      const units = changedUnits(before, after)
-      const fields = options.fields ? units.filter((u) => options.fields!.includes(u)) : units
+      const selected = edits.map(({ effect, card }) => {
+        const { before: original, after: changed } = card!
+        const of = changedUnits(original, changed)
+        const fields = of.filter(
+          (unit) => !effect.reversion?.fields.includes(unit) && (!options.fields || options.fields.includes(unit))
+        )
+        return { covered: { ...keyOf(effect), of, fields }, patch: { original, changed, fields } }
+      })
       return yield* onHost(
         files.reverseCardFile(actor, {
           path,
-          original: before,
-          changed: after,
-          fields,
+          patches: selected.map(({ patch }) => patch).reverse(),
           choices: options.choices,
           dryRun: options.dryRun,
           record: (written) =>
@@ -204,10 +207,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
               fields: written.plan.fields,
               before: written.plan.before,
               after: written.plan.after,
-              effects: edits.map(({ effect, card }) => {
-                const of = changedUnits(card!.before, card!.after)
-                return { ...keyOf(effect), of, fields: of }
-              })
+              effects: selected.map(({ covered }) => covered)
             })
         })
       )
@@ -222,9 +222,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       return yield* onHost(
         files.reverseCardFile(actor, {
           path: record.targetId,
-          original: docOfUnits(record.before),
-          changed: docOfUnits(record.after),
-          fields,
+          patches: [{ original: docOfUnits(record.before), changed: docOfUnits(record.after), fields }],
           choices: options.choices,
           dryRun: options.dryRun,
           record: (written) =>

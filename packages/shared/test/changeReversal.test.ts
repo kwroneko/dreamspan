@@ -7,6 +7,7 @@ import {
   combinedFileEdits,
   docOfUnits,
   planReversal,
+  planGroupedReversal,
   revertedFields,
   unitKey
 } from "../src/changeReversal.ts"
@@ -68,6 +69,21 @@ describe("planReversal", () => {
         { uid: 3, content: "User's." }
       ]
     })
+  })
+
+  it("replays separate file patches around an intervening save to the same field", () => {
+    const oldest = {
+      original: { description: "The ferry runs at dawn. The inn is quiet." },
+      changed: { description: "The ferry runs at dusk. The inn is quiet." },
+      fields: [D]
+    }
+    const newest = {
+      original: { description: "The ferry runs at dusk. The inn is bustling." },
+      changed: { description: "The ferry runs at dusk. The inn is abandoned." },
+      fields: [D]
+    }
+    const plan = planGroupedReversal([newest, oldest], newest.changed)
+    expect(plan.doc).toEqual({ description: "The ferry runs at dawn. The inn is bustling." })
   })
 
   it("redoes from a record's values", () => {

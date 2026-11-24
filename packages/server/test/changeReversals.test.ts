@@ -246,6 +246,21 @@ describe("revert a change", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("keeps a user save between two edits selected for one revert", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const before = yield* f.doc()
+      yield* agentEdit(f, [{ field: "description", text: "First." }], "c1")
+      yield* userEdit(api, f.card, "scenario", "Saved during the reply.")
+      yield* agentEdit(f, [{ field: "personality", text: "Second." }], "c2")
+      const reverted = yield* api.RevertChange({ effects: yield* f.editKeys(["c1", "c2"]) })
+      assert.isString(reverted.reversalId)
+      assert.deepStrictEqual(yield* f.doc(), { ...before, scenario: "Saved during the reply." })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("reverts a lorebook's entries by identity; an entry the user deleted since is a conflict", () => {
     const config = testConfig()
     return Effect.gen(function* () {

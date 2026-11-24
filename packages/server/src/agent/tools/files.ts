@@ -79,7 +79,13 @@ import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput }
 import type { Formats } from "../../importer/Formats.ts"
 import { CARD_FILE_BYTES, makeCardFileTools } from "./cardFiles.ts"
 import { visibleDoc } from "../libraryView.ts"
-import { type ConflictChoice, planReversal, type ReversalPlan, unitPath } from "@dreamspan/shared/changeReversal.ts"
+import {
+  type ConflictChoice,
+  planGroupedReversal,
+  type ReversalPatch,
+  type ReversalPlan,
+  unitPath
+} from "@dreamspan/shared/changeReversal.ts"
 
 /** Where subagents' isolated copies go, under /files (spec/SUBAGENTS.md §3.3). */
 const COPIES = ".subagents"
@@ -2089,8 +2095,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     })
 
   /**
-   * Takes a change back in a card file in Files (spec/WORKSHOP-CARDS.md §8.1): `changed` and
-   * `original` are its fields after and before the change, `fields` which to take back. The file
+   * Takes selected changes back newest first in a card file (spec/WORKSHOP-CARDS.md §8.1). The file
    * as it is now is read with the format worker, the fields are planned three-way, and the result
    * is written in the file's own format, the file as it was kept as a version. A conflict or a dry
    * run writes nothing. `record` stores the reversal (one writer transaction) once written.
@@ -2099,9 +2104,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     actor: User,
     input: {
       readonly path: string
-      readonly original: Record<string, unknown>
-      readonly changed: Record<string, unknown>
-      readonly fields: ReadonlyArray<string>
+      readonly patches: ReadonlyArray<ReversalPatch>
       readonly choices?: Readonly<Record<string, ConflictChoice>> | undefined
       readonly dryRun?: boolean | undefined
       readonly record: (written: {
@@ -2127,13 +2130,11 @@ export const makeFileTools = (deps: FileToolDeps) => {
             return yield* new EffectUndoRefused({ message: "The card file isn't there any more." })
           const info = yield* formats.readCardFile(current.bytes).pipe(Effect.orElseSucceed(() => null))
           if (!info) return yield* new EffectUndoRefused({ message: "The file isn't a card file any more." })
-          const plan = planReversal({
-            original: input.original,
-            changed: input.changed,
-            now: visibleDoc("card", info.doc) as Record<string, unknown>,
-            fields: input.fields,
-            ...(input.choices ? { choices: input.choices } : {})
-          })
+          const plan = planGroupedReversal(
+            input.patches,
+            visibleDoc("card", info.doc) as Record<string, unknown>,
+            input.choices
+          )
           const outcome = (reversalId: string | null) => ({
             reversalId,
             fields: plan.fields,
