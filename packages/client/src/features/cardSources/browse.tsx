@@ -28,6 +28,7 @@ import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder, SortScroller } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
+import { OPEN_BESIDE_HINT, OPEN_NEW_TAB_HINT, PAGE_BESIDE_HINT, openBeside, openPageBeside, useCanOpenBeside } from "../../ui/openBeside.ts"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
@@ -512,7 +513,9 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const view = cardSourceViews.get(info.id)
   const link = cardLink(info.id, card.remoteId)
   const chat = chatLink(info.id, card.remoteId)
-  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}/chat`
+  // The card's read-only page (Inspect's): View beside.
+  const pageHref = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
+  const canBeside = useCanOpenBeside()
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
   const adopt = useAdoptRemote()
@@ -521,6 +524,8 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const [added, setAdded] = useState<{ entityId: string; archived: boolean } | null>(null)
   const [flash, setFlash] = useState(false)
   const mine = added ?? (card.held ? { entityId: card.held.entityId, archived: card.held.archived } : null)
+  // What a click opens: your card's chat, else the draft chat. Open beside and a new browser tab open it too.
+  const clickHref = mine !== null ? `/cards/${encodeURIComponent(mine.entityId)}/chat` : `${pageHref}/chat`
   const openMine = (entityId: string) => openCharacter(entityId as EntityId)
   const face = (
     <TileFace
@@ -632,6 +637,24 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open
           </MenuItem>
         )}
+        {canBeside && (
+          <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(clickHref)}>
+            Open beside
+          </MenuItem>
+        )}
+        <MenuItem
+          icon="external"
+          description={OPEN_NEW_TAB_HINT}
+          onClick={() => window.open(clickHref, "_blank", "noopener")}
+        >
+          Open in a new browser tab
+        </MenuItem>
+        {/* The card's read-only page beside, to inspect many cards (owner, 2026-11-24). */}
+        {canBeside && (
+          <MenuItem icon="eye" description={PAGE_BESIDE_HINT} onClick={() => openPageBeside(pageHref)}>
+            View beside
+          </MenuItem>
+        )}
         {mine === null && (
           <MenuItem
             icon="eye"
@@ -668,13 +691,6 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Show on {info.name}
           </MenuItem>
         )}
-        <MenuItem
-          icon="external"
-          description="Opens it in a new tab of the browser."
-          onClick={() => window.open(href, "_blank", "noopener")}
-        >
-          Open in a new browser tab
-        </MenuItem>
         {card.url !== undefined && (
           <MenuItem
             icon="external"

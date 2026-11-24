@@ -498,9 +498,11 @@ export class WorkbenchStore {
   }
   /**
    * Opens an item to the side (VS Code's Open to the Side): in the frame on the right of the
-   * focused one, else in a new frame there. Kept, as a deliberate open.
+   * focused one, else in a new frame there. Kept, as a deliberate open. `preview` (a card's page
+   * beside, to read card after card): it takes that frame's preview tab, and focus stays where it
+   * was, so the next one beside replaces it rather than splitting again.
    */
-  openBeside(href: string) {
+  openBeside(href: string, { preview = false }: { readonly preview?: boolean } = {}) {
     const focused = focusedFrame(this.layout)
     let frame = neighbours(this.layout, focused.id).right
     if (!frame) {
@@ -511,7 +513,9 @@ export class WorkbenchStore {
     // tile scopes the sidebar to the character's chats).
     this.shellChange = shellCarried(href)
     try {
-      return this.open(href, { frame, preview: false, affinity: false })
+      const tabId = this.open(href, { frame, preview, affinity: false })
+      if (preview) this.set(focusFrame(this.layout, focused.id))
+      return tabId
     } finally {
       this.shellChange = null
     }
