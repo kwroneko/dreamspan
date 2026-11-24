@@ -15,7 +15,7 @@ import { foldState, type StoredStateEventData } from "@dreamspan/shared/state.ts
 type StoredEvent = typeof StoredStateEventData.Type
 import { Effect } from "effect"
 import type { DecisionPoint } from "../engine.ts"
-import { decisionStateStamp } from "../stateStamp.ts"
+import { decisionStateStamp, decisionWindowStamp, PRESENCE_WINDOW_SIZE } from "../stateStamp.ts"
 
 /** A message's text as the state carries it, at most this long (the newest part kept). */
 const MESSAGE_CHARS = 4_000
@@ -112,7 +112,7 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
         forkId: reply.forkId,
         leafSlotId: reply.slotId,
         range: { _tag: "Bottom" },
-        limit: 2
+        limit: PRESENCE_WINDOW_SIZE
       })
       // A completed reply may already have been swiped or edited before this background task runs.
       if (window.entries.at(-1)?.version.id !== reply.versionId) return false
@@ -157,6 +157,7 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
         rolloutId: outcome.rolloutId,
         versionId: reply.versionId,
         expectedState: decisionStateStamp(events),
+        expectedWindow: decisionWindowStamp(window.entries),
         events: changes
       })
     }).pipe(

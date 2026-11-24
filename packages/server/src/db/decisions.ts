@@ -20,10 +20,11 @@ import { correctPresence } from "./presenceCorrection.ts"
 import { selectionIn } from "./forkState.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { decisionStateStamp } from "../decision/stateStamp.ts"
+import { decisionStateStamp, decisionWindowStamp, PRESENCE_WINDOW_SIZE } from "../decision/stateStamp.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { brokenTurnAt } from "./autoGuard.ts"
+import { readPathTail } from "./reads.ts"
 
 const KEY = "decisions"
 
@@ -226,7 +227,7 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           return settled.length > 0
         }).pipe(transaction(sql, "SettleSpeaker")),
 
-      ApplyDecisionEffect: ({ userId, rolloutId, versionId, expectedState, events }) =>
+      ApplyDecisionEffect: ({ userId, rolloutId, versionId, expectedState, expectedWindow, events }) =>
         Effect.gen(function* () {
           const decision = yield* decisionRollout(userId, rolloutId)
           const [version] = yield* sql<{ readonly slot_id: string; readonly fork_id: string | null }>`
@@ -252,6 +253,18 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
             })) as Array<FoldableEvent>
           )
           if (decisionStateStamp(current) !== expectedState) return false
+          const [view] = yield* sql<{ id: string }>`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
+            WHERE c.id = ${decision.chat_id} AND c.deleted_at IS NULL
+              AND f.id = coalesce(${fork}, c.current_fork_id) AND f.deleted_at IS NULL`
+          if (!view) return false
+          const window = yield* readPathTail(
+            sql,
+            decision.chat_id as ChatId,
+            view.id,
+            version.slot_id as SlotId,
+            PRESENCE_WINDOW_SIZE
+          )
+          if (decisionWindowStamp(window) !== expectedWindow) return false
           for (const data of events)
             yield* graph.insertStateEvent(userId, decision.chat_id, version.slot_id, versionId, null, data, fork, {
               origin: "rollout",
