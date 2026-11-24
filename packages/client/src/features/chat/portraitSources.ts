@@ -106,9 +106,22 @@ class PortraitSources {
         inPlace.has(key) ? [inPlace.get(key)!] : removed.has(key) ? [] : below.has(key) ? [key, below.get(key)!] : [key]
       )
     ]
-    // "Keep one image open": one opened here closes the other views' ones.
+    // "Keep one image open": one opened here closes the other views' ones, but not their copy of it.
     if (onTop.length > 0 && source.viewer.single) {
-      for (const [other, s] of this.sources) if (other !== tabId && s.viewer.shown.length > 0) s.viewer.set([])
+      for (const [other, s] of this.sources) {
+        if (other === tabId || s.viewer.shown.every((e) => ids.includes(e.portrait.id))) continue
+        s.viewer.set(s.viewer.shown.filter((e) => ids.includes(e.portrait.id)))
+      }
+    }
+    // The column shows a picture once, so one closed here (a second click on it) closes it in
+    // every view that holds it, as in a single pane (owner, 2026-11-24). One swapped in place
+    // isn't closed; a view going away (`remove`) leaves the others'.
+    const closed = new Set(before.filter((id) => !ids.includes(id) && !inPlace.has(keyOf(tabId, id))))
+    if (closed.size > 0) {
+      for (const [other, s] of this.sources) {
+        if (other === tabId || !s.viewer.shown.some((e) => closed.has(e.portrait.id))) continue
+        s.viewer.set(s.viewer.shown.filter((e) => !closed.has(e.portrait.id)))
+      }
     }
     this.notify()
   }
