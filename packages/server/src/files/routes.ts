@@ -1191,7 +1191,10 @@ export const filesRoutes = Layer.unwrap(
     })
 
     /** Attach copies running per account, with how many wait (`ATTACH_AT_ONCE`, `ATTACH_WAITING`). */
-    const attaching = new Map<string, { readonly gate: Semaphore.Semaphore; waiting: number }>()
+    const attaching = new Map<
+      string,
+      { readonly gate: Semaphore.Semaphore; readonly recording: Semaphore.Semaphore; waiting: number }
+    >()
 
     /**
      * A file of the account's Files attached to a workshop message (§6.1): its content is kept
@@ -1217,16 +1220,16 @@ export const filesRoutes = Layer.unwrap(
           413,
           `Attachments can be at most ${formatByteSize(ATTACHMENT_MAX_BYTES)}. The assistant can still open it at ${full}.`
         )
-      const slot = attaching.get(userId) ?? { gate: Semaphore.makeUnsafe(ATTACH_AT_ONCE), waiting: 0 }
+      const slot = attaching.get(userId) ?? {
+        gate: Semaphore.makeUnsafe(ATTACH_AT_ONCE),
+        recording: Semaphore.makeUnsafe(1),
+        waiting: 0
+      }
       attaching.set(userId, slot)
       if (slot.waiting >= ATTACH_WAITING)
         return refuse(429, "Too many files are being attached. Try again in a moment.")
       slot.waiting++
       return yield* Effect.gen(function* () {
-        // The copy takes room in the Files quota until no message names it.
-        yield* quota
-          .check(userId, info.size, "attach files")
-          .pipe(Effect.mapError((error) => new Answer(507, error.message)))
         const copied = yield* Effect.tryPromise(() => copyAttachment(config.dataDir, root, segments, info))
         return yield* Effect.gen(function* () {
           // Only a block image the image worker decodes is an image; a file that fails is a
@@ -1239,32 +1242,65 @@ export const filesRoutes = Layer.unwrap(
           }
           const named = typeOf(name)
           const mime = image?.mime ?? (named.startsWith("image/") ? "application/octet-stream" : named)
-          const recorded = yield* holds.holding(
-            [copied.sha256],
-            Effect.andThen(
-              placeStreamedMedia(config.dataDir, copied.temporary, copied.sha256, copied.size),
-              writer
-                .RecordAttachmentCopy({
-                  userId: userId as never,
-                  path: full,
-                  inode: info.ino,
-                  ...(body.composer ? { composer: body.composer } : {}),
-                  media: {
-                    sha256: copied.sha256,
-                    mime,
-                    byteSize: copied.size,
-                    width: image?.width ?? null,
-                    height: image?.height ?? null
-                  }
-                })
-                .pipe(
-                  Effect.catchTag("NotFound", () =>
-                    Effect.fail(new Answer(404, "That composer draft isn't available."))
+          const record = (adding: number) =>
+            Effect.gen(function* () {
+              const usage = yield* quota
+                .check(userId, adding, "attach files")
+                .pipe(Effect.mapError((error) => new Answer(507, error.message)))
+              const reservation = adding > 0 ? quota.hold(userId, true) : null
+              let landed = false
+              return yield* Effect.gen(function* () {
+                if (reservation && !reservation.reserve(adding, usage.quotaBytes))
+                  return yield* Effect.fail(
+                    new Answer(507, quota.overMessage(usage.usedBytes + adding, usage.quotaBytes, "attach files"))
                   )
+                const saved = yield* holds.holding(
+                  [copied.sha256],
+                  Effect.gen(function* () {
+                    yield* placeStreamedMedia(config.dataDir, copied.temporary, copied.sha256, copied.size)
+                    return yield* writer
+                      .RecordAttachmentCopy({
+                        userId: userId as never,
+                        path: full,
+                        inode: info.ino,
+                        maxAddedBytes: adding,
+                        ...(body.composer ? { composer: body.composer } : {}),
+                        media: {
+                          sha256: copied.sha256,
+                          mime,
+                          byteSize: copied.size,
+                          width: image?.width ?? null,
+                          height: image?.height ?? null
+                        }
+                      })
+                      .pipe(
+                        Effect.catchTag("NotFound", () =>
+                          Effect.fail(new Answer(404, "That composer draft isn't available."))
+                        )
+                      )
+                  })
                 )
-            )
-          )
-          quota.wrote(userId, copied.size)
+                if (saved?.addedBytes) {
+                  reservation?.landed()
+                  landed = true
+                }
+                return saved
+              }).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    if (!landed) reservation?.release()
+                  })
+                )
+              )
+            }).pipe(Effect.uninterruptible)
+
+          // Copies may hash in parallel; charge and record them one at a time for this account.
+          const recorded = yield* Effect.gen(function* () {
+            const held = yield* reader.FileVersionBytes({ userId: userId as never, sha256: copied.sha256 })
+            const first = yield* record(held > 0 ? 0 : copied.size)
+            return first ?? (yield* record(copied.size))
+          }).pipe(slot.recording.withPermits(1))
+          if (recorded === null) return refuse(507, "There's no room left for files.")
           // Those bytes recorded earlier under another type (a version's) are sent as that.
           const isImage = image !== null && recorded.mime === image.mime
           const attached: AttachedFile = {

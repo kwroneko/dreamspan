@@ -2989,6 +2989,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.NullOr(Schema.Number),
       composer: Schema.optionalKey(AttachmentComposer),
+      maxAddedBytes: Schema.Int,
       media: Schema.Struct({
         sha256: Sha256,
         mime: Schema.String,
@@ -2997,7 +2998,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
         height: Schema.NullOr(Schema.Int)
       })
     },
-    success: Schema.Struct({ mediaId: Schema.String, mime: Schema.String }),
+    success: Schema.NullOr(Schema.Struct({ mediaId: Schema.String, mime: Schema.String, addedBytes: Schema.Int })),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -6268,9 +6269,9 @@ const ReadOpsOwn = RpcGroup.make(
     ),
     error: StorageError
   }),
-  /** Bytes an account's file versions hold: each stored content once (fileVersions.ts). */
+  /** Bytes an account's file versions hold: each stored content once, optionally just for a hash. */
   Rpc.make("FileVersionBytes", {
-    payload: { userId: UserId },
+    payload: { userId: UserId, sha256: Schema.optionalKey(Sha256) },
     success: Schema.Int,
     error: StorageError
   }),

@@ -11,6 +11,12 @@ import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 
+/** The Files quota counts each media row once, including when several paths hold it. */
+const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string) =>
+  sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
+    WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)
+    ${sha256 === undefined ? sql`` : sql`AND m.sha256 = ${sha256}`}`.pipe(Effect.map(([row]) => row?.bytes ?? 0))
+
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
@@ -54,8 +60,12 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         }
         return ids
       }).pipe(transaction(sql, "RecordFileVersions")),
-    RecordAttachmentCopy: ({ userId, path, inode, media, composer }) =>
+    RecordAttachmentCopy: ({ userId, path, inode, media, composer, maxAddedBytes }) =>
       Effect.gen(function* () {
+        const addedBytes = (yield* versionBytes(sql, userId, media.sha256)) > 0 ? 0 : media.byteSize
+        // A prune can drop a duplicate after the route checked it. Ask for a reservation
+        // for the full copy before recording it in that case.
+        if (addedBytes > maxAddedBytes) return null
         yield* sql`INSERT INTO media_assets ${sql.insert({
           id: uuidv7(),
           sha256: media.sha256,
@@ -94,7 +104,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
             ...(image ? {} : { kind: "file" as const })
           })
         }
-        return { mediaId: row!.id, mime: row!.mime }
+        return { mediaId: row!.id, mime: row!.mime, addedBytes }
       }).pipe(transaction(sql, "RecordAttachmentCopy")),
     MoveFileReferences: ({ userId, from, to }) =>
       Effect.gen(function* () {
@@ -258,11 +268,6 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
         ),
         query("FileSharesGrantedTo")
       ),
-    FileVersionBytes: ({ userId }) =>
-      sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
-        WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)`.pipe(
-        Effect.map(([row]) => row?.bytes ?? 0),
-        query("FileVersionBytes")
-      )
+    FileVersionBytes: ({ userId, sha256 }) => versionBytes(sql, userId, sha256).pipe(query("FileVersionBytes"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
