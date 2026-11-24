@@ -50,6 +50,31 @@ export function personaLockTests() {
       cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
     })
     const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
+
+    test("an ordinary card can play in this chat but cannot lock the persona", async ({ page }) => {
+      const harbor = await admin((api) =>
+        Effect.gen(function* () {
+          const harbor = yield* api.CreateCard({ label: "Lock Harbor", name: "Lock Harbor" })
+          yield* api.CreateCard({ label: "Ordinary Card", name: "Ordinary Card" })
+          const pilot = yield* api.CreateCard({ label: "Lock Pilot", name: "Lock Pilot" })
+          yield* api.SetPersona({ entityId: pilot.entityId, persona: true })
+          yield* api.ChangeGenerationDefaults({ change: { persona: pilot.entityId } })
+          return harbor
+        })
+      )
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/cards/${harbor.entityId}/chat`)
+      await openPanel(page, "Cast")
+      await playing(page, "Lock Pilot (default)").click()
+      const picker = page.getByRole("dialog", { name: "Your persona" })
+      await picker.getByRole("tab", { name: "All cards" }).click()
+      await picker.getByRole("option", { name: /^Ordinary Card/ }).click()
+      await playing(page, "Ordinary Card").click()
+      await expect(
+        picker.getByRole("checkbox", { name: "Always play as Ordinary Card with Lock Harbor" })
+      ).toBeDisabled()
+    })
+
     for (const width of [1340, 390])
       for (const theme of ["light", "dark"] as const) {
         const suffix = `${width} ${theme}`

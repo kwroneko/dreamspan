@@ -83,7 +83,7 @@ function PendingPersonaLock({ pending }: { pending: PendingChat }) {
     <div className="mx-2 flex min-h-9 shrink-0 items-center rounded-md px-2 py-2 hover:bg-surface-raised">
       <Checkbox
         checked={locked}
-        disabled={!lock.ready || action.pending}
+        disabled={!persona.persona || persona.inBin || !lock.ready || action.pending}
         hintInline={false}
         onCheckedChange={(on) =>
           void writeLock(action, card.entityId, on ? persona.entityId : null).then((result) => {
