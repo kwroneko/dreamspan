@@ -25,13 +25,7 @@ import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
-import {
-  CornerIconButton,
-  IconButton,
-  SquareIconButton,
-  ToggleIconButton,
-  Tooltip
-} from "../../ui/Tooltip.tsx"
+import { CornerIconButton, IconButton, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
 import { EnsurePortraitViewer, PicturePeek, type Portrait, usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -266,16 +260,16 @@ function AttachedThumbnail({
         picture={picture}
         trigger={
           <button
-              type="button"
-              aria-label={`View ${item.name}`}
-              aria-disabled={peekable ? undefined : true}
-              onClick={() => {
-                if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
-              }}
-              className="block overflow-hidden rounded-md border border-border bg-surface-raised outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              {item.thumbnail}
-            </button>
+            type="button"
+            aria-label={`View ${item.name}`}
+            aria-disabled={peekable ? undefined : true}
+            onClick={() => {
+              if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
+            }}
+            className="block overflow-hidden rounded-md border border-border bg-surface-raised outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {item.thumbnail}
+          </button>
         }
       />
       {corner}
@@ -1132,7 +1126,9 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     onRemove={state.remove}
                   />
                   {state.entries.length === 0 ? null : state.attacher ? (
-                    images && vision === false ? <VisionNote vision={vision} maxImages={maxImages} /> : null
+                    images && vision === false ? (
+                      <VisionNote vision={vision} maxImages={maxImages} />
+                    ) : null
                   ) : (
                     <VisionNote vision={vision} maxImages={maxImages} />
                   )}
