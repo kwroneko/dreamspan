@@ -93,7 +93,8 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
         // Its name and path are what the model is told (§6.1): the path must be where this user
         // attached the copy from, the name that path's own.
         const [media] = staged
-          ? yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND kind = 'workshop'`
+          ? yield* sql`SELECT id FROM chats /* chat:includes-pending: a pending workshop can stage files before its first send */
+              WHERE id = ${chatId} AND kind = 'workshop'`
           : !attachmentFieldsFit(file)
             ? []
             : file.kind === "file"
