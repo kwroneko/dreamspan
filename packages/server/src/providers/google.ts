@@ -12,9 +12,9 @@ import {
   resolveGoogleFunctionCallingMode,
   resolveGoogleThinkingLevel,
   supportsGoogleStrictToolSampling,
-  toGoogleSdkThinkingLevel,
   toGoogleThinkingLevel,
-  usesGoogleThinkingLevel as piUsesThinkingLevel
+  usesGoogleThinkingLevel as piUsesThinkingLevel,
+  type GoogleApiThinkingLevel
 } from "@earendil-works/pi-ai/api/google-shared"
 import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options"
 import { clampThinkingLevel, calculateCost } from "@earendil-works/pi-ai/models"
@@ -31,6 +31,10 @@ import { sanitizeSurrogates } from "@earendil-works/pi-ai/utils/sanitize-unicode
 import { Schema } from "effect"
 import { googleRequest } from "./googleRequest.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
+
+type RestGoogleOptions = Omit<GoogleOptions, "thinking"> & {
+  thinking?: { enabled: boolean; level?: GoogleApiThinkingLevel | "XHIGH"; budgetTokens?: number }
+}
 
 const Part = Schema.Struct({
   text: Schema.optionalKey(Schema.String),
@@ -131,7 +135,7 @@ async function* chunks(response: Response) {
   }
 }
 
-export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (model, context, options = {}) => {
+export const stream: StreamFunction<"google-generative-ai", RestGoogleOptions> = (model, context, options = {}) => {
   const events = new AssistantMessageEventStream()
   const output: AssistantMessage = {
     role: "assistant",
@@ -173,7 +177,7 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
                 ? {
                     includeThoughts: true,
                     ...(options.thinking.level !== undefined
-                      ? { thinkingLevel: toGoogleSdkThinkingLevel(options.thinking.level) }
+                      ? { thinkingLevel: options.thinking.level }
                       : options.thinking.budgetTokens !== undefined
                         ? { thinkingBudget: options.thinking.budgetTokens }
                         : {})
@@ -332,13 +336,12 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
   return events
 }
 
-// pi-ai 1.0.3 predates Gemini 4's thinkingLevel control. Its transcript, level
-// mapping and all other model families still use the pinned helpers.
+// pi-ai 1.0.3 predates Gemini 4's thinkingLevel control and xhigh.
 const gemini4 = (model: { readonly id: string }) => /^(?:models\/)?gemini-4-/i.test(model.id)
 const usesGoogleThinkingLevel = (model: Parameters<typeof piUsesThinkingLevel>[0]) =>
   gemini4(model) || piUsesThinkingLevel(model)
 const getDisabledGoogleThinkingConfig = (model: Parameters<typeof piDisabledThinkingConfig>[0]) =>
-  gemini4(model) ? { thinkingLevel: toGoogleSdkThinkingLevel("LOW") } : piDisabledThinkingConfig(model)
+  gemini4(model) ? { thinkingLevel: "LOW" } : piDisabledThinkingConfig(model)
 
 const googleBudget = (model: string, level: string) => {
   const budgets = model.includes("2.5-pro")
@@ -356,18 +359,21 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
   context,
   options = {}
 ) => {
-  const base = buildBaseOptions(model, context, options, options.apiKey)
+  const base = {
+    ...buildBaseOptions(model, context, options, options.apiKey),
+    ...(options.toolChoice ? { toolChoice: options.toolChoice } : {})
+  }
+  // Omitting thinkingConfig selects the model's own default.
+  if (gemini4(model) && options.reasoning === undefined) return stream(model, context, base)
   const clamped = options.reasoning ? clampThinkingLevel(model, options.reasoning) : "off"
-  const level = clamped === "off" ? "off" : resolveGoogleThinkingLevel(model, clamped)
-  const thinking =
-    level === "off"
-      ? { enabled: false }
-      : usesGoogleThinkingLevel(model)
-        ? { enabled: true, level: toGoogleThinkingLevel(level) }
-        : { enabled: true, budgetTokens: options.thinkingBudgets?.[level] ?? googleBudget(model.id, level) }
+  if (clamped === "off") return stream(model, context, { ...base, thinking: { enabled: false } })
+  if (gemini4(model) && (model.thinkingLevelMap?.[clamped] ?? clamped).toLowerCase() === "xhigh")
+    return stream(model, context, { ...base, thinking: { enabled: true, level: "XHIGH" } })
+  const level = resolveGoogleThinkingLevel(model, clamped)
   return stream(model, context, {
     ...base,
-    thinking,
-    ...(options.toolChoice ? { toolChoice: options.toolChoice } : {})
+    thinking: usesGoogleThinkingLevel(model)
+      ? { enabled: true, level: toGoogleThinkingLevel(level) }
+      : { enabled: true, budgetTokens: options.thinkingBudgets?.[level] ?? googleBudget(model.id, level) }
   })
 }

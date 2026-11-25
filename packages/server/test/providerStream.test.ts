@@ -607,7 +607,65 @@ describe("provider quirks", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
-  it.live("DeepSeek: the catalog's compat reaches the wire (max_tokens, reasoning replay)", () =>
+  it.live("o3 Auto preserves the developer role and omits a reasoning disable in generation and Check", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.endsWith("/models")
+          ? json(res, 200, openAiList([{ id: "o3" }]))
+          : sse(res, completionChunks(["Aye."], {}))
+      )
+      const { userId, connection, modelId, providers, reader, writer } = yield* connect(
+        "openai-chat",
+        server.url + "/v1",
+        null,
+        "o3"
+      )
+      const saved = yield* reader.GetModel({ userId, modelId })
+      yield* writer.EditModel({
+        userId,
+        modelId,
+        overrides: { thinkingLevels: { off: "none" } },
+        expectedRowVersion: saved.rowVersion
+      })
+      const send = (options: NonNullable<Providers.StreamRequest["options"]>) =>
+        collect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId,
+            context,
+            options,
+            attribution: { purpose: "test" }
+          })
+        )
+      yield* send({})
+      assert.isTrue((yield* providers.testConnection(userId, connection.id, modelId)).ok)
+      const draft = yield* providers.testDraft({
+        userId,
+        role: "admin",
+        kind: "openai-chat",
+        settings: settings(server.url + "/v1"),
+        model: "o3"
+      })
+      assert.isTrue(draft.ok)
+      yield* send({ payload: { reasoning_effort: "none" } })
+      yield* send({ sampling: { reasoning_effort: "high" } })
+      yield* send({ payload: { reasoning_effort: "low" } })
+
+      const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
+      assert.lengthOf(calls, 6)
+      assert.deepEqual((calls[0]!.body!.messages as ReadonlyArray<unknown>)[0], {
+        role: "developer",
+        content: context.systemPrompt
+      })
+      assert.deepEqual(
+        calls.map((call) => call.body!.reasoning_effort),
+        [undefined, undefined, undefined, "none", "high", "low"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+  it.live("DeepSeek preserves catalog request fields and reasoning replay on Auto", () =>
     Effect.gen(function* () {
       const server = yield* mock((request, res) =>
         request.path === "/models"
@@ -624,6 +682,7 @@ describe("provider quirks", () => {
         "deepseek-flash"
       )
       const withHistory: PiContext = {
+        tools: [{ name: "look", description: "Look.", parameters: { type: "object", properties: {} } }],
         messages: [
           { role: "user", content: "Who goes there?", timestamp: 1 },
           {
@@ -670,6 +729,27 @@ describe("provider quirks", () => {
       const messages = body.messages as Array<Record<string, unknown>>
       const assistant = messages.find((m) => m.role === "assistant")!
       assert.property(assistant, "reasoning_content")
+
+      const auto = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context: {
+            ...withHistory,
+            messages: withHistory.messages.map((message) =>
+              message.role === "assistant" ? { ...message, content: [{ type: "text", text: "A friend." }] } : message
+            )
+          },
+          attribution: { purpose: "generation" }
+        })
+      )
+      assert.strictEqual(auto.at(-1)?.type, "done")
+      const autoBody = server.requests().filter((r) => r.path === "/chat/completions")[1]!.body!
+      assert.notProperty(autoBody, "thinking")
+      assert.notProperty(autoBody, "reasoning_effort")
+      const autoAssistant = (autoBody.messages as Array<Record<string, unknown>>).find((m) => m.role === "assistant")!
+      assert.propertyVal(autoAssistant, "reasoning_content", "")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
@@ -1776,6 +1856,55 @@ describe("pure pieces", () => {
   })
 })
 
+for (const model of ["gemini-4-neon", "gemini-4-hydrogen"])
+  it.live(`Google ${model} uses the provider default on Auto and sends all supported thinking levels`, () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) =>
+        request.path.startsWith("/v1beta/models?")
+          ? json(res, 200, { models: [{ name: `models/${model}`, thinking: true }] })
+          : sse(res, [{ candidates: [{ content: { parts: [{ text: "Aye." }] }, finishReason: "STOP" }] }])
+      )
+      const { userId, connection, modelId, providers } = yield* connect(
+        "google",
+        server.url + "/v1beta",
+        "synthetic-key",
+        model
+      )
+      for (const options of [
+        {},
+        { reasoning: "low" },
+        { reasoning: "medium" },
+        { reasoning: "high" },
+        { reasoning: "xhigh" },
+        { payload: { config: { thinkingConfig: Object.freeze({ thinkingBudget: 0 }) } } }
+      ] as const) {
+        const events = yield* collect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId,
+            context,
+            options,
+            attribution: { purpose: "test" }
+          })
+        )
+        assert.strictEqual(events.at(-1)?.type, "done")
+      }
+      const calls = server.requests().filter((r) => r.path.includes(":streamGenerateContent"))
+      assert.deepEqual(
+        calls.map((call) => (call.body!.generationConfig as Record<string, unknown>).thinkingConfig),
+        [
+          undefined,
+          { includeThoughts: true, thinkingLevel: "LOW" },
+          { includeThoughts: true, thinkingLevel: "MEDIUM" },
+          { includeThoughts: true, thinkingLevel: "HIGH" },
+          { includeThoughts: true, thinkingLevel: "XHIGH" },
+          { thinkingLevel: "LOW" }
+        ]
+      )
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
 it.live("Google's REST adapter preserves fragmented SSE, thinking, tools and cache usage", () =>
   Effect.gen(function* () {
     const server = yield* mock((_request, res) => {
@@ -2301,7 +2430,7 @@ for (const afterTokens of [false, true])
   )
 
 describe("Chat tool reasoning refusal", () => {
-  it.live("retries an unfamiliar model once without effort after the explicit function-tools 400", () =>
+  it.live("retries an unfamiliar model once when a compatible tool effort is mandatory", () =>
     Effect.gen(function* () {
       const server = yield* mock((request, res) => {
         if (request.path.endsWith("/models"))
@@ -2310,7 +2439,7 @@ describe("Chat tool reasoning refusal", () => {
           return json(res, 400, {
             error: {
               message:
-                "Function tools with reasoning_effort are not supported for this model in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+                "Function tools with reasoning_effort are not supported. With tools a compatible setting is mandatory: set reasoning_effort to 'none'.",
               type: "invalid_request_error"
             }
           })
@@ -2331,14 +2460,14 @@ describe("Chat tool reasoning refusal", () => {
             ...context,
             tools: [{ name: "look", description: "Look.", parameters: { type: "object", properties: {} } as never }]
           },
-          options: { sampling: { reasoning_effort: "low" } },
+          options: { reasoning: "high" },
           attribution: { purpose: "test" }
         })
       )
       assert.strictEqual(events.at(-1)?.type, "done")
       const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
       assert.lengthOf(calls, 2)
-      assert.strictEqual(calls[0]!.body!.reasoning_effort, "low")
+      assert.strictEqual(calls[0]!.body!.reasoning_effort, "high")
       assert.strictEqual(calls[1]!.body!.reasoning_effort, "none")
       const first = { ...calls[0]!.body },
         next = { ...calls[1]!.body }

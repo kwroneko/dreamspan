@@ -232,11 +232,10 @@ for (const id of ["../escape", "models/%2e%2e/escape", "https://example.invalid/
     }
   })
 
-// The pinned SDK predates Gemini 4; public generateContent docs require levels,
-// including when a saved preset asks to turn thinking off.
+// The pinned SDK predates Gemini 4. Auto uses Google's default.
 for (const id of ["gemini-4-carbon", "gemini-4-argon"])
-  for (const reasoning of ["off", "low", "medium", "high"] as const)
-    it(`Google ${id} sends a thinking level for ${reasoning}`, async () => {
+  for (const reasoning of [undefined, "low", "medium", "high"] as const)
+    it(`Google ${id} uses the expected thinking config for ${reasoning ?? "Auto"}`, async () => {
       const mock = await startMockProvider((_r, res) => {
         res.end(wire(stop))
       })
@@ -257,12 +256,14 @@ for (const id of ["gemini-4-carbon", "gemini-4-argon"])
             }
           },
           normalizeContext(context),
-          { apiKey: "synthetic-key", fetch, ...(reasoning === "off" ? {} : { reasoning }) }
+          { apiKey: "synthetic-key", fetch, ...(reasoning === undefined ? {} : { reasoning }) }
         )
         assert.equal((await events.result()).stopReason, "stop")
-        const config = mock.requests()[0]!.body!.generationConfig as { thinkingConfig: Record<string, unknown> }
-        assert.equal(config.thinkingConfig.thinkingLevel, reasoning === "off" ? "LOW" : reasoning.toUpperCase())
-        assert.isUndefined(config.thinkingConfig.thinkingBudget)
+        const config = mock.requests()[0]!.body!.generationConfig as { thinkingConfig?: Record<string, unknown> }
+        assert.deepEqual(
+          config.thinkingConfig,
+          reasoning === undefined ? undefined : { includeThoughts: true, thinkingLevel: reasoning.toUpperCase() }
+        )
       } finally {
         await mock.close()
       }

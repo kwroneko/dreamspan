@@ -483,6 +483,10 @@ it("retries only the explicit tool/effort refusal before output on Chat Completi
   assert.isTrue(hasRetryShim(builtinShims, target, providerError("bad_request", refusal, { status: 400 })))
   for (const error of [
     providerError("bad_request", "Other invalid argument", { status: 400 }),
+    providerError("bad_request", `Reasoning is mandatory for this endpoint and cannot be disabled. ${refusal}`, {
+      status: 400
+    }),
+    providerError("bad_request", `Reasoning cannot be disabled. ${refusal}`, { status: 400 }),
     providerError("auth", refusal, { status: 401 }),
     providerError("bad_request", refusal, { status: 400, afterTokens: true })
   ])

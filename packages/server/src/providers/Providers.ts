@@ -900,12 +900,7 @@ const buildPiModel = async (
     api: prepared.api,
     provider: prepared.kind.piProvider,
     baseUrl: prepared.baseUrl,
-    // Some serializers explicitly disable thinking on Auto if the model is flagged as reasoning
-    // (OpenAI-compatible chat sends effort "none"). Auto must send nothing, so there the flag
-    // follows a chosen effort; only the user's explicit Off may send a disable.
-    reasoning:
-      effective.reasoning.value &&
-      (prepared.api === "openai-completions" ? hasEffort : effective.reasoning.source !== "unknown" || hasEffort),
+    reasoning: effective.reasoning.value && (effective.reasoning.source !== "unknown" || hasEffort),
     ...(Object.keys(levels).length > 0 ? { thinkingLevelMap: levels } : {}),
     input: effective.vision.value ? ["text", "image"] : ["text"],
     cost: {
