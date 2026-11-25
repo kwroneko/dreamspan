@@ -109,11 +109,10 @@ describe("provider capability defaults", () => {
     const prefill = (key: string, connection: typeof messages, upstream = {}) =>
       resolveModel(key, upstream, {}, {}, {}, connection).prefill
     expect(prefill("claude-haiku-4-5-20251001", messages)).toEqual({ value: "assistant", source: "provider" })
-    for (const key of ["claude-sonnet-4-6", "claude-fable-5-2", "opaque-alias"])
-      expect(prefill(key, messages).value, key).toBe("none")
+    for (const key of ["claude-sonnet-4-6", "claude-fable-5-2"]) expect(prefill(key, messages).value, key).toBe("none")
     expect(prefill("upstream.gpt-5.6-sol", chat).value).toBe("tool_schema")
     expect(prefill("gpt-5.4-mini", chat, { prefill: "none" }).value).toBe("none")
-    expect(prefill("gpt-5.4-mini", { kind: "openai-chat", api: "openai-completions" }).value).toBe("none")
+    expect(prefill("gpt-5.4-mini", { kind: "openai-chat", api: "openai-completions" }).value).toBe("tool_schema")
   })
 
   it("uses a recognized vision family only when model metadata is absent", () => {

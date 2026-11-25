@@ -383,7 +383,7 @@ describe("continue and reasoning", () => {
       const api = yield* client()
       const { version, chat, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {}
+        model: { prefill: "none" }
       })
       const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
       assert.strictEqual(next.model?.prefill, "none")

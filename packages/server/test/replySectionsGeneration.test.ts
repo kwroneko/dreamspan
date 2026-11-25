@@ -208,7 +208,7 @@ describe("reply sections in generation", () => {
       const api = yield* client()
       const { version, chat, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {}
+        model: { prefill: "none" }
       })
       assert.strictEqual(version.status, "failed")
       const path = yield* api.ReadPath({

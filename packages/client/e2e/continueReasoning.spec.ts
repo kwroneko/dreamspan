@@ -26,7 +26,7 @@ const shoot = async (page: Page, state: string) => {
   }
 }
 
-const setup = (kind = "openai-chat", prefill: "assistant" | "tool_schema" = "assistant", beta = false) =>
+const setup = (kind = "openai-chat", prefill: "assistant" | "tool_schema" | null = "assistant", beta = false) =>
   asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       yield* api.SetDisplayPrefs({ prefs: { reasoning: "expanded" } })
@@ -45,7 +45,7 @@ const setup = (kind = "openai-chat", prefill: "assistant" | "tool_schema" = "ass
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "native-prefill",
-        overrides: { prefill }
+        overrides: prefill === null ? {} : { prefill }
       })
       const plain = yield* api.AddUserModel({
         connectionId: connection.id,
@@ -277,15 +277,16 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`unknown prefill in the model editor does not claim a provider reported no at ${width}px`, async ({ page }) => {
+  test(`an opaque OpenAI model uses schema prefill by default at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const { connection } = await setup()
+    const { connection } = await setup("openai-chat", null)
     await page.goto(`${server().url}/settings/connections/${connection.id}`)
     await page.getByRole("button", { name: "Edit native-prefill", exact: true }).click()
     const prefill = page.getByRole("combobox", { name: "Prefill", exact: true })
+    await expect(prefill).toContainText("Provider: yes, the OpenAI way")
     await prefill.click()
-    await expect(page.getByRole("option", { name: "Unknown", exact: true })).toBeVisible()
+    await expect(page.getByRole("option", { name: "Provider: yes, the OpenAI way", exact: true })).toBeVisible()
     await expect(page.getByRole("option", { name: "Yes, the OpenAI way", exact: true })).toBeVisible()
     await shoot(page, "10-model-capabilities")
   })

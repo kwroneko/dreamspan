@@ -634,25 +634,25 @@ type ModelConnection = {
   readonly provider?: string | null
 }
 
-const claudeAssistantPrefill =
-  /(?:^|[./])claude-(?:(?:sonnet|opus|haiku)-4(?:[.-][0-5](?!\d)|(?![.-]\d{1,2}(?:$|[-@:])))|3(?:[.-]\d+)?-(?:sonnet|opus|haiku)|(?:sonnet|opus|haiku)-3(?:[.-]\d+)?)(?:$|[-@:])/
+/** Only measured refusals disable the default; dated IDs and cloud namespace prefixes share their family. */
+const claudePrefillRefused = (kind: string, key: string) => {
+  const match = /(?:^|[./])claude-(sonnet|opus|haiku|fable|mythos)-(\d+)(?:[.-](\d{1,2})(?!\d))?(?:$|[-@:])/i.exec(
+    key.replace(/^ft:/i, "")
+  )
+  if (!match) return false
+  const family = `${match[1]!.toLowerCase()}:${Number(match[2])}.${Number(match[3] ?? 0)}`
+  return kind === "anthropic"
+    ? ["sonnet:4.6", "haiku:5.5", "sonnet:5.0", "fable:5.2"].includes(family)
+    : kind === "openrouter" && family === "haiku:5.5"
+}
 
 const providerPrefill = (connection: ModelConnection | undefined, key: string): typeof Prefill.Type | undefined => {
   if (!connection) return
-  const { kind, api, provider } = connection
-  if (
-    claudeAssistantPrefill.test(key) &&
-    (api === "anthropic-messages" || (kind === "openrouter" && key.startsWith("anthropic/")))
-  )
-    return "assistant"
-  if (kind === "deepseek") return "assistant"
-  if (
-    (api === "openai-completions" || api === "openai-responses") &&
-    openAIStructuredTools.test(key) &&
-    (provider === "openai" || (kind === "openrouter" && key.startsWith("openai/")))
-  )
-    return "tool_schema"
-  if (kind === "openrouter" && /^(?:deepseek\/|xiaomi\/mimo)/.test(key)) return "assistant"
+  const { kind, api } = connection
+  if (api === "anthropic-messages" || (kind === "openrouter" && /^anthropic\/claude/i.test(key)))
+    return claudePrefillRefused(kind, key) ? "none" : "assistant"
+  if (kind === "deepseek" || (kind === "openrouter" && /^(?:deepseek\/|xiaomi\/mimo)/i.test(key))) return "assistant"
+  if (api === "openai-completions" || api === "openai-responses") return "tool_schema"
 }
 
 /** A versioned family can declare vision even when a list supplies only its ID. */

@@ -143,15 +143,18 @@ describe("R4-C review acceptance regressions", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("supports the task's OpenAI tool-schema prefill capability instead of rejecting it as unavailable", () => {
+  it.live("infers Responses schema prefill for preset and Continue on an opaque compatible model", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* mockProvider()
       const api = yield* client()
       const { chat, version, events } = yield* generateReply(api, {
         connection: { kind: "openai-responses", baseUrl: `${mock.url}/v1`, apiKey: "sk-synthetic-only" },
-        model: { prefill: "tool_schema" }
+        model: {},
+        preset: { assistant_prefill: "Hm." }
       })
+      const first = mock.requests()[0]!.body as { tools?: Array<{ name?: string }> }
+      assert.strictEqual(first.tools?.[0]?.name, "continue_reply", "the preset uses the inferred schema dialect")
       const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       const continued = yield* api.ContinueVersion({
         versionId: version.id,
@@ -180,7 +183,7 @@ describe("R4-C review acceptance regressions", () => {
         "schema output must leave room for both the original prefix and new prose"
       )
       assert.strictEqual(sent.tools[0]!.strict, true)
-      assert.strictEqual(sent.tools[0]!.parameters.properties.text.pattern, "^The ledger says otherwise\\.")
+      assert.strictEqual(sent.tools[0]!.parameters.properties.text.pattern, '^ More "prose"\\.\nA tide 🌊\\.')
       const inspection = yield* api.GetRunContext({ versionId: done.id })
       assert.strictEqual(inspection.messages.at(-1)!.content, version.content)
       assert.strictEqual(inspection.messages.at(-1)!.prefill?.protocol, "tool_schema")

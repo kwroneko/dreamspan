@@ -66,7 +66,7 @@ describe("the request inspector", () => {
       const api = yield* client()
       const { version, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {},
+        model: { prefill: "none" },
         preset: { assistant_prefill: "Hm." }
       })
       assert.strictEqual(version.status, "complete")

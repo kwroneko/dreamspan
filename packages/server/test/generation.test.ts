@@ -55,7 +55,7 @@ describe("generation", () => {
       const api = yield* client()
       const { version, connection, model } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {},
+        model: { prefill: "none" },
         preset: { temperature: 0.7, top_p: 0.9, seed: 42, assistant_prefill: "Hm." }
       })
       assert.strictEqual(version.status, "complete")
@@ -81,7 +81,7 @@ describe("generation", () => {
       ])
       assert.deepInclude(body, { model: "mock-model", stream: true, temperature: 0.7, top_p: 0.9, seed: 42 })
       assert.notProperty(body, "max_completion_tokens")
-      // The model isn't known to take a prefill, so it was dropped and that's recorded.
+      // Prefill is explicitly disabled for this model, so it was dropped and that's recorded.
       assert.deepStrictEqual(
         db.snapshot.issues.map((i) => i.kind),
         ["prefill_dropped"]
