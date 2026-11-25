@@ -122,32 +122,32 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape")
       await expect(peek).toHaveCount(0)
 
-      // Its corner button opens it in the image column, explained on hover; shown always on touch.
+      // The tile has no hover popover and no column button; closing the peek returns focus to it.
       const thumb = attached.getByRole("button", { name: "View costume.png", exact: true })
-      const toColumn = attached.getByRole("button", { name: "Open in image column", exact: true })
-      // Closing the peek returns focus to the thumbnail, which shows the button too.
       await expect(thumb).toBeFocused()
-      await page.mouse.move(0, 0)
-      await expect(toColumn).toHaveCSS("opacity", "1")
-      await expect(attached.getByRole("button", { name: "Remove costume.png", exact: true })).toHaveCSS("opacity", "1")
-      await thumb.blur()
-      await page.mouse.move(0, 0)
-      await expect(toColumn).toHaveCSS("opacity", "0")
-      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-rest-${width}-${colorScheme}.png`) })
-      await thumb.hover()
-      await expect(toColumn).toHaveCSS("opacity", "1")
-      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-hover-${width}-${colorScheme}.png`) })
+      await expect(attached.getByRole("button", { name: "Open in image column", exact: true })).toHaveCount(0)
       const remove = attached.getByRole("button", { name: "Remove costume.png", exact: true })
       await expect(remove).toHaveCSS("opacity", "1")
+      await thumb.blur()
+      await page.mouse.move(0, 0)
+      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-rest-${width}-${colorScheme}.png`) })
+      await thumb.hover()
+      await expect(tooltip(page)).toHaveCount(0)
+      if (screenshots) await page.screenshot({ path: join(screenshots, `draft-hover-${width}-${colorScheme}.png`) })
       await remove.hover()
       await expect(tooltip(page)).toHaveText("Removes this image from the message. It isn't sent.")
-      await toColumn.hover()
-      await expect(tooltip(page)).toHaveText("Opens this image in the image column, beside the chat.")
       await expectLayout(page, test.info(), `attachment-thumbnail-${width}-${colorScheme}`, {
         scope: '[aria-label="Image attachments"]',
         hovered: true
       })
-      await toColumn.click()
+      // The peek's header button opens it in the image column and closes the peek.
+      await thumb.click()
+      await page.locator("[data-picture-peek]").waitFor()
+      const peekColumn = page.getByRole("button", { name: "Open in image column", exact: true })
+      await peekColumn.hover()
+      await expect(tooltip(page)).toHaveText("Opens this image in the image column, beside the chat.")
+      await peekColumn.click()
+      await expect(page.locator("[data-picture-peek]")).toHaveCount(0)
       await closeViewer(page, width, "costume.png")
 
       // Its app context menu: Open in image column, Open as a tab, each explained.
@@ -204,7 +204,7 @@ for (const colorScheme of ["light", "dark"] as const) {
   }
 }
 
-test("on a touch screen an attachment's two buttons show without a hover", async ({ browser }) => {
+test("on a touch screen an attachment's remove button shows without a hover", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const page = await context.newPage()
   expect(await page.evaluate(() => matchMedia("(hover: none) and (pointer: coarse)").matches)).toBe(true)
@@ -213,8 +213,8 @@ test("on a touch screen an attachment's two buttons show without a hover", async
     .getByLabel("Choose images")
     .setInputFiles({ name: "touch.png", mimeType: "image/png", buffer: await drawing(page) })
   const attached = page.getByRole("list", { name: "Attached images" })
-  const { column, x } = await expectImageTile(attached, "touch.png")
-  for (const button of [column, x]) await expect(button).toHaveCSS("opacity", "1")
+  const { x } = await expectImageTile(attached, "touch.png")
+  await expect(x).toHaveCSS("opacity", "1")
   await x.tap()
   await expect(attached).toHaveCount(0)
   await context.close()
@@ -496,12 +496,6 @@ test("an attachment still uploading peeks from its local copy; the column and ta
   const attached = page.getByRole("list", { name: "Attached images" })
   const thumb = attached.getByRole("button", { name: "View slow.png", exact: true })
   await expect(thumb).toBeVisible()
-  // The corner button says why it waits, and stays disabled.
-  const toColumn = attached.getByRole("button", { name: "Open in image column", exact: true })
-  await thumb.hover()
-  await expect(toColumn).toHaveAttribute("aria-disabled", "true")
-  await toColumn.hover()
-  await expect(tooltip(page)).toHaveText("This image can open there once it has finished uploading.")
   // So do the context menu's items.
   await thumb.click({ button: "right" })
   const menu = page.getByRole("menu", { name: "Image", exact: true })
@@ -514,15 +508,21 @@ test("an attachment still uploading peeks from its local copy; the column and ta
   await expect(menu).toHaveCount(0)
   // The peek shows the browser's own copy meanwhile.
   await thumb.click()
+  const peekToColumn = page.getByRole("button", { name: "Open in image column", exact: true })
+  await expect(peekToColumn).toBeDisabled()
   const peeked = page.locator("[data-picture-peek]").getByRole("img", { name: "slow.png at full size" })
   await expect.poll(() => peeked.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
   await expect(peeked).toHaveAttribute("src", /^blob:/)
   await page.locator("[data-window-close]").click()
   await expect(peeked).toHaveCount(0)
   release()
-  await expect(toColumn).not.toHaveAttribute("aria-disabled", "true")
-  await thumb.hover()
-  await toColumn.click()
+  await thumb.click({ button: "right" })
+  const stored = page.getByRole("menu", { name: "Image", exact: true })
+  await expect(stored.getByRole("menuitem", { name: "Open in image column", exact: true })).not.toHaveAttribute(
+    "aria-disabled",
+    "true"
+  )
+  await stored.getByRole("menuitem", { name: "Open in image column", exact: true }).click()
   await expect(page.getByRole("complementary", { name: "slow.png's image", exact: true })).toBeVisible()
 })
 
@@ -579,8 +579,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(limited).toHaveAttribute("aria-pressed", "true")
       await expect(limited).toHaveAttribute("aria-disabled", "true")
       await expect(message.getByRole("button", { name: /^View image 1 \(not sent/ })).toBeVisible()
-      await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
-      await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible()
+      // Re-enter until the tooltip opens: a pointer already resting over the tile fires no enter.
+      await expect(async () => {
+        await page.mouse.move(0, 0)
+        await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
+        await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible({
+          timeout: 2000
+        })
+      }).toPass({ timeout: 15000 })
       const screenshots = process.env.SCREENSHOT_DIR
       if (screenshots) await page.screenshot({ path: join(screenshots, `image-rule-${width}-${colorScheme}.png`) })
 

@@ -25,14 +25,7 @@ import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
-import {
-  CornerIconButton,
-  IconButton,
-  PICTURE_TOGGLE,
-  SquareIconButton,
-  ToggleIconButton,
-  Tooltip
-} from "../../ui/Tooltip.tsx"
+import { CornerIconButton, IconButton, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
 import { EnsurePortraitViewer, PicturePeek, type Portrait, usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -172,7 +165,7 @@ function AttachButton({
 const UPLOADING = "This image can open there once it has finished uploading."
 
 /**
- * An image's other ways to open (owner, 2026-11-07), for its context menu and corner button:
+ * An image's other ways to open (owner, 2026-11-07), for its context menu:
  * in the image column (full screen on a phone, as a portrait's) and as a tab. Disabled, with
  * the reason, while `picture` is null: an attachment still uploading has no stored image yet.
  */
@@ -238,29 +231,9 @@ function ImageMenu({
 }
 
 /**
- * The thumbnail's button at its bottom right, inside it (the remove X takes the top right): opens
- * it in the image column (on hover and focus; always on touch).
- */
-function ColumnButton({ picture }: { picture: Portrait | null }) {
-  const { column } = useImageActions(picture)
-  return (
-    <span data-layout-overlay="Open in image column sits over the thumbnail" className="absolute right-1 bottom-1 flex">
-      <ToggleIconButton
-        label="Open in image column"
-        icon="sidebar"
-        hint={picture ? "Opens this image in the image column, beside the chat." : UPLOADING}
-        disabled={column.disabled}
-        onClick={column.run}
-        className={`tile-action ${PICTURE_TOGGLE}`}
-      />
-    </span>
-  )
-}
-
-/**
  * An attached image not sent yet, as the list shows it: a click peeks at it in a modal with the
  * column's viewer (owner, 2026-11-07: "Images attached to the composer should be peeked in a
- * modal"); its context menu and corner button open it in the column, or as a tab, once stored.
+ * modal"); its context menu opens it in the column, or as a tab, once stored.
  */
 function AttachedThumbnail({
   item,
@@ -286,28 +259,19 @@ function AttachedThumbnail({
       <ImageMenu
         picture={picture}
         trigger={
-          <Tooltip
-            label={
-              peekable
-                ? "Opens this image to look at it closely. Right-click or long-press to open it in the image column."
-                : "This image is still being added."
-            }
+          <button
+            type="button"
+            aria-label={`View ${item.name}`}
+            aria-disabled={peekable ? undefined : true}
+            onClick={() => {
+              if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
+            }}
+            className="block overflow-hidden rounded-md border border-border bg-surface-raised outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <button
-              type="button"
-              aria-label={`View ${item.name}`}
-              aria-disabled={peekable ? undefined : true}
-              onClick={() => {
-                if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
-              }}
-              className="block overflow-hidden rounded-md border border-border bg-surface-raised outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              {item.thumbnail}
-            </button>
-          </Tooltip>
+            {item.thumbnail}
+          </button>
         }
       />
-      <ColumnButton picture={picture} />
       {corner}
     </div>
   )
@@ -1162,7 +1126,9 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     onRemove={state.remove}
                   />
                   {state.entries.length === 0 ? null : state.attacher ? (
-                    images && vision === false ? <VisionNote vision={vision} maxImages={maxImages} /> : null
+                    images && vision === false ? (
+                      <VisionNote vision={vision} maxImages={maxImages} />
+                    ) : null
                   ) : (
                     <VisionNote vision={vision} maxImages={maxImages} />
                   )}
