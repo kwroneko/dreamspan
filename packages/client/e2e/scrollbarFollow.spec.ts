@@ -101,7 +101,7 @@ const openStream = async (page: Page, baseUrl: string) => {
   return { chatId, list, reply, fromEnd, otherId }
 }
 
-const dragUp = async (page: Page, list: Locator) => {
+const grabThumb = async (page: Page, list: Locator) => {
   const { x, y, gutter } = await list.evaluate((node) => {
     const box = node.getBoundingClientRect()
     return { x: box.right - 4, y: box.bottom - 8, gutter: box.width - node.clientWidth }
@@ -109,8 +109,70 @@ const dragUp = async (page: Page, list: Locator) => {
   expect(gutter).toBeGreaterThan(4)
   await page.mouse.move(x, y)
   await page.mouse.down()
+  return { x, y }
+}
+
+const dragUp = async (page: Page, list: Locator) => {
+  const { x, y } = await grabThumb(page, list)
   await page.mouse.move(x, y - 80)
   return { x, y }
+}
+
+for (const width of [1440, 390]) {
+  test(`grabbing the stationary thumb keeps following reply growth at ${width}px`, async ({ page, provider }) => {
+    await page.setViewportSize({ width, height: 850 })
+    const { list, reply, fromEnd } = await openStream(page, provider.baseUrl)
+    // Let initial positioning and its history save settle before grabbing the native thumb.
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    await expect.poll(() => page.evaluate(() => history.state?.chatReading?.slot)).toBeNull()
+    await grabThumb(page, list)
+
+    provider.append(41, 41)
+    await expect(reply).toContainText(paragraph(41))
+    const heldGap = await list.evaluate(
+      (node) =>
+        new Promise<number>((done) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => done(node.scrollHeight - node.scrollTop - node.clientHeight))
+          )
+        )
+    )
+    await page.mouse.up()
+
+    provider.append(42, 70)
+    await expect(reply).toContainText(paragraph(70))
+    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
+    expect(heldGap).toBeLessThanOrEqual(2)
+  })
+
+  test(`Back returns to the end after a stationary thumb release resumes follow at ${width}px`, async ({
+    page,
+    provider
+  }) => {
+    await page.setViewportSize({ width, height: 850 })
+    const { chatId, list, reply, fromEnd, otherId } = await openStream(page, provider.baseUrl)
+    const { x, y } = await dragUp(page, list)
+    await expect.poll(fromEnd).toBeGreaterThan(100)
+    await page.mouse.move(x, y)
+    await expect.poll(fromEnd).toBeLessThanOrEqual(1)
+
+    // Let the scroll's history write capture the article while the drag is still active.
+    const slot = await reply.getAttribute("data-slot")
+    expect(slot).toBeTruthy()
+    await expect.poll(() => page.evaluate(() => history.state?.chatReading?.slot)).toBe(slot)
+    await page.mouse.up()
+
+    if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+    await page.locator(`a[data-chat-id="${otherId}"]:visible`).click()
+    await expect(page.getByRole("heading", { name: "Other chat" })).toBeVisible()
+
+    provider.append(41, 70)
+    provider.finish()
+    await page.goBack()
+    await expect(page).toHaveURL(new RegExp(`/chats/${chatId}`))
+    await expect(reply).toContainText(paragraph(70))
+    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
+  })
 }
 
 test("releasing a thumb held at the end resumes follow after reply growth", async ({ page, provider }) => {
