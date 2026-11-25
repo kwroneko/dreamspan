@@ -12,6 +12,8 @@
 
 **Built finish1-native (2026-11-25), obsolete as a proposal.** Messages and Responses default to native loading, including opaque deployments and Bedrock Responses. The recorded Responses nano failure and OpenRouter Responses GPT-5.4 mini cache/replay failure retain dispatcher. Earlier model-generation and host-wide restrictions in §17.1 are historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
 
+**Built finish1-alibaba (2026-11-25), obsolete as a proposal.** The Alibaba cache-family lookup normalizes routing tags before marker and TTL decisions. The measurement record in §17.3 row 5 is retained. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
+
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
 This replaces WORKSHOP §1.2's "Skills … Not taken" row and AGENTIC §1.2's "dynamic tool loading" exclusion, for workshops only.

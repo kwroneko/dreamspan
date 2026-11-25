@@ -261,15 +261,16 @@ export const routerCacheFamily = (
   routing?: Record<string, unknown>
 ): RouterCacheFamily | null => {
   if (!model) return null
-  if (/^anthropic\/claude/i.test(model)) return "anthropic"
-  if (/^google\/gemini/i.test(model)) return "gemini"
+  const key = model.split(":", 1)[0]!
+  if (/^anthropic\/claude/i.test(key)) return "anthropic"
+  if (/^google\/gemini/i.test(key)) return "gemini"
   const pin = pinnedRoute(routing)
   if (
     (pin === null || pin === "alibaba") &&
-    /^qwen\/(?:qwen-plus|qwen3-(?:max|coder-plus|coder-flash)|qwen3\.(?:[6-9]|[1-9]\d+)-(?:plus|max))$/i.test(model)
+    /^qwen\/(?:qwen-plus|qwen3-(?:max|coder-plus|coder-flash)|qwen3\.(?:[6-9]|[1-9]\d+)-(?:plus|max))$/i.test(key)
   )
     return "alibaba"
-  if (pin === "alibaba" && model === "deepseek/deepseek-v3.2") return "alibaba"
+  if (pin === "alibaba" && key === "deepseek/deepseek-v3.2") return "alibaba"
   return null
 }
 
