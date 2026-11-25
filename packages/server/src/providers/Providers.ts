@@ -21,11 +21,7 @@ import type { AssembledRequest, ModelInput, InspectionInputs } from "../assemble
 import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
 import { cacheIdentity, routeCacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
-import {
-  openAIExplicitCacheMode,
-  openAIGpt5OrLater,
-  openAIResponseToolSearch
-} from "@dreamspan/shared/modelFamilies.ts"
+import { openAIExplicitCacheMode, openAIResponseToolSearch } from "@dreamspan/shared/modelFamilies.ts"
 import type {
   Api,
   AssistantMessage,
@@ -885,9 +881,7 @@ const buildPiModel = async (
       : {}),
     ...(claudeSystemUpdates ? { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } : {}),
     ...(openaiStrict ? { supportsStrictMode: true } : {}),
-    ...(prepared.provider === "openai" && openAIGpt5OrLater.test(model.key)
-      ? { supportsOpenAIGrammarTools: true }
-      : {}),
+    ...(prepared.api === "openai-completions" || responses ? { supportsOpenAIGrammarTools: true } : {}),
     ...(openaiCacheMode ? { supportsExplicitPromptCacheMode: true } : {}),
     ...(anthropicStrict ? { supportsStrictTools: true } : {})
   }

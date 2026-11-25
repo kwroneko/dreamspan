@@ -1240,6 +1240,8 @@ Chat panels use `panel`; an explicit close marks that history entry so the brows
 
 **Strict tool defaults (finish1 review).** JSON-schema constrained tool sampling defaults on for the Chat Completions, Responses and Messages wires, including compatible forwarders, opaque deployment IDs and the Bedrock/Vertex Messages adapters. Explicit connection and model compat values still win. `strictDefaults.test.ts` checks final dispatched strict tool declarations and refusal before dispatch with an explicit false.
 
+**Grammar tool defaults (finish1 review).** Chat Completions and Responses send grammar-constrained tools on compatible forwarders and opaque deployment IDs by default, while explicit model and connection compat overrides remain authoritative. `grammarDefaults.test.ts` checks final custom-tool declarations on both wires and the ordinary function-tool fallback with an explicit false.
+
 `packages/server/src/providers/` (spec/PROVIDERS.md §4, §7, §9). It's the one entry point to models, for the assembler (phase 2) and later the agent loop. Dependencies are pinned: `@earendil-works/pi-ai` 1.0.3, OpenAI 7.19.0, Anthropic 0.129.0 and Google GenAI 2.21.0. Startup scrubs ambient SDK configuration, and requests use the controlled transport. Upgrades require another environment/transport audit; installed libraries are unmodified.
 
 **The provider registry** (`providers/registry.ts`, `providers/builtins.ts`; the generic mechanism is `@dreamspan/shared/registry.ts`, re-exported as `src/registry.ts`). This is the first registry of the structure in spec/PLUGINS.md §3.1: the core registers its features through the same registries plugins will use.
