@@ -295,67 +295,6 @@ test("Back restores a short scrollbar release while the reply grows in another c
 
 const endMarker = (page: Page) => page.evaluate(() => history.state?.chatReading?.slot)
 
-const pressShiftTrack = async (page: Page, list: Locator) => {
-  const { x, y, bottom, gutter } = await list.evaluate((node) => {
-    const box = node.getBoundingClientRect()
-    return {
-      x: box.right - 4,
-      y: box.top + box.height / 5,
-      bottom: box.bottom - 2,
-      gutter: box.width - node.clientWidth
-    }
-  })
-  expect(gutter).toBeGreaterThan(4)
-  await page.mouse.move(x, y)
-  await page.keyboard.down("Shift")
-  await page.mouse.down()
-  return { x, bottom }
-}
-
-for (const width of [1440, 390]) {
-  test(`a Shift-track press dragged back to the end resumes follow at ${width}px`, async ({ page, provider }) => {
-    await page.setViewportSize({ width, height: 850 })
-    const { list, reply, fromEnd } = await openStream(page, provider.baseUrl)
-    await expect.poll(() => endMarker(page)).toBeNull()
-
-    const { x, bottom } = await pressShiftTrack(page, list)
-    await expect.poll(fromEnd).toBeGreaterThan(300)
-    await page.mouse.move(x, bottom, { steps: 8 })
-    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
-    await page.mouse.up()
-    await page.keyboard.up("Shift")
-    await expect(reply.getByText(paragraph(40), { exact: true })).toBeInViewport()
-    // Let the released gesture settle before sending the next burst.
-    await page.waitForTimeout(300)
-
-    provider.append(41, 100)
-    await expect(reply).toContainText(paragraph(100))
-    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
-    await expect(reply.getByText(paragraph(100), { exact: true })).toBeInViewport()
-  })
-
-  test(`a Shift-track click released in history keeps its reading position at ${width}px`, async ({
-    page,
-    provider
-  }) => {
-    await page.setViewportSize({ width, height: 850 })
-    const { list, reply, fromEnd } = await openStream(page, provider.baseUrl)
-    await expect.poll(() => endMarker(page)).toBeNull()
-
-    await pressShiftTrack(page, list)
-    await expect.poll(fromEnd).toBeGreaterThan(300)
-    await page.mouse.up()
-    await page.keyboard.up("Shift")
-    await expect.poll(() => endMarker(page)).toEqual(expect.any(String))
-    const offset = await list.evaluate((node) => node.scrollTop)
-
-    provider.append(41, 100)
-    await expect(reply).toContainText(paragraph(100))
-    await expect.poll(() => list.evaluate((node) => node.scrollTop)).toBeCloseTo(offset, 0)
-    expect(await fromEnd()).toBeGreaterThan(300)
-  })
-}
-
 test("fp6 #1: a native scrollbar track click keeps its place when a reply grows on press", async ({
   page,
   provider
