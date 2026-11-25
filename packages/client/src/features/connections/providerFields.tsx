@@ -332,15 +332,15 @@ export function ProviderAdvanced({
     >
       <Field
         label="Tool loading"
-        about="Automatic uses measured provider profiles. Trying the dispatcher is untested for other providers and models."
+        about="Automatic loads tools as needed for every model."
         description="Changing the tool list makes the next request read the chat again once, at full input cost. An active run keeps its saved choice."
       >
         <Select<NonNullable<ProviderDraft["toolLoading"]>>
           items={[
             {
               value: "auto",
-              label: "Automatic (measured profiles)",
-              description: "Uses measured loading profiles; other targets get every tool from the start."
+              label: "Automatic",
+              description: "Loads tools as needed, using the best method for the model."
             },
             {
               value: "every",
@@ -349,9 +349,8 @@ export function ProviderAdvanced({
             },
             {
               value: "dispatcher",
-              label: "Try dispatcher (untested)",
-              description:
-                "Tries a fixed dispatcher on this connection. Cache behavior is untested outside the measured profiles."
+              label: "Load tools as needed",
+              description: "Loads tools through a fixed dispatcher on this connection."
             }
           ]}
           value={settings.toolLoading ?? "auto"}

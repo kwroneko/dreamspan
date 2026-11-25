@@ -209,25 +209,9 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
     id: "dispatcher",
     dispatcher: true,
     declaresDeferred: false,
-    supports: (t) => {
-      if (t.toolLoading === "every") return false
-      if (t.toolLoading === "dispatcher") return true
-      // TOOL-LOADING §§11.1, 16: measured Chat ids only; Responses nano remains every-tool.
-      if (
-        directOpenAI(t) &&
-        t.kind === "openai-chat" &&
-        t.api === "openai-completions" &&
-        ["gpt-5.4-nano", "gpt-5.4-mini"].includes(t.key)
-      )
-        return true
-      if (t.kind === "deepseek" && t.api === "openai-completions" && t.key === "deepseek-flash") return true
-      if (t.kind !== "openrouter" || t.api !== "openai-completions") return false
-      const route = pinnedRoute(t.settings?.routing)
-      return (
-        (t.key === "deepseek/deepseek-v4-flash" && route === "deepseek") ||
-        (t.key === "anthropic/claude-haiku-4.5" && route === "amazon-bedrock")
-      )
-    }
+    // TOOL-LOADING §15: every model, unless the user chose every tool. Native wires win first;
+    // §§11.1, 15 and 16 record no measured dispatcher failure, so there is no route exception.
+    supports: (t) => t.toolLoading !== "every"
   }
 ]
 
