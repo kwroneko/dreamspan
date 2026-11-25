@@ -579,8 +579,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(limited).toHaveAttribute("aria-pressed", "true")
       await expect(limited).toHaveAttribute("aria-disabled", "true")
       await expect(message.getByRole("button", { name: /^View image 1 \(not sent/ })).toBeVisible()
-      await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
-      await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible()
+      // Re-enter until the tooltip opens: a pointer already resting over the tile fires no enter.
+      await expect(async () => {
+        await page.mouse.move(0, 0)
+        await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
+        await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible({
+          timeout: 2000
+        })
+      }).toPass({ timeout: 15000 })
       const screenshots = process.env.SCREENSHOT_DIR
       if (screenshots) await page.screenshot({ path: join(screenshots, `image-rule-${width}-${colorScheme}.png`) })
 
