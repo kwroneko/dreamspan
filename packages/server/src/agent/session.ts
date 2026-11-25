@@ -815,7 +815,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           else progressOf.set(toolCallId, text)
           showProgress()
         },
-        vision: (generation.model as { readonly vision?: boolean } | null)?.vision === true,
+        vision: (generation.model as { readonly vision?: boolean } | null)?.vision !== false,
         countTokens: (text: string) =>
           run.reader.CountRolloutContext({
             model: JSON.stringify(model),
