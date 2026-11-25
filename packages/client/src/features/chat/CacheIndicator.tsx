@@ -154,8 +154,8 @@ const useBeforeReply = (session: ChatSession, replying: boolean) => {
   return waiting
 }
 
-/** The chip's text keeps the room its fullest state needs ("↻ 12k of 130k uncached"), so a state change moves nothing after it. */
-const SPAN = "inline-block min-w-[22ch] text-center"
+/** The chip keeps the room of its widest common text ("Cache after reply"), so the usual state changes move nothing after it; a rare long change note may grow it. */
+const SPAN = "inline-block min-w-[17ch] text-left"
 
 export function CacheChip({ session, view }: { session: ChatSession; view: ChatView }) {
   const warmth = view.cache
@@ -188,7 +188,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
       <Popover
         open={open}
         onOpenChange={setOpen}
-        trigger={<span className={SPAN}>Cache –</span>}
+        trigger={<span className={SPAN}>No cache yet</span>}
         triggerLabel="Cache: shown after the first reply. Details"
         hint="Whether your next reply can read this chat from the provider's cache. Shown after the first reply"
         triggerClassName={`${chipClass("neutral")} text-muted`}

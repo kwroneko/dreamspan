@@ -139,7 +139,7 @@ for (const width of [1440, 390]) {
     await expect(branch).toBeDisabled()
     await hint(page, branch, "No other branches yet.")
     // Before any estimate the cache chip is muted and empty, in its place from the start.
-    await expect(page.getByRole("button", { name: /^Cache/ })).toHaveText("Cache –")
+    await expect(page.getByRole("button", { name: /^Cache/ })).toHaveText("No cache yet")
     const composer = page.getByTestId("composer-controls")
     const guidance = composer.getByRole("switch", { name: "Guidance", exact: true })
     const send = composer.getByRole("button", { name: "Send", exact: true })

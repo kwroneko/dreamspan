@@ -145,7 +145,7 @@ export function ContextPopover({
     <Popover
       open={open}
       onOpenChange={onOpenChange}
-      trigger={<span className={`tabular-nums ${loading ? "opacity-60" : ""}`}>{contextText(tokens, maximum)}</span>}
+      trigger={<span className={`inline-block min-w-[11ch] text-center tabular-nums ${loading ? "opacity-60" : ""}`}>{contextText(tokens, maximum)}</span>}
       triggerLabel={`Context: about ${tokens.toLocaleString()}${maximum === null ? "" : ` of ${maximum.toLocaleString()}`} tokens in your ${request} request. Details`}
       hint={
         tone === "warning"
