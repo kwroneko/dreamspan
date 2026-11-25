@@ -6,7 +6,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { mediaPath } from "./media.ts"
 import { composerImages } from "./composerImages.ts"
-import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
+import { NotFound, type AttachmentPublication, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { Writer } from "./Database.ts"
@@ -23,6 +23,8 @@ const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string)
       UNION
       SELECT i.media_id FROM drafts d JOIN composer_images i ON i.draft_id = d.id
         WHERE d.user_id = ${userId} AND i.staged = 1 AND i.status = 'active'
+      UNION
+      SELECT media_id FROM swept_composer_files WHERE user_id = ${userId}
     )
     ${sha256 === undefined ? sql`` : sql`AND m.sha256 = ${sha256}`}`.pipe(Effect.map(([row]) => row?.bytes ?? 0))
 
@@ -212,10 +214,16 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
                 AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
                 AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM swept_composer_files WHERE media_id = media_assets.id)
               RETURNING id`
           : []
         return { versions: gone.length, attachments: dropped.length, media: removed.length }
       }).pipe(transaction(sql, "PruneFileVersions")),
+    FinishAttachmentPublication: ({ token }) =>
+      sql`DELETE FROM attachment_publications WHERE token = ${token}`.pipe(
+        Effect.asVoid,
+        transaction(sql, "FinishAttachmentPublication")
+      ),
     /** The file was put back on disk by the host; this marks the agent's change undone. */
     CompleteFileUndo: (input) =>
       Effect.gen(function* () {
@@ -320,6 +328,9 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
         query("FileSharesGrantedTo")
       ),
     FileVersionBytes: ({ userId, sha256 }) => versionBytes(sql, userId, sha256).pipe(query("FileVersionBytes")),
+    ListAttachmentPublications: ({ userId }) =>
+      sql<AttachmentPublication>`SELECT token, user_id AS userId, path, device, inode FROM attachment_publications
+        ${userId === undefined ? sql`` : sql`WHERE user_id = ${userId}`}`.pipe(query("ListAttachmentPublications")),
     WorkshopImportBytes: ({ userId, media }) =>
       newWorkshopImportMedia(sql, userId, media).pipe(
         Effect.map((rows) => rows.reduce((total, row) => total + row.addedBytes, 0)),

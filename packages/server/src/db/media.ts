@@ -52,4 +52,5 @@ export const discardUnheldMedia = (sql: SqlClient.SqlClient, mediaId: string) =>
     AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
     AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
     AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM swept_composer_files WHERE media_id = media_assets.id)
     RETURNING sha256`

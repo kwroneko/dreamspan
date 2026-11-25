@@ -348,7 +348,8 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
             AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id) /* chat:includes-pending: kept until swept */
             AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
             AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
-            AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)`
+            AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
+            AND NOT EXISTS (SELECT 1 FROM swept_composer_files WHERE media_id = media_assets.id)`
         return gone.length
       }).pipe(transaction(sql, "PruneSavedMedia"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

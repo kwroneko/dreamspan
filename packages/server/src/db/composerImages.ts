@@ -6,7 +6,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { MessageImages } from "@dreamspan/shared/chat.ts"
 import type { ComposerImage } from "@dreamspan/shared/composerApi.ts"
 import { attachedFrom, discardUnheldMedia, mediaHeldBy } from "./media.ts"
-import { NotFound, StorageError } from "./ops.ts"
+import { NotFound, StorageError, type PublishedAttachments } from "./ops.ts"
 
 /** The row as the API gives it: a workshop's attachment adds its kind, name and path (§6.1). */
 interface Row {
@@ -55,11 +55,12 @@ export const attachmentFieldsFit = (file: {
 }
 
 export const composerImages = (sql: SqlClient.SqlClient) => {
-  const owned = (userId: UserId, chatId: string, draftId: string) =>
+  const owned = (userId: UserId, chatId: string, draftId: string, forkId?: string) =>
     Effect.gen(function* () {
       const [row] = yield* sql`SELECT d.id FROM drafts d JOIN chats c ON c.id=d.target_id
       WHERE d.id=${draftId} AND d.user_id=${userId} AND d.target_kind='composer'
-        AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
+        AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
+        ${forkId === undefined ? sql`` : sql`AND d.field=${forkId}`}`
       if (!row) return yield* new NotFound({ entity: "composer", id: draftId })
     })
   const read = (userId: UserId, chatId: string, draftId: string, ids: readonly string[]) =>
@@ -88,6 +89,10 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
         (existing.draft_id !== draftId || (staged && (!existing.staged || existing.media_id !== mediaId)))
       )
         return yield* new NotFound({ entity: "composer image", id })
+      if (!existing) {
+        const [swept] = yield* sql`SELECT 1 FROM swept_composer_files WHERE id=${id}`
+        if (swept) return yield* new NotFound({ entity: "composer image", id })
+      }
       if (mediaId !== null && !existing) {
         // A file of any type only where its chat is a workshop (§6.1); a story's are images.
         // Its name and path are what the model is told (§6.1): the path must be where this user
@@ -138,6 +143,7 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
   const consume = (
     userId: UserId,
     chatId: string,
+    forkId: string,
     draftId: string | undefined,
     ids: readonly string[],
     images: MessageImages
@@ -146,7 +152,7 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
       if (!ids.length) return
       if (!draftId || ids.length !== images.length || new Set(ids).size !== ids.length)
         return yield* new NotFound({ entity: "composer images", id: draftId ?? "" })
-      yield* owned(userId, chatId, draftId)
+      yield* owned(userId, chatId, draftId, forkId)
       for (const [index, id] of ids.entries()) {
         const [row] =
           yield* sql`SELECT id FROM composer_images WHERE id=${id} AND draft_id=${draftId} AND status='active' AND staged=0 AND media_id=${images[index]!.mediaId}`
@@ -154,29 +160,30 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
         yield* sql`UPDATE composer_images SET status='sent' WHERE id=${id}`
       }
     })
-  const stagedFiles = (userId: UserId, chatId: string, draftId: string, ids: readonly string[]) =>
+  const stagedFiles = (userId: UserId, chatId: string, draftId: string, ids: readonly string[], forkId?: string) =>
     Effect.gen(function* () {
-      yield* owned(userId, chatId, draftId)
+      yield* owned(userId, chatId, draftId, forkId)
       return yield* sql<{ id: string; mediaId: string; name: string; sha256: string; byteSize: number }>`
         SELECT i.id, m.id AS mediaId, i.name, m.sha256, m.byte_size AS byteSize
         FROM composer_images i JOIN media_assets m ON m.id = i.media_id
         WHERE i.draft_id = ${draftId} AND i.staged = 1 AND i.status = 'active' AND i.id IN ${sql.in(ids)}`
     })
 
-  /** Records the paths that the send's Files step created, inside the send transaction. */
+  /** Records the prepared paths and their publication intents in the send transaction. */
   const publish = (
     userId: UserId,
     chatId: string,
+    forkId: string,
     draftId: string | undefined,
     ids: readonly string[],
     images: MessageImages,
-    files: ReadonlyArray<{ id: string; path: string; inode: number }>
+    files: PublishedAttachments
   ) =>
     Effect.gen(function* () {
       if (!files.length) return
-      const rows = yield* stagedFiles(userId, chatId, draftId ?? "", ids)
+      const rows = yield* stagedFiles(userId, chatId, draftId ?? "", ids, forkId)
       const byId = new Map(rows.map((row) => [row.id, row]))
-      for (const { id, path, inode } of files) {
+      for (const { id, path, inode, token, device } of files) {
         const row = byId.get(id)
         const image = images[ids.indexOf(id)]
         if (
@@ -194,6 +201,8 @@ export const composerImages = (sql: SqlClient.SqlClient) => {
             ${userId}, NULL, NULL, ${time}
           WHERE NOT EXISTS (SELECT 1 FROM file_versions
             WHERE owner_user_id=${userId} AND path=${path} AND media_id=${row.mediaId} AND origin='attachment')`
+        yield* sql`INSERT INTO attachment_publications (token, user_id, path, device, inode)
+          VALUES (${token}, ${userId}, ${path}, ${device}, ${inode})`
         yield* sql`UPDATE composer_images SET staged=0, name=${image.name}, path=${path} WHERE id=${id}`
         byId.delete(id)
       }

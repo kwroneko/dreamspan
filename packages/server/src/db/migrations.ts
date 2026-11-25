@@ -375,6 +375,46 @@ export const migrationDefinitions = {
           AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = OLD.media_id);
       END`
     ]
+  },
+  "0033_attachment_recovery": {
+    statements: [
+      `CREATE TABLE swept_composer_files (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        media_id TEXT NOT NULL REFERENCES media_assets(id),
+        alt_text TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('image','file')),
+        name TEXT NOT NULL,
+        FOREIGN KEY (user_id, chat_id) REFERENCES swept_workshops(user_id, chat_id) ON DELETE CASCADE
+      ) STRICT, WITHOUT ROWID`,
+      "CREATE INDEX swept_composer_files_workshop ON swept_composer_files(user_id, chat_id, position)",
+      "CREATE INDEX swept_composer_files_media ON swept_composer_files(media_id)",
+      // Keep 0032's cleanup for live drafts, with one additional kind of media hold.
+      "DROP TRIGGER composer_images_discard_staged",
+      `CREATE TRIGGER composer_images_discard_staged AFTER DELETE ON composer_images
+      WHEN OLD.staged = 1 AND OLD.media_id IS NOT NULL
+      BEGIN
+        DELETE FROM media_assets WHERE id = OLD.media_id
+          AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM file_versions WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM swept_composer_files WHERE media_id = OLD.media_id);
+      END`,
+      `CREATE TABLE attachment_publications (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        device INTEGER NOT NULL,
+        inode INTEGER NOT NULL,
+        UNIQUE (user_id, path)
+      ) STRICT, WITHOUT ROWID`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

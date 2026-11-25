@@ -455,6 +455,15 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "Imported or generated media in the configured data volume, and the private temporary file a copy is written to first.",
     expressions: ["readdir(path)", "readFile(join(dataDir, path))", 'open(temporary, "wx", 0o600)']
   },
+  "packages/server/src/files/sendAttachments.ts": {
+    reason:
+      "The configured Files volume and private preparation directory, directory handles used for sync, and a server-created upload copy opened without following links.",
+    expressions: [
+      "open(path, constants.O_RDONLY | constants.O_DIRECTORY)",
+      "readdir(staging)",
+      "open(temporary, constants.O_RDONLY | constants.O_NOFOLLOW)"
+    ]
+  },
   "packages/server/src/sources/cache.ts": {
     reason: "Card-source cache entries and blobs created in the data volume.",
     expressions: [

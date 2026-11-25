@@ -3,6 +3,7 @@ import { installCardSourceCommands } from "./agent/cardSourceCommands.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
 import { WorkshopFiles } from "./files/WorkshopFiles.ts"
+import { AttachmentPublicationRecovery } from "./files/sendAttachments.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
 import { AuthenticatedPluginApi } from "@dreamspan/shared/api.ts"
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
@@ -840,6 +841,7 @@ export const serverWith = <E>(
       RequestGuard
     )
   ).pipe(
+    Layer.provide(AttachmentPublicationRecovery),
     // --- ST data folder import (ARCHITECTURE.md §13)
     // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
     // Import jobs (StImportJobs) run the path imports in their own scope, past any request.

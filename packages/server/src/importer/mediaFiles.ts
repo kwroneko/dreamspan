@@ -50,17 +50,22 @@ export const streamToMedia = async (dataDir: string, chunks: AsyncIterable<Uint8
   const out = await open(temporary, "wx", 0o600)
   try {
     for await (const chunk of chunks) {
+      let offset = 0
+      while (offset < chunk.byteLength) {
+        const { bytesWritten } = await out.write(chunk.subarray(offset))
+        if (bytesWritten === 0) throw new Error("Writing the attachment to storage made no progress.")
+        offset += bytesWritten
+      }
       hash.update(chunk)
       size += chunk.byteLength
-      await out.write(chunk)
     }
     await out.sync()
+    await out.close()
   } catch (error) {
     await out.close().catch(() => undefined)
     await rm(temporary, { force: true })
     throw error
   }
-  await out.close()
   return { temporary, sha256: hash.digest("hex"), size }
 }
 

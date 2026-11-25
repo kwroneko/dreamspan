@@ -519,6 +519,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         yield* composerImages(sql).publish(
           userId,
           chatId,
+          draftForkId,
           commitDraft?.draftId,
           imageDraftIds ?? [],
           images ?? [],
@@ -529,7 +530,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           kind === "message"
             ? yield* composerLibrary(sql).takeForSend(userId, chatId, draftForkId, commitDraft?.draftId, library ?? [])
             : []
-        yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
+        yield* composerImages(sql).consume(
+          userId,
+          chatId,
+          draftForkId,
+          commitDraft?.draftId,
+          imageDraftIds ?? [],
+          images ?? []
+        )
         yield* graph.checkSpeaker(userId, speakerEntityId)
         if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
         if (parentSlotId !== null) {
@@ -1041,20 +1049,21 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           yield* refusePending(sql, chatId)
-          yield* composerImages(sql).publish(
-            userId,
-            chatId,
-            commitDraft?.draftId,
-            imageDraftIds ?? [],
-            images ?? [],
-            publishedAttachments ?? []
-          )
           const forks = yield* Effect.forEach(targets, (target) => graph.ownedFork(userId, chatId, target.forkId))
           if (
             new Set(forks.map((fork) => fork.id)).size !== forks.length ||
             !(yield* separateThreads(sql, chatId, forks))
           )
             return yield* new ThreadsRefused({ message: "Each copy goes to another thread of the same threads." })
+          yield* composerImages(sql).publish(
+            userId,
+            chatId,
+            forks[0]!.id,
+            commitDraft?.draftId,
+            imageDraftIds ?? [],
+            images ?? [],
+            publishedAttachments ?? []
+          )
           const groupId = uuidv7()
           const copies: Array<
             | {

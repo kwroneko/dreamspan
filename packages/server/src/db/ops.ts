@@ -1111,15 +1111,24 @@ const McpWriteOps = RpcGroup.make(
   })
 )
 
-/** What the MCP client needs to reach a server, secrets still encrypted. Never sent to a browser. */
+const AttachmentPublicationFields = {
+  token: Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/)),
+  path: Schema.String,
+  device: Schema.Number,
+  inode: Schema.Number
+}
+const AttachmentPublication = Schema.Struct({ userId: UserId, ...AttachmentPublicationFields })
+export type AttachmentPublication = typeof AttachmentPublication.Type
+
 const PublishedAttachments = Schema.Array(
   Schema.Struct({
     id: Schema.String,
-    path: Schema.String,
-    inode: Schema.Number
+    ...AttachmentPublicationFields
   })
 ).check(Schema.isMaxLength(32))
+export type PublishedAttachments = typeof PublishedAttachments.Type
 
+/** What the MCP client needs to reach a server, secrets still encrypted. Never sent to a browser. */
 export const McpResolved = Schema.Struct({
   connection: McpConnection,
   credential: Schema.NullOr(
@@ -3272,6 +3281,12 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 }))
     },
     success: Schema.Struct({ versions: Schema.Int, attachments: Schema.Int, media: Schema.Int }),
+    error: StorageError
+  }),
+  /** The live link is durable and the preparation has been removed. */
+  Rpc.make("FinishAttachmentPublication", {
+    payload: { token: AttachmentPublicationFields.token },
+    success: Schema.Void,
     error: StorageError
   }),
   /**
@@ -6673,6 +6688,11 @@ const ReadOpsOwn = RpcGroup.make(
   Rpc.make("FileVersionBytes", {
     payload: { userId: UserId, sha256: Schema.optionalKey(Sha256) },
     success: Schema.Int,
+    error: StorageError
+  }),
+  Rpc.make("ListAttachmentPublications", {
+    payload: { userId: Schema.optionalKey(UserId) },
+    success: Schema.Array(AttachmentPublication),
     error: StorageError
   }),
   Rpc.make("WorkshopImportBytes", {

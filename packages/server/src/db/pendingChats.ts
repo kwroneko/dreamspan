@@ -262,6 +262,11 @@ export const sweepPendingChat = (
         SELECT ${userId}, ${chatId}, l.ref_id, l.position
         FROM composer_library l JOIN drafts d ON d.id = l.draft_id
         WHERE d.user_id = ${userId} AND d.target_kind = 'composer' AND d.target_id = ${chatId}`
+      yield* sql`INSERT INTO swept_composer_files (id, user_id, chat_id, position, media_id, alt_text, kind, name)
+        SELECT i.id, ${userId}, ${chatId}, i.rowid, i.media_id, i.alt_text, i.kind, i.name
+        FROM composer_images i JOIN drafts d ON d.id = i.draft_id
+        WHERE d.user_id = ${userId} AND d.target_kind = 'composer' AND d.target_id = ${chatId}
+          AND i.staged = 1 AND i.status = 'active'`
     }
     yield* sql`DELETE FROM chats WHERE id = ${chatId} AND status = 'pending' /* chat:includes-pending: sweeps it */`
     // A copied URL can still find a pending destination or its swept item. Once both

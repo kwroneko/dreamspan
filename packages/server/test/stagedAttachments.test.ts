@@ -1,15 +1,20 @@
 import { assert, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
+import { link, lstat, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { Effect, Stream } from "effect"
+import { Deferred, Effect, Fiber, Stream } from "effect"
 import { expect } from "vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import type { StagedFile } from "@dreamspan/shared/files.ts"
+import { nameOf } from "@dreamspan/shared/files.ts"
 import { Generator } from "../src/chat/Generator.ts"
+import { AppConfig } from "../src/config.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { mediaPath } from "../src/db/media.ts"
-import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { makeAttachmentSend } from "../src/files/sendAttachments.ts"
+import { client, outcome, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -17,6 +22,8 @@ const workspace = "/files/Attachments"
 
 const raw = (path: string, init?: RequestInit) =>
   Effect.flatMap(serverPort, (port) => Effect.promise(() => fetch(`http://127.0.0.1:${port}${path}`, init)))
+
+const rawFile = (name: string) => raw(`/files/raw?${new URLSearchParams({ path: `${workspace}/${name}` })}`)
 
 const stage = (name: string, content: string, composer: AttachmentComposer) =>
   Effect.gen(function* () {
@@ -226,4 +233,281 @@ it.live(
       assert.strictEqual(yield* textOf(next), "First upload.")
       assert.strictEqual(yield* textOf(third), "Carried upload.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("keeps the upload private while the writer is waiting to reject a stale send", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const api = yield* client()
+    const writer = yield* Writer
+    const { id: userId } = yield* api.Whoami()
+    const chat = yield* api.CreateWorkshop({ title: "A stale send" })
+    const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+    const staged = yield* stage("private.txt", "Held until an accepted send.", {
+      chatId: chat.id,
+      draftId: draft.id,
+      id: "private"
+    })
+    yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "Moved.",
+        reply: false
+      })
+    )
+    const send = yield* makeAttachmentSend.pipe(Effect.provideService(AppConfig, config))
+    const entered = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const composer = { draftId: draft.id, session: draft.session }
+    const input = {
+      chatId: chat.id,
+      composer,
+      imageDraftIds: ["private"],
+      images: [{ mediaId: staged.mediaId, kind: "file" as const, name: staged.name }]
+    }
+    const sending = yield* send(userId, input, (attachments) =>
+      Effect.gen(function* () {
+        yield* Deferred.succeed(entered, undefined)
+        yield* Deferred.await(release)
+        return yield* writer.SendOrQueue({
+          ...input,
+          ...attachments,
+          userId,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          kind: "message",
+          content: "Stale.",
+          speakerEntityId: null,
+          replySpeakerEntityId: null,
+          noReply: true,
+          direction: null,
+          commitDraft: composer
+        })
+      })
+    ).pipe(Effect.flip, Effect.forkScoped)
+    yield* Deferred.await(entered)
+    const inFlight = yield* rawFile(staged.name).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+    assert.strictEqual((yield* Fiber.join(sending))._tag, "LeafMoved")
+    assert.strictEqual((yield* rawFile(staged.name)).status, 404)
+    assert.strictEqual(inFlight.status, 404, "the rejected send must never expose the file")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+})
+
+it.live("recovers accepted publications on startup through an interrupted link without duplicating it", () => {
+  const config = testConfig()
+  const files = join(config.dataDir, "files")
+  const privateFolder = join(files, ".attachment-publications")
+  const name = "notes.txt"
+  const second = "notes (2).txt"
+  const third = "notes (3).txt"
+  const at = (userId: string, name: string) => join(files, userId, "Attachments", name)
+  const server = serverLayer(config, Generator.none)
+  return Effect.gen(function* () {
+    const { userId, inode } = yield* Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const { id: userId } = yield* api.Whoami()
+      const chat = yield* api.CreateWorkshop({ title: "Interrupted send" })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+      const composer = { chatId: chat.id, draftId: draft.id }
+      const prior = yield* raw(
+        `/files/upload?${new URLSearchParams({ path: `${workspace}/${name}`, conflict: "keep" })}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: "Earlier."
+        }
+      )
+      assert.strictEqual(prior.status, 200)
+      const first = yield* stage(name, "First attachment.", { ...composer, id: "one" })
+      const last = yield* stage(name, "Second attachment.", { ...composer, id: "two" })
+      const input = {
+        chatId: chat.id,
+        composer,
+        imageDraftIds: ["one", "two"],
+        images: [first, last].map(({ mediaId, name }) => ({ mediaId, kind: "file" as const, name }))
+      }
+      const send = yield* makeAttachmentSend.pipe(Effect.provideService(AppConfig, config))
+      const lost = new Error("The writer's reply was lost after commit.")
+      assert.strictEqual(
+        yield* send(userId, input, (attachments) =>
+          writer
+            .SendOrQueue({
+              ...input,
+              ...attachments,
+              userId,
+              parentSlotId: chat.activeLeafSlotId,
+              branch: false,
+              kind: "message",
+              content: "With two files.",
+              speakerEntityId: null,
+              replySpeakerEntityId: null,
+              noReply: true,
+              direction: null,
+              commitDraft: { draftId: draft.id, session: draft.session }
+            })
+            .pipe(Effect.andThen(Effect.fail(lost)))
+        ).pipe(Effect.flip),
+        lost
+      )
+      assert.strictEqual((yield* rawFile(second)).status, 404)
+      assert.strictEqual((yield* rawFile(third)).status, 404)
+      const pending = yield* reader.ListAttachmentPublications({ userId })
+      assert.lengthOf(pending, 2)
+      const linked = pending.find(({ path }) => nameOf(path) === second)!
+      yield* Effect.promise(async () => {
+        await link(join(privateFolder, linked.token), at(userId, second))
+        await writeFile(join(privateFolder, crypto.randomUUID()), "A preparation left before commit.")
+      })
+      return { userId, inode: linked.inode }
+    }).pipe(Effect.scoped, Effect.provide(server))
+
+    yield* Effect.gen(function* () {
+      const reader = yield* Reader
+      const api = yield* client()
+      assert.strictEqual((yield* api.Whoami()).id, userId)
+      assert.deepStrictEqual(yield* reader.ListAttachmentPublications({ userId }), [])
+      assert.deepStrictEqual(yield* Effect.promise(() => readdir(privateFolder)), [])
+      assert.strictEqual((yield* Effect.promise(() => lstat(at(userId, second)))).ino, inode)
+      for (const [file, text] of [
+        [name, "Earlier."],
+        [second, "First attachment."],
+        [third, "Second attachment."]
+      ] as const) {
+        const response = yield* rawFile(file)
+        assert.strictEqual(response.status, 200)
+        assert.strictEqual(yield* Effect.promise(() => response.text()), text)
+      }
+      assert.deepStrictEqual((yield* Effect.promise(() => readdir(at(userId, "")))).sort(), [second, third, name])
+    }).pipe(Effect.scoped, Effect.provide(server))
+  })
+})
+
+it.live("refuses to send or consume another fork's staged upload", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateWorkshop({ title: "Two composers" })
+    const original = chat.currentForkId!
+    const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: original, atSlotId: chat.activeLeafSlotId })
+    const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: original })
+    const staged = yield* stage("only-a.txt", "A's draft upload.", { chatId: chat.id, draftId: draft.id, id: "only-a" })
+    const send = (forkId: typeof original) =>
+      api.SendMessage({
+        chatId: chat.id,
+        forkId,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "Attached.",
+        reply: false,
+        composer: { draftId: draft.id, session: draft.session },
+        imageDraftIds: ["only-a"],
+        images: [{ mediaId: staged.mediaId, kind: "file", name: staged.name }]
+      })
+    assert.strictEqual(yield* outcome(send(fork.id)), "NotFound")
+    assert.strictEqual((yield* rawFile(staged.name)).status, 404)
+    assert.deepStrictEqual(
+      (yield* api.GetComposerImages({ chatId: chat.id, draftId: draft.id, ids: [] })).map(({ id }) => id),
+      ["only-a"]
+    )
+    yield* posted(send(original))
+    const response = yield* rawFile(staged.name)
+    assert.strictEqual(yield* Effect.promise(() => response.text()), "A's draft upload.")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("binds a multi-thread send's staged upload to the first target's composer", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const reader = yield* Reader
+    const { id: userId } = yield* api.Whoami()
+    const chat = yield* api.CreateWorkshop({ title: "Two threads" })
+    const chatId = chat.id
+    const forkId = chat.currentForkId!
+    const slotId = chat.activeLeafSlotId!
+    const { entry } = yield* reader.GetSlot({ userId, slotId, forkId })
+    const thread = { name: null, cast: [entry.version.speakerEntityId!], writesAs: null }
+    const { forkIds } = yield* api.StartThreads({
+      chatId,
+      forkId,
+      slotId,
+      expectedRowVersion: entry.rowVersion,
+      threads: [thread, thread]
+    })
+    const draft = yield* api.OpenComposer({ chatId, forkId })
+    const staged = yield* stage("threads.txt", "One file for both threads.", {
+      chatId,
+      draftId: draft.id,
+      id: "threads"
+    })
+    const send = (ids: typeof forkIds) =>
+      api.SendToThreads({
+        chatId,
+        content: "For both threads.",
+        composer: { draftId: draft.id, session: draft.session },
+        imageDraftIds: ["threads"],
+        images: [{ mediaId: staged.mediaId, kind: "file", name: staged.name }],
+        targets: ids.map((forkId) => ({
+          forkId,
+          parentSlotId: slotId,
+          speakerEntityId: null,
+          reply: false,
+          replySpeakerEntityId: null
+        }))
+      })
+    assert.strictEqual(yield* outcome(send([...forkIds].reverse())), "NotFound")
+    assert.strictEqual((yield* rawFile(staged.name)).status, 404)
+    const sent = yield* send(forkIds)
+    for (const copy of sent.copies) {
+      if (copy._tag !== "Posted") return assert.fail("Expected both thread copies to post")
+      assert.strictEqual(copy.entry.version.images?.[0]?.path, `${workspace}/${staged.name}`)
+    }
+    const response = yield* rawFile(staged.name)
+    assert.strictEqual(yield* Effect.promise(() => response.text()), "One file for both threads.")
+    assert.strictEqual((yield* rawFile("threads (2).txt")).status, 404)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("reopens a swept workshop with its staged upload and carries it once through repeated sweeps", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const writer = yield* Writer
+    const reader = yield* Reader
+    const { id: userId } = yield* api.Whoami()
+    const draftFor = "workshop::"
+    const original = yield* api.OpenDraftChat({ draftFor })
+    const draft = yield* api.OpenComposer({ chatId: original.id, forkId: null })
+    const content = "Keep this while the workshop is swept."
+    const staged = yield* stage("carry.txt", content, { chatId: original.id, draftId: draft.id, id: "carry" })
+    const sweep = (chatId: typeof original.id) => writer.SweepPendingChat({ userId, chatId })
+    const reopen = () => api.OpenDraftChat({ draftFor, reopen: original.id })
+    const check = (chatId: typeof original.id) =>
+      Effect.gen(function* () {
+        const composer = yield* api.OpenComposer({ chatId, forkId: null })
+        const images = yield* api.GetComposerImages({ chatId, draftId: composer.id, ids: [] })
+        assert.deepStrictEqual(
+          images.map(({ id, mediaId, name, path }) => ({ id, mediaId, name, path })),
+          [{ id: "carry", mediaId: staged.mediaId, name: staged.name, path: undefined }]
+        )
+        return composer
+      })
+    assert.isTrue(yield* sweep(original.id))
+    const replacement = yield* reopen()
+    assert.notStrictEqual(replacement.id, original.id)
+    yield* check(replacement.id)
+    assert.isTrue(yield* sweep(replacement.id))
+    assert.strictEqual(yield* reader.FileVersionBytes({ userId }), Buffer.byteLength(content))
+    const carried = yield* reopen()
+    assert.notStrictEqual(carried.id, replacement.id)
+    assert.strictEqual((yield* reopen()).id, carried.id)
+    const current = yield* check(carried.id)
+    const copy = yield* raw(`/files/attachment?id=${staged.mediaId}`)
+    assert.strictEqual(yield* Effect.promise(() => copy.text()), content)
+    assert.strictEqual((yield* rawFile(staged.name)).status, 404)
+    yield* api.SetComposerImage({ chatId: carried.id, draftId: current.id, id: "carry", mediaId: null, altText: "" })
+    assert.strictEqual(yield* reader.FileVersionBytes({ userId }), 0)
+    assert.strictEqual((yield* raw(`/files/attachment?id=${staged.mediaId}`)).status, 404)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

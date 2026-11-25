@@ -309,9 +309,17 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const { chat } = yield* stepsFor.createWorkshop(input, swept !== undefined)
         if (swept !== undefined && draftFor !== undefined) {
           const refs = yield* library.sweptRefs(userId, swept)
-          if (refs.length > 0) {
+          const [files] =
+            yield* sql`SELECT 1 FROM swept_composer_files WHERE user_id = ${userId} AND chat_id = ${swept} LIMIT 1`
+          if (refs.length > 0 || files) {
             const draft = yield* openComposer(userId, chat)
             for (const { refId } of refs) yield* library.move(userId, swept, chat.id, draft.id, refId)
+            if (files) {
+              yield* sql`INSERT INTO composer_images (id, draft_id, media_id, alt_text, status, kind, name, staged)
+                SELECT id, ${draft.id}, media_id, alt_text, 'active', kind, name, 1 FROM swept_composer_files
+                WHERE user_id = ${userId} AND chat_id = ${swept} ORDER BY position`
+              yield* sql`DELETE FROM swept_composer_files WHERE user_id = ${userId} AND chat_id = ${swept}`
+            }
           }
           // A retry can follow this link even after the replacement itself is swept.
           yield* sql`UPDATE swept_workshops SET replacement_chat_id = ${chat.id}

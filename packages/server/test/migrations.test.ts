@@ -189,7 +189,8 @@ describe("0002_files", () => {
           "composer_library_handovers",
           "composer_library_carry_cutover",
           "swept_composer_library",
-          "staged_attachments"
+          "staged_attachments",
+          "attachment_recovery"
         ]
       )
       // The existing row is kept, an image by default.
@@ -550,7 +551,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0029_composer_library_handovers",
       "0030_composer_library_carry_cutover",
       "0031_swept_composer_library",
-      "0032_staged_attachments"
+      "0032_staged_attachments",
+      "0033_attachment_recovery"
     ])
   }).pipe(Effect.provide(layer()))
 )
