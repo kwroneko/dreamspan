@@ -244,10 +244,10 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // These models are absent from pi-ai 1.0.3's catalog; never infer their prices.
     id: "google-gemini-4-thinking-levels",
     label: "Thinking stays on, with low, medium or high effort.",
-    models: "Gemini 4 Carbon and Argon",
+    models: "Gemini 4",
     providers: ["google"],
     apis: ["google-generative-ai"],
-    model: /^(?:models\/)?gemini-4-(?:argon|carbon)(?:-|$)/i,
+    model: /^(?:models\/)?gemini-4-/i,
     capabilities: {
       reasoning: true,
       vision: true,
@@ -323,6 +323,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     retryWhen: (e) =>
       e.status === 400 &&
       !e.afterTokens &&
+      !/mandatory|cannot be disabled/i.test(e.message) &&
       /Function tools with reasoning_effort are not supported/i.test(e.message) &&
       /reasoning_effort to ['"]none['"]/i.test(e.message),
     payload: (payload) => {
@@ -339,9 +340,9 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F11: "Reasoning is mandatory for this endpoint and cannot be disabled."
     id: "openrouter-gemini-4-argon-reasoning-on",
     label: "Reasoning stays on: this model can’t turn it off.",
-    models: "Gemini 4 Argon",
+    models: "Gemini 4 (all)",
     providers: ["openrouter"],
-    model: /^google\/gemini-4-argon/i,
+    model: /^google\/gemini-4-/i,
     capabilities: { thinkingLevels: { off: null } },
     payload: (payload) => {
       // Model settings and user-edited thinking levels can bypass the SDK's off mapping.
