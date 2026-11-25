@@ -487,6 +487,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       noReply,
       images,
       imageDraftIds,
+      publishedAttachments,
       library,
       direction,
       commitDraft,
@@ -515,6 +516,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
             : []
         for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
+        yield* composerImages(sql).publish(
+          userId,
+          chatId,
+          commitDraft?.draftId,
+          imageDraftIds ?? [],
+          images ?? [],
+          publishedAttachments ?? []
+        )
         yield* graph.checkImages(userId, images ?? [], chatId)
         const libraryPins =
           kind === "message"
@@ -1028,10 +1037,18 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       // One message to several threads (spec/THREADS.md §6.2): per thread, exactly SendOrQueue's
       // append in that thread's fork, then the reply its Next asked for, all in one transaction
       // and one send group. The thread the user is in goes last, so it stays the current fork.
-      SendToThreads: ({ userId, chatId, images, imageDraftIds, commitDraft, targets }) =>
+      SendToThreads: ({ userId, chatId, images, imageDraftIds, publishedAttachments, commitDraft, targets }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           yield* refusePending(sql, chatId)
+          yield* composerImages(sql).publish(
+            userId,
+            chatId,
+            commitDraft?.draftId,
+            imageDraftIds ?? [],
+            images ?? [],
+            publishedAttachments ?? []
+          )
           const forks = yield* Effect.forEach(targets, (target) => graph.ownedFork(userId, chatId, target.forkId))
           if (
             new Set(forks.map((fork) => fork.id)).size !== forks.length ||

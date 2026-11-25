@@ -679,6 +679,8 @@ export const makeReadHandlers = Effect.gen(function* () {
 
     GetComposerImages: ({ userId, chatId, draftId, ids }) =>
       composerImages(sql).read(userId, chatId, draftId, ids).pipe(query("GetComposerImages")),
+    GetStagedComposerFiles: ({ userId, chatId, draftId, ids }) =>
+      composerImages(sql).stagedFiles(userId, chatId, draftId, ids).pipe(query("GetStagedComposerFiles")),
     GetComposerLibrary: ({ userId, chatId, draftId }) =>
       composerLibrary(sql).read(userId, chatId, draftId).pipe(query("GetComposerLibrary")),
     GetComposerChoice: ({ userId, chatId, draftId }) =>

@@ -1033,7 +1033,7 @@ export const layer = Layer.unwrap(
       const user = yield* CurrentUser
       const query = new URL(request.url, "http://media").searchParams
       const mediaId = query.get("id") ?? ""
-      const file = yield* reader.GetMediaFile({ userId: user.id, mediaId })
+      const file = yield* reader.GetMediaFile({ userId: user.id, mediaId, includeStaged: true })
       // Only images a browser shows as images; anything else stored is never served inline.
       if (!INLINE_IMAGES.has(file.mime)) return jsonError(404, "there's no such image")
       const requested = query.get("w")

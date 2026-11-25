@@ -447,6 +447,7 @@ interface AttachmentItem {
   readonly name: string
   /** A file that isn't an image (§6.1): shown by its name, opening its copy at `fileHref`. */
   readonly kind?: "file"
+  readonly inFiles?: boolean
   /** A character card file (spec/WORKSHOP-CARDS.md §4.5): shown as a card. */
   readonly card?: CardFace
   readonly fileHref?: string | null
@@ -506,9 +507,7 @@ function AttachmentList({
                     <CornerIconButton
                       label={`Remove ${item.name}`}
                       icon="close"
-                      hint={
-                        item.kind === "file" ? "Removes this file from the message. It stays in Files." : removeHint
-                      }
+                      hint={item.inFiles ? "Removes this file from the message. It stays in Files." : removeHint}
                       onClick={() => onRemove(item.id)}
                       className="tile-action relative"
                     />
@@ -726,7 +725,7 @@ function ImageScope({
       const attaching = files.current
       const composer = draftId.current && { chatId: session.chatId, draftId: draftId.current, id: entry.id }
       if (attaching && !composer) throw new Error("Wait for the chat to load before attaching.")
-      // In a workshop, saved in Files first (or already there) and attached by its path (§6.1).
+      // Workshop uploads go to the composer; existing files are attached by their path.
       const attached =
         attaching && composer
           ? entry.file
@@ -741,7 +740,7 @@ function ImageScope({
         scope,
         name: "name" in attached ? attached.name : entry.name,
         mediaId: attached.mediaId,
-        ...("path" in attached ? { path: attached.path } : {}),
+        ...("path" in attached && typeof attached.path === "string" ? { path: attached.path } : {}),
         ...("kind" in attached && attached.kind === "file" ? { kind: "file" as const } : {}),
         ...("card" in attached && attached.card ? { card: attached.card } : {}),
         ...(entry.pendingPosition === undefined ? {} : { pendingPosition: entry.pendingPosition })
@@ -771,7 +770,7 @@ function ImageScope({
   }
   const waitsForGroup = groupEntry && groupKey === null
   useEffect(() => {
-    // Uploads replay where they belong: wait until it's known whether files go to Files.
+    // Replay uploads once the chat's attachment handler is known.
     if (resolvedDraftId === null || loading || waitsForGroup) return
     let live = true
     void enqueue(async () => {
@@ -1085,7 +1084,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
   const images = state.entries.some((entry) => entry.kind !== "file")
   const items = library?.items.length ?? 0
   const filesHint = state.attacher
-    ? `Attach files of any type. They're saved in ${state.attacher.folder}, where the assistant can open them. You can also paste or drop them here, or drag a file from the Files tab.`
+    ? "Attach files of any type. You can also paste or drop them here, or drag a file from the Files tab."
     : "Attach images. You can also paste an image or drop it anywhere in the chat."
   return (
     <Composer
@@ -1130,12 +1129,17 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                   <AttachmentList
                     label={library ? "Attachments" : state.attacher ? "Attached files" : "Attached images"}
                     more={library ? <ComposerLibraryTiles library={library} /> : null}
-                    removeHint="Removes this image from the message. It isn't sent."
+                    removeHint={
+                      state.attacher
+                        ? "Removes this attachment from the draft."
+                        : "Removes this image from the message. It isn't sent."
+                    }
                     items={state.entries.map((entry) => ({
                       id: entry.id,
                       name: entry.name,
                       mediaId: entry.mediaId ?? null,
                       file: entry.file,
+                      inFiles: Boolean(entry.path),
                       thumbnail: <DraftThumbnail entry={entry} />,
                       ...(entry.card
                         ? {
@@ -1161,12 +1165,13 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     }))}
                     onRemove={state.remove}
                   />
-                  {state.entries.length === 0 ? null : state.attacher ? (
-                    <p role="status" className="text-sm text-muted">
-                      {`Saved in ${state.attacher.folder}. The assistant is told where each one is${
-                        images && vision === false ? "; this model can't see images" : ""
-                      }.`}
-                    </p>
+                  {state.attacher ? (
+                    images &&
+                    vision === false && (
+                      <p role="status" className="text-sm text-muted">
+                        This model can't see images.
+                      </p>
+                    )
                   ) : (
                     <VisionNote vision={vision} maxImages={maxImages} />
                   )}

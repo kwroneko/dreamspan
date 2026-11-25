@@ -201,6 +201,26 @@ export const sweepMedia = (dataDir: string, recorded: ReadonlySet<string>, optio
     return deleted
   })
 
+/** Discards a just-unrecorded original, checking again if a concurrent import claims its bytes. */
+export const discardMedia = (dataDir: string, sha256: string, wanted: Effect.Effect<boolean, unknown>) =>
+  Effect.gen(function* () {
+    if (yield* wanted) return
+    const path = join(dataDir, mediaPath(sha256))
+    const aside = `${path}.${randomUUID()}.swept`
+    const moved = yield* Effect.tryPromise(() =>
+      rename(path, aside).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return false
+          throw error
+        }
+      )
+    )
+    if (!moved) return
+    if (yield* wanted.pipe(Effect.orElseSucceed(() => true))) yield* Effect.tryPromise(() => rename(aside, path))
+    else yield* Effect.tryPromise(() => rm(aside, { force: true }))
+  }).pipe(Effect.catch((error) => Effect.logWarning("discarding an attachment's media failed", error)))
+
 /** A stored file's bytes, or undefined if it's missing. Only paths `mediaPath` makes are read. */
 export const readMedia = (dataDir: string, path: string) =>
   isMediaPath(path)

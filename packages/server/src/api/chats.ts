@@ -41,6 +41,7 @@ import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { rewriteText } from "../chat/rewrites.ts"
 import { DraftTooLarge } from "../db/ops.ts"
+import { makeAttachmentSend } from "../files/sendAttachments.ts"
 import { notifyWorkshopDeletions } from "./bin.ts"
 import { internal, toServerError } from "./internal.ts"
 
@@ -93,6 +94,7 @@ const extendScriptRecord = <T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T
 export const makeChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const sendAttachments = yield* makeAttachmentSend
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
   const generations = yield* Generations
@@ -237,20 +239,23 @@ export const makeChatHandlers = Effect.gen(function* () {
               content: params.content
             })
           : { content: params.content }
-      const outcome = yield* writer.SendOrQueue({
-        userId: user,
-        ...send,
-        ...(immediate || outputLimit !== undefined || auto !== undefined ? { immediate: true } : {}),
-        ...(auto === undefined || params.kind !== "generate"
-          ? {}
-          : { auto, autoConfiguration: autoConfigurationStamp() }),
-        content: written.content,
-        ...(written.rewrite ? { rewrite: written.rewrite } : {}),
-        ...(round === undefined || round.length === 0 ? {} : { round }),
-        ...(autoPick === true ? { autoPick } : {}),
-        // The composer draft the text was taken from (DESIGN §6.2).
-        commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
-      })
+      const outcome = yield* sendAttachments(user, params, (attachments) =>
+        writer.SendOrQueue({
+          userId: user,
+          ...send,
+          ...attachments,
+          ...(immediate || outputLimit !== undefined || auto !== undefined ? { immediate: true } : {}),
+          ...(auto === undefined || params.kind !== "generate"
+            ? {}
+            : { auto, autoConfiguration: autoConfigurationStamp() }),
+          content: written.content,
+          ...(written.rewrite ? { rewrite: written.rewrite } : {}),
+          ...(round === undefined || round.length === 0 ? {} : { round }),
+          ...(autoPick === true ? { autoPick } : {}),
+          // The composer draft the text was taken from (DESIGN §6.2).
+          commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
+        })
+      )
       if (outcome._tag === "Queued") {
         hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
         return {

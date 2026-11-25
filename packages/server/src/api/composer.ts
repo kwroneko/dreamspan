@@ -8,6 +8,10 @@ import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { AppConfig } from "../config.ts"
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { MediaHolds } from "../importer/MediaHolds.ts"
+import { discardMedia } from "../importer/mediaFiles.ts"
 import { internal } from "./internal.ts"
 
 export const makeComposerHandlers = Effect.gen(function* () {
@@ -15,6 +19,9 @@ export const makeComposerHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
+  const { dataDir } = yield* AppConfig
+  const { quota } = yield* WorkshopFiles
+  const { pending } = yield* MediaHolds
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -53,9 +60,21 @@ export const makeComposerHandlers = Effect.gen(function* () {
         internal("GetComposerImages")
       ),
     SetComposerImage: (payload) =>
-      Effect.flatMap(userId, (id) =>
-        writer.SetComposerImage({ userId: id, ...payload }).pipe(Effect.tap(() => warmth.refreshUser(id)))
-      ).pipe(internal("SetComposerImage")),
+      Effect.gen(function* () {
+        const id = yield* userId
+        const { image, discardedHash, removedStaged } = yield* writer.SetComposerImage({ userId: id, ...payload })
+        if (discardedHash)
+          yield* discardMedia(
+            dataDir,
+            discardedHash,
+            Effect.suspend(() =>
+              pending.has(discardedHash) ? Effect.succeed(true) : reader.IsMediaRecorded({ sha256: discardedHash })
+            )
+          )
+        if (removedStaged) yield* quota.measure(id, true)
+        yield* warmth.refreshUser(id)
+        return image
+      }).pipe(Effect.uninterruptible, internal("SetComposerImage")),
     GetComposerChoice: ({ chatId, draftId }) =>
       Effect.flatMap(userId, (id) => reader.GetComposerChoice({ userId: id, chatId, draftId })).pipe(
         internal("GetComposerChoice")

@@ -1,6 +1,6 @@
 // Attachments of any type in workshops (spec/FILES-AND-ENVIRONMENT.md §6.1, track A3) in the
-// browser: the paperclip takes a text file, which is saved in the working folder's Attachments
-// folder; the Files tab's Attach to message attaches a file as it is; the sent message lists both
+// browser: remove an unsent file, reload with a draft attachment, then send it.
+// The Files tab's Attach to message attaches a file as it is; the sent message lists both
 // by name, opening the copy as sent in its viewer (with Download there), and Show in Files; the model is told where each one is.
 // Layout audit at 1440 and 390, light and dark. A scripted loopback provider and synthetic files.
 import { expect, type Page, test } from "@playwright/test"
@@ -25,7 +25,7 @@ test.beforeAll(async () => {
     answer: (body) => {
       const text = JSON.stringify(body.messages)
       const seen = ["notes", "outline"].filter((name) => text.includes(`path=\\"/attachments/`) && text.includes(name))
-      return seen.length === 2 && text.includes('<attachment filename=\\"notes.txt\\"')
+      return seen.length === 2 && text.includes('file_path=\\"/files/Attachments/notes.txt\\"')
         ? "I can see notes.txt and outline.md."
         : "No attachments came through."
     }
@@ -77,7 +77,7 @@ for (const width of [1440, 390])
     const composer = page.getByTestId("composer")
     await expect(composer).toBeVisible()
 
-    // The paperclip (Attach) takes any type in a workshop; the file lands in Attachments.
+    // The paperclip keeps unsent files in the composer.
     const clip = page.getByRole("button", { name: "Attach", exact: true })
     await expect(clip).toBeEnabled()
     await page.getByLabel("Choose files").setInputFiles({
@@ -87,8 +87,20 @@ for (const width of [1440, 390])
     })
     const attached = page.getByRole("list", { name: "Attachments" })
     await expect(attached.getByRole("button", { name: "Open notes.txt" })).toBeVisible()
-    await expect(page.getByText("Saved in /files/Attachments.")).toBeVisible()
-    await expect.poll(() => files.has("/files/Attachments/notes.txt")).toBe(true)
+    await expect.soft(page.getByText("Saved in /files/Attachments.")).toHaveCount(0, { timeout: 1000 })
+    expect.soft(await files.has("/files/Attachments/notes.txt")).toBe(false)
+    await page.getByLabel("Choose files").setInputFiles({
+      name: "discard.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Synthetic draft to remove.")
+    })
+    await expect(attached.getByRole("button", { name: "Open discard.txt" })).toBeVisible()
+    await attached.getByRole("button", { name: "Remove discard.txt" }).press("Enter")
+    await expect(attached.getByRole("button", { name: "Open discard.txt" })).toHaveCount(0)
+    await page.reload()
+    await expect(attached.getByRole("button", { name: "Open notes.txt" })).toBeVisible()
+    await expect(attached.getByRole("button", { name: "Open discard.txt" })).toHaveCount(0)
+    expect.soft(await files.has("/files/Attachments/discard.txt")).toBe(false)
 
     // The Files tab attaches a file as it is.
     const panel = await openPanel(page, "Files")
@@ -96,6 +108,17 @@ for (const width of [1440, 390])
     await row.getByRole("button", { name: "Actions for outline.md" }).click()
     await page.getByRole("menuitem", { name: "Attach to message" }).click()
     if (phone) await page.keyboard.press("Escape")
+    await expect(attached.getByRole("button", { name: "Open outline.md" })).toBeVisible()
+    await attached.getByRole("button", { name: "Remove outline.md" }).press("Enter")
+    await expect(attached.getByRole("button", { name: "Open outline.md" })).toHaveCount(0)
+    expect(await files.text("/files/outline.md")).toBe("# Synthetic outline")
+    await composer.evaluate((target) => {
+      const data = new DataTransfer()
+      data.setData("application/x-rp-file-path", "/files/outline.md")
+      target.dispatchEvent(
+        new DragEvent("drop", { dataTransfer: data, bubbles: true, composed: true, cancelable: true })
+      )
+    })
     await expect(attached.getByRole("button", { name: "Open outline.md" })).toBeVisible()
     expect(await files.has("/files/Attachments/outline.md")).toBe(false)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -110,6 +133,7 @@ for (const width of [1440, 390])
     const sent = page.getByRole("article").filter({ hasText: "Read my notes." }).last()
     const listed = sent.getByRole("list", { name: "Message files" })
     await expect(attached).toHaveCount(0)
+    expect(await files.text("/files/Attachments/notes.txt")).toBe("Synthetic notes for the assistant.")
     await audit(page, info, `attachments-message-${width}`, "article[data-slot]")
 
     // A file opens its copy as sent in the viewer for its type (§8.2), read-only, with Download.

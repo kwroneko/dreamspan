@@ -18,7 +18,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
-import { attachmentHeldBy, isMediaPath, mediaHeldBy } from "./media.ts"
+import { attachmentHeldBy, isMediaPath, mediaHeldBy, stagedAttachmentHeldBy } from "./media.ts"
 import { noteAt, noteHere, otherBranches } from "./noteAt.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { linkCounts, linkedNote, sharedNote } from "./sharedNotes.ts"
@@ -322,11 +322,16 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           .toSorted((a, b) => a.title.localeCompare(b.title) || (a.ref.id < b.ref.id ? -1 : 1))
       }).pipe(query("ListSharedNotes")),
 
-    GetMediaFile: ({ userId, mediaId, attachmentOnly }) =>
+    GetMediaFile: ({ userId, mediaId, attachmentOnly, includeStaged }) =>
       Effect.gen(function* () {
         const [file] = yield* sql<{ path: string; mime: string; byteSize: number }>`
           SELECT m.path, m.mime, m.byte_size AS byteSize FROM media_assets m
-          WHERE m.id = ${mediaId} AND ${(attachmentOnly ? attachmentHeldBy : mediaHeldBy)(sql, "m.id", userId)}`
+          WHERE m.id = ${mediaId} AND ${
+            attachmentOnly
+              ? attachmentHeldBy(sql, "m.id", userId)
+              : sql`(${mediaHeldBy(sql, "m.id", userId)}
+                ${includeStaged ? sql`OR ${stagedAttachmentHeldBy(sql, "m.id", userId)}` : sql``})`
+          }`
         if (!file || !isMediaPath(file.path)) return yield* new NotFound({ entity: "media", id: mediaId })
         return file
       }).pipe(query("GetMediaFile"))

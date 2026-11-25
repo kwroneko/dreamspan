@@ -43,10 +43,10 @@ export const attachmentLines = (
   const references = attachments.map((a) => {
     const block = a.image && !a.excluded && vision !== false
     const note = a.image && vision === false ? ` note="This model can't see images."` : ""
-    const open = `<attachment filename="${attribute(a.name)}" type="${attribute(a.mime)}" size="${formatByteSize(a.size)}" path="${attribute(`${ATTACHMENT_COPY_ROOT}/${a.mediaId}`)}"${block ? ` image_block="true"` : ""}${note}`
-    if (!a.card) return `${open}/>`
     const file = a.path ? ` file_path="${attribute(a.path)}"` : ""
-    return `${open}${file} card="true" card_name="${attribute(a.card.name)}" format="${attribute(a.card.format)}" spec="${attribute(a.card.spec)}" spec_version="${attribute(a.card.specVersion)}"/>`
+    const open = `<attachment filename="${attribute(a.name)}" type="${attribute(a.mime)}" size="${formatByteSize(a.size)}" path="${attribute(`${ATTACHMENT_COPY_ROOT}/${a.mediaId}`)}"${block ? ` image_block="true"` : ""}${note}${file}`
+    if (!a.card) return `${open}/>`
+    return `${open} card="true" card_name="${attribute(a.card.name)}" format="${attribute(a.card.format)}" spec="${attribute(a.card.spec)}" spec_version="${attribute(a.card.specVersion)}"/>`
   })
   if (!attachments.some((a) => a.card)) return references
 

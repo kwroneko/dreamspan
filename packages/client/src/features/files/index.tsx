@@ -12,7 +12,7 @@ import { FILES_TAB, FOLDER_CHIP } from "./ids.ts"
 import { composerControls } from "../chat/composerControls.tsx"
 import { FolderChip, useFolderChoices } from "./FolderChip.tsx"
 import { workingFolderSources } from "./working.ts"
-import { ATTACHMENTS_FOLDER, FILES_TOP, joinPath, nameOf, parentOf } from "@dreamspan/shared/files.ts"
+import { FILES_TOP, nameOf, parentOf } from "@dreamspan/shared/files.ts"
 import { fileAttachments } from "../chat/fileAttachments.ts"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { filesNoticeReceiver } from "./live.ts"
@@ -43,21 +43,15 @@ export const register = () => [
       return { path: folder.choices?.current ?? FILES_TOP, set: folder.choose }
     }
   }),
-  // Attachments of any type in workshops (§6.1): saved in the working folder's Attachments folder
-  // and attached by their path; a file of Files attached as it is.
+  // Workshop uploads stay in the composer until Send. A file from Files stays at its path.
   fileAttachments.register({
     id: "files.attachments",
-    useFileAttacher: (session, view) => {
-      const shows = kindShows(view.chat?.kind, FOLDER_CHIP)
-      const folder = useFolderChoices(session, shows)
+    useFileAttacher: (_session, view) => {
       const source = useFilesSource()
-      if (!shows || !source) return null
-      if (!folder.ready) return "loading"
-      const target = joinPath(folder.choices?.current ?? FILES_TOP, ATTACHMENTS_FOLDER)
+      if (!view.chat) return "loading"
+      if (!kindShows(view.chat.kind, FOLDER_CHIP) || !source) return null
       return {
-        folder: target,
-        upload: async (file, name, composer) =>
-          source.attach((await source.upload(joinPath(target, name), file, "keep")).path, composer),
+        upload: source.stageAttachment,
         attach: source.attach,
         copyUrl: source.attachmentUrl,
         showHref: showInFiles

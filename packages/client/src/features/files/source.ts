@@ -13,6 +13,7 @@ import {
   FolderListing,
   FolderShare,
   RestoredVersion,
+  StagedFile,
   type ShareMode,
   TextFile,
   UploadOutcome,
@@ -59,6 +60,7 @@ export interface FilesSource {
   readonly zipUrl: (path: string) => string
   /** A file attached to a workshop message (§6.1): its content kept as the copy the message sends. */
   readonly attach: (path: string, composer?: AttachmentComposer) => Promise<AttachedFile>
+  readonly stageAttachment: (file: Blob, name: string, composer: AttachmentComposer) => Promise<StagedFile>
   /** The URL an attachment's copy as sent opens at, or downloads from. */
   readonly attachmentUrl: (mediaId: string, name: string, download?: boolean) => string
   /** A text file for the editor, with the hash a save names (§8.2). */
@@ -175,6 +177,15 @@ export const httpFilesSource: FilesSource = {
     `${FILES_ROUTES.raw}?${new URLSearchParams(download ? { path, download: "1" } : { path })}`,
   zipUrl: (path) => `${FILES_ROUTES.zip}?${new URLSearchParams({ path })}`,
   attach: async (path, composer) => json(AttachedFile, await post(FILES_ROUTES.attach, { path, composer })),
+  stageAttachment: async (file, name, composer) =>
+    json(
+      StagedFile,
+      await reach(`${FILES_ROUTES.stageAttachment}?${new URLSearchParams({ name, ...composer })}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: file
+      })
+    ),
   attachmentUrl: (id, name, download = false) =>
     `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`,
   readText: async (path) =>

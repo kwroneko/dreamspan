@@ -1112,6 +1112,14 @@ const McpWriteOps = RpcGroup.make(
 )
 
 /** What the MCP client needs to reach a server, secrets still encrypted. Never sent to a browser. */
+const PublishedAttachments = Schema.Array(
+  Schema.Struct({
+    id: Schema.String,
+    path: Schema.String,
+    inode: Schema.Number
+  })
+).check(Schema.isMaxLength(32))
+
 export const McpResolved = Schema.Struct({
   connection: McpConnection,
   credential: Schema.NullOr(
@@ -1607,7 +1615,11 @@ const WriteOpsChatOwn = RpcGroup.make(
    */
   Rpc.make("SetComposerImage", {
     payload: { userId: UserId, ...SetComposerImageFields },
-    success: ComposerImage,
+    success: Schema.Struct({
+      image: ComposerImage,
+      discardedHash: Schema.NullOr(Sha256),
+      removedStaged: Schema.Boolean
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A workshop composer's attached library items: removes, then adds (composerLibrary.ts). */
@@ -1803,6 +1815,7 @@ const WriteOpsChatOwn = RpcGroup.make(
       chatId: ChatId,
       images: Schema.optionalKey(MessageImages),
       imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      publishedAttachments: Schema.optionalKey(PublishedAttachments),
       commitDraft: CommitDraft,
       targets: Schema.Array(
         Schema.Struct({
@@ -3161,6 +3174,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       path: Schema.String.check(Schema.isMaxLength(4096)),
       inode: Schema.NullOr(Schema.Number),
       composer: Schema.optionalKey(AttachmentComposer),
+      staged: Schema.optionalKey(Schema.Boolean),
       maxAddedBytes: Schema.Int,
       media: Schema.Struct({
         sha256: Sha256,
@@ -3533,6 +3547,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     payload: {
       images: Schema.optionalKey(MessageImages),
       imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      publishedAttachments: Schema.optionalKey(PublishedAttachments),
       /** Library items a workshop message carries (spec/WORKSHOP-CARDS.md §4.4); refused elsewhere. */
       library: Schema.optionalKey(MessageLibrary),
       userId: UserId,
@@ -5259,6 +5274,19 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(ComposerImage),
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("GetStagedComposerFiles", {
+    payload: { userId: UserId, ...ComposerImageKey, ids: ComposerImageIds },
+    success: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        mediaId: Schema.String,
+        name: Schema.String,
+        sha256: Sha256,
+        byteSize: Schema.Int
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetComposerLibrary", {
     payload: { userId: UserId, ...ComposerImageKey },
     success: Schema.Array(ComposerLibraryItem),
@@ -5993,7 +6021,12 @@ const ReadOpsOwn = RpcGroup.make(
   }),
   /** A stored file the user holds a reference to. */
   Rpc.make("GetMediaFile", {
-    payload: { userId: UserId, mediaId: Schema.String, attachmentOnly: Schema.optionalKey(Schema.Boolean) },
+    payload: {
+      userId: UserId,
+      mediaId: Schema.String,
+      attachmentOnly: Schema.optionalKey(Schema.Boolean),
+      includeStaged: Schema.optionalKey(Schema.Boolean)
+    },
     success: StoredFile,
     error: Schema.Union([NotFound, StorageError])
   }),

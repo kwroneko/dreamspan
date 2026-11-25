@@ -53,6 +53,8 @@ export const FILES_ROUTES = {
    * content kept as the copy the message sends (`AttachedFile`).
    */
   attach: "/files/attach",
+  /** POST a file's bytes with its name and composer address in the query. */
+  stageAttachment: "/files/attachments/stage",
   /** GET `?id=&name=` (and `&download=1`): an attachment's copy as sent, served as `raw` serves files. */
   attachment: "/files/attachment",
   /**
@@ -126,21 +128,24 @@ export const encodeText = (text: string, lineEnding: LineEnding, bom: boolean): 
 /** The largest file a message can attach; larger ones stay in Files for the assistant to open (§6.1). */
 export const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
 
-/** The folder a workshop's attachments are saved in, inside its working folder (§6.1). */
+/** The folder in Files where a workshop's uploads land on Send (§6.1). */
 export const ATTACHMENTS_FOLDER = "Attachments"
 
-/** A file attached to a message: the copy kept (`mediaId`), and where it is in Files. */
-export const AttachedFile = Schema.Struct({
+/** A workshop upload held in its composer. */
+export const StagedFile = Schema.Struct({
   mediaId: Schema.String,
   /** `image`: a PNG, JPEG, GIF or WebP, also sent as an image to a model that sees images. */
   kind: Schema.Literals(["image", "file"]),
   name: Schema.String,
-  path: Schema.String,
   mime: Schema.String,
   size: Schema.Number,
   /** A character card file (spec/WORKSHOP-CARDS.md §4.5): its name and format. */
   card: Schema.optionalKey(Schema.Struct({ name: Schema.String, format: Schema.Literals(["png", "json", "charx"]) }))
 })
+export type StagedFile = typeof StagedFile.Type
+
+/** A workshop attachment's copy and where it is in Files. */
+export const AttachedFile = Schema.Struct({ ...StagedFile.fields, path: Schema.String })
 export type AttachedFile = typeof AttachedFile.Type
 
 export const ShareMode = Schema.Literals(["view", "edit"])

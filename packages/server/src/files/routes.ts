@@ -27,7 +27,7 @@ import {
   SHARED_FOLDER,
   ShareRequest,
   FILES_ROUTES,
-  type AttachedFile,
+  type StagedFile,
   FILES_TOP,
   isWithin,
   keepBothName,
@@ -1361,6 +1361,22 @@ export const filesRoutes = Layer.unwrap(
           413,
           `Attachments can be at most ${formatByteSize(ATTACHMENT_MAX_BYTES)}. The assistant can still open it at ${full}.`
         )
+      return yield* recordAttachment(
+        userId,
+        name,
+        body.composer,
+        { path: full, inode: info.ino },
+        Effect.tryPromise(() => copyAttachment(config.dataDir, root, segments, info))
+      )
+    })
+
+    const recordAttachment = Effect.fnUntraced(function* (
+      userId: string,
+      name: string,
+      composer: AttachmentComposer | undefined,
+      source: { path: string; inode: number } | null,
+      copy: Effect.Effect<Awaited<ReturnType<typeof copyAttachment>>, unknown>
+    ) {
       const slot = attaching.get(userId) ?? {
         gate: Semaphore.makeUnsafe(ATTACH_AT_ONCE),
         recording: Semaphore.makeUnsafe(1),
@@ -1371,7 +1387,7 @@ export const filesRoutes = Layer.unwrap(
         return refuse(429, "Too many files are being attached. Try again in a moment.")
       slot.waiting++
       return yield* Effect.gen(function* () {
-        const copied = yield* Effect.tryPromise(() => copyAttachment(config.dataDir, root, segments, info))
+        const copied = yield* copy
         return yield* Effect.gen(function* () {
           // Only a block image the image worker decodes is an image; a file that fails is a
           // plain file, never recorded with an image type (its bytes would be sent as one).
@@ -1411,10 +1427,11 @@ export const filesRoutes = Layer.unwrap(
                     return yield* writer
                       .RecordAttachmentCopy({
                         userId: userId as never,
-                        path: full,
-                        inode: info.ino,
+                        path: source?.path ?? name,
+                        inode: source?.inode ?? null,
                         maxAddedBytes: adding,
-                        ...(body.composer ? { composer: body.composer } : {}),
+                        ...(composer ? { composer } : {}),
+                        ...(source === null ? { staged: true } : {}),
                         media: {
                           sha256: copied.sha256,
                           mime,
@@ -1464,16 +1481,17 @@ export const filesRoutes = Layer.unwrap(
           if (recorded === null) return refuse(507, "There's no room left for files.")
           // Those bytes recorded earlier under another type (a version's) are sent as that.
           const isImage = image !== null && recorded.mime === image.mime
-          const attached: AttachedFile = {
+          const attached: StagedFile = {
             mediaId: recorded.mediaId,
             kind: isImage ? "image" : "file",
             name,
-            path: full,
             mime: recorded.mime,
             size: copied.size,
             ...(card ? { card: { name: card.name, format: card.format } } : {})
           }
-          return HttpServerResponse.jsonUnsafe(attached, { headers: { "cache-control": "no-store" } })
+          return HttpServerResponse.jsonUnsafe(source ? { ...attached, path: source.path } : attached, {
+            headers: { "cache-control": "no-store" }
+          })
         }).pipe(Effect.ensuring(Effect.promise(() => rm(copied.temporary, { force: true }))))
       }).pipe(
         slot.gate.withPermits(1),
@@ -1485,12 +1503,58 @@ export const filesRoutes = Layer.unwrap(
       )
     })
 
+    const stageAttachment = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      if (request.headers["content-type"] !== "application/octet-stream")
+        return refuse(415, "Expected application/octet-stream.")
+      const user = yield* CurrentUser
+      const query = yield* queryOf
+      const name = query.get("name") ?? ""
+      const problem = nameProblem(name)
+      if (problem || /[\u0000-\u001f\u007f]/.test(name))
+        return refuse(400, problem ?? "That name contains a control character.")
+      const composer = Schema.decodeUnknownOption(AttachmentComposer)(Object.fromEntries(query))
+      if (Option.isNone(composer)) return refuse(400, "Name the composer draft and attachment.")
+      const tooLarge = () => new Answer(413, `Attachments can be at most ${formatByteSize(ATTACHMENT_MAX_BYTES)}.`)
+      if (Number(request.headers["content-length"] ?? "0") > ATTACHMENT_MAX_BYTES) return yield* Effect.fail(tooLarge())
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const copy = Effect.tryPromise(async () => {
+        let head: Uint8Array = new Uint8Array(0)
+        const chunks = (async function* () {
+          let size = 0
+          const input = message.iterator({ destroyOnReturn: false }) as AsyncIterator<Buffer>
+          try {
+            for (;;) {
+              let idle: NodeJS.Timeout | undefined
+              const chunk = await Promise.race([
+                input.next(),
+                new Promise<never>((_, reject) => {
+                  idle = setTimeout(() => reject(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
+                })
+              ]).finally(() => clearTimeout(idle))
+              if (chunk.done) break
+              size += chunk.value.byteLength
+              if (size > ATTACHMENT_MAX_BYTES) throw tooLarge()
+              if (head.byteLength < 64) head = Buffer.concat([head, chunk.value.subarray(0, 64 - head.byteLength)])
+              yield chunk.value
+            }
+          } finally {
+            // A timed-out read can still be pending while the server answers the request.
+            void input.return?.().catch(() => undefined)
+          }
+        })()
+        const copied = await streamToMedia(config.dataDir, chunks)
+        return { ...copied, head }
+      })
+      return yield* recordAttachment(user.id, name, composer.value, null, copy)
+    })
+
     /** An attachment's copy as sent (§6.1), served as `raw` serves files: never as the app's own content. */
     const attachment = Effect.gen(function* () {
       const query = yield* queryOf
       const user = yield* CurrentUser
       const file = yield* reader
-        .GetMediaFile({ userId: user.id, mediaId: query.get("id") ?? "" })
+        .GetMediaFile({ userId: user.id, mediaId: query.get("id") ?? "", includeStaged: true })
         .pipe(Effect.mapError(() => new Answer(404, "That attachment isn't here any more.")))
       const name = (query.get("name") ?? "attachment").slice(0, 255) || "attachment"
       const inline = query.get("download") === null ? INLINE_TYPES[extension(name)] : undefined
@@ -1761,6 +1825,7 @@ export const filesRoutes = Layer.unwrap(
       HttpRouter.add("POST", FILES_ROUTES.delete, authenticated(remove)),
       HttpRouter.add("POST", FILES_ROUTES.restore, authenticated(restore)),
       HttpRouter.add("POST", FILES_ROUTES.attach, authenticated(attach)),
+      HttpRouter.add("POST", FILES_ROUTES.stageAttachment, authenticated(stageAttachment)),
       HttpRouter.add("GET", FILES_ROUTES.attachment, authenticated(attachment)),
       HttpRouter.add("GET", FILES_ROUTES.shares, authenticated(shares)),
       HttpRouter.add("POST", FILES_ROUTES.share, authenticated(share)),

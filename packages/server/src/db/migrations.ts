@@ -357,6 +357,24 @@ export const migrationDefinitions = {
         FOREIGN KEY (user_id, chat_id) REFERENCES swept_workshops(user_id, chat_id) ON DELETE CASCADE
       ) STRICT, WITHOUT ROWID`
     ]
+  },
+  "0032_staged_attachments": {
+    statements: [
+      "ALTER TABLE composer_images ADD COLUMN staged INTEGER NOT NULL DEFAULT 0 CHECK (staged IN (0,1))",
+      "CREATE INDEX composer_images_staged ON composer_images(media_id, draft_id) WHERE staged = 1 AND status = 'active'",
+      `CREATE TRIGGER composer_images_discard_staged AFTER DELETE ON composer_images
+      WHEN OLD.staged = 1 AND OLD.media_id IS NOT NULL
+      BEGIN
+        DELETE FROM media_assets WHERE id = OLD.media_id
+          AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM file_versions WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = OLD.media_id)
+          AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = OLD.media_id);
+      END`
+    ]
   }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 

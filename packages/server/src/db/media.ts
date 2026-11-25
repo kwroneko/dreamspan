@@ -33,3 +33,23 @@ export const mediaHeldBy = (sql: SqlClient.SqlClient, column: string, userId: st
 export const attachedFrom = (sql: SqlClient.SqlClient, column: string, userId: string, path: string) =>
   sql`EXISTS (SELECT 1 FROM file_versions f WHERE f.media_id = ${sql.literal(column)}
     AND f.owner_user_id = ${userId} AND f.origin = 'attachment' AND f.path = ${path})`
+
+/** An upload the account can preview in its composer until it sends or removes it. */
+export const stagedAttachmentHeldBy = (sql: SqlClient.SqlClient, column: string, userId: string) =>
+  sql`EXISTS (
+    SELECT 1 FROM composer_images i JOIN drafts d ON d.id = i.draft_id
+    JOIN chats c ON c.id = d.target_id /* chat:includes-pending: the user previews a pending workshop's files too */
+    WHERE i.media_id = ${sql.literal(column)} AND i.staged = 1 AND i.status = 'active'
+      AND d.user_id = ${userId} AND c.deleted_at IS NULL)`
+
+/** Drops the row only when the bytes have no other holder, returning the hash for disk cleanup. */
+export const discardUnheldMedia = (sql: SqlClient.SqlClient, mediaId: string) =>
+  sql<{ sha256: string }>`DELETE FROM media_assets WHERE id = ${mediaId}
+    AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM file_versions WHERE media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id) /* chat:includes-pending: covers are kept until swept */
+    AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
+    AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
+    RETURNING sha256`

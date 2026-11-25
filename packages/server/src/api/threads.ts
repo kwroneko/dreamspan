@@ -28,10 +28,12 @@ import { Commands, makeCommand, runCommand } from "../commands.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { notifyWorkshopDeletions } from "./bin.ts"
 import { internal } from "./internal.ts"
+import { makeAttachmentSend } from "../files/sendAttachments.ts"
 
 export const makeThreadHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const sendAttachments = yield* makeAttachmentSend
   const hub = yield* ChatHub
   const commands = yield* Commands
   const generations = yield* Generations
@@ -82,14 +84,17 @@ export const makeThreadHandlers = Effect.gen(function* () {
           return { ...target, content: written.content, ...(written.rewrite ? { rewrite: written.rewrite } : {}) }
         })
       )
-      const result = yield* writer.SendToThreads({
-        userId: id,
-        chatId: input.chatId,
-        ...(input.images === undefined ? {} : { images: input.images }),
-        ...(input.imageDraftIds === undefined ? {} : { imageDraftIds: input.imageDraftIds }),
-        commitDraft: input.composer === undefined ? null : input.composer,
-        targets
-      })
+      const result = yield* sendAttachments(id, { ...input, composer: input.composer }, (attachments) =>
+        writer.SendToThreads({
+          userId: id,
+          chatId: input.chatId,
+          ...(input.images === undefined ? {} : { images: input.images }),
+          ...(input.imageDraftIds === undefined ? {} : { imageDraftIds: input.imageDraftIds }),
+          ...attachments,
+          commitDraft: input.composer === undefined ? null : input.composer,
+          targets
+        })
+      )
       const entryOf = (slotId: PathEntry["slotId"], forkId: ForkId) =>
         Effect.map(reader.GetSlot({ userId: id, slotId, forkId }), ({ entry }) => {
           hub.publish(input.chatId, { _tag: "Slot", entry })

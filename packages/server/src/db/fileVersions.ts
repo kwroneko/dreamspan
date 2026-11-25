@@ -20,6 +20,9 @@ const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string)
       SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL
       UNION
       SELECT media_id FROM media_refs WHERE owner_user_id = ${userId} AND files_quota = 1
+      UNION
+      SELECT i.media_id FROM drafts d JOIN composer_images i ON i.draft_id = d.id
+        WHERE d.user_id = ${userId} AND i.staged = 1 AND i.status = 'active'
     )
     ${sha256 === undefined ? sql`` : sql`AND m.sha256 = ${sha256}`}`.pipe(Effect.map(([row]) => row?.bytes ?? 0))
 
@@ -78,7 +81,7 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         if (addedBytes > maxAddedBytes) return null
         return { id: yield* record(userId, version, actorUserId, Date.now()), addedBytes }
       }).pipe(transaction(sql, "RecordReplacementVersion")),
-    RecordAttachmentCopy: ({ userId, path, inode, media, composer, maxAddedBytes, card }) =>
+    RecordAttachmentCopy: ({ userId, path, inode, media, composer, staged, maxAddedBytes, card }) =>
       Effect.gen(function* () {
         const addedBytes = (yield* versionBytes(sql, userId, media.sha256)) > 0 ? 0 : media.byteSize
         // A prune can drop a duplicate after the route checked it. Ask for a reservation
@@ -107,9 +110,11 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
             doc_json: card.docJson
           })} ON CONFLICT (media_id) DO NOTHING`
         // One copy per path and content: attaching it again names the same one.
-        const [held] = yield* sql`SELECT 1 FROM file_versions
+        const [held] = staged
+          ? []
+          : yield* sql`SELECT 1 FROM file_versions
           WHERE owner_user_id = ${userId} AND media_id = ${row!.id} AND origin = 'attachment' AND path = ${path}`
-        if (!held)
+        if (!staged && !held)
           yield* sql`INSERT INTO file_versions ${sql.insert({
             id: uuidv7(),
             owner_user_id: userId,
@@ -126,11 +131,25 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         if (composer) {
           const name = path.slice(path.lastIndexOf("/") + 1)
           const image = media.mime.startsWith("image/") && row!.mime === media.mime
-          yield* composerImages(sql).set(userId, composer.chatId, composer.draftId, composer.id, row!.id, name, {
+          const saved = yield* composerImages(sql).set(
+            userId,
+            composer.chatId,
+            composer.draftId,
+            composer.id,
+            row!.id,
             name,
-            path,
-            ...(image ? {} : { kind: "file" as const })
-          })
+            {
+              name,
+              ...(staged ? {} : { path }),
+              ...(image ? {} : { kind: "file" as const })
+            },
+            staged
+          )
+          if (
+            staged &&
+            (saved.image.status !== "active" || saved.image.mediaId !== row!.id || saved.image.path !== undefined)
+          )
+            return yield* new NotFound({ entity: "composer image", id: composer.id })
         }
         return { mediaId: row!.id, mime: row!.mime, addedBytes }
       }).pipe(transaction(sql, "RecordAttachmentCopy")),
@@ -169,6 +188,10 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
             AND NOT EXISTS (SELECT 1 FROM composer_images i JOIN drafts d ON d.id = i.draft_id
               WHERE i.media_id = file_versions.media_id AND i.status = 'active'
                 AND d.user_id = file_versions.owner_user_id)
+            AND NOT EXISTS (SELECT 1 FROM queued_messages q
+              JOIN chats c ON c.id = q.chat_id /* chat:includes-pending: queued copies still belong to the account */
+              JOIN json_each(q.images_json) i ON i.value ->> 'mediaId' = file_versions.media_id
+              WHERE c.owner_user_id = file_versions.owner_user_id)
             AND NOT EXISTS (SELECT 1 FROM version_history h
               JOIN versions v ON v.id = h.version_id JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id /* chat:includes-pending: as above */
               WHERE c.owner_user_id = file_versions.owner_user_id AND h.images_json IS NOT NULL

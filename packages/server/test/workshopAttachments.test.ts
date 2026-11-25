@@ -173,9 +173,12 @@ describe("workshop attachments", () => {
         assert.include(content, "[Image]\\n<attachment")
         assert.include(
           content,
-          `<attachment filename=\\"notes.txt\\" type=\\"text/plain\\" size=\\"9 B\\" path=\\"/attachments/${notes.mediaId}\\"/>`
+          `<attachment filename=\\"notes.txt\\" type=\\"text/plain\\" size=\\"9 B\\" path=\\"/attachments/${notes.mediaId}\\" file_path=\\"${notes.path}\\"/>`
         )
-        assert.include(content, `path=\\"/attachments/${picture.mediaId}\\" image_block=\\"true\\"/>`)
+        assert.include(
+          content,
+          `path=\\"/attachments/${picture.mediaId}\\" image_block=\\"true\\" file_path=\\"${picture.path}\\"/>`
+        )
         // The image goes as a block as well; the text file only by its path.
         assert.strictEqual(content.split('"type":"image_url"').length - 1, 1)
         assert.notInclude(JSON.stringify(requests[0]), "Draft one")
@@ -281,7 +284,10 @@ describe("workshop attachments", () => {
         )
         const body = JSON.stringify(requests[0])
         assert.notInclude(body, "image_url")
-        assert.include(body, `path=\\"/attachments/${picture.mediaId}\\" note=\\"This model can't see images.\\"/>`)
+        assert.include(
+          body,
+          `path=\\"/attachments/${picture.mediaId}\\" note=\\"This model can't see images.\\" file_path=\\"${picture.path}\\"/>`
+        )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
     120_000
   )
