@@ -334,7 +334,7 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
 
 // pi-ai 1.0.3 predates Gemini 4's thinkingLevel control. Its transcript, level
 // mapping and all other model families still use the pinned helpers.
-const gemini4 = (model: { readonly id: string }) => /^(?:models\/)?gemini-4-(?:argon|carbon)(?:-|$)/i.test(model.id)
+const gemini4 = (model: { readonly id: string }) => /^(?:models\/)?gemini-4-/i.test(model.id)
 const usesGoogleThinkingLevel = (model: Parameters<typeof piUsesThinkingLevel>[0]) =>
   gemini4(model) || piUsesThinkingLevel(model)
 const getDisabledGoogleThinkingConfig = (model: Parameters<typeof piDisabledThinkingConfig>[0]) =>

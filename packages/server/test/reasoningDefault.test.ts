@@ -118,6 +118,66 @@ describe("the reasoning default", () => {
     )
 })
 
+describe("Gemini 4 on OpenRouter", () => {
+  for (const [label, listing] of [
+    ["unreported", {}],
+    ["provider says reasoning", { supported_parameters: ["tools", "temperature", "reasoning", "include_reasoning"] }]
+  ] as const)
+    it.live(`${label}: no default request disables reasoning, with tools`, () =>
+      Effect.gen(function* () {
+        const model = "google/gemini-4-neon"
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              if (request.path.endsWith("/models")) return json(res, 200, { data: [{ id: model, ...listing }] })
+              return sse(res, completionChunks(["Waves."], {}))
+            })
+          ),
+          (s) => Effect.promise(() => s.close())
+        )
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const providers = yield* Providers.Providers
+        const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+        const connection = yield* providers.createConnection({
+          userId,
+          kind: "openrouter",
+          settings: {
+            name: "Test",
+            baseUrl: server.url + "/api/v1",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          apiKey: "sk-synthetic-key"
+        })
+        yield* providers.refreshModels(userId, connection.id)
+        const listed = yield* reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
+        const modelId = listed.find((m) => m.key === model)!.id as ModelId
+        yield* Stream.runCollect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId,
+            context: {
+              ...context,
+              tools: [{ name: "note", description: "Note it.", parameters: { type: "object", properties: {} } }]
+            } as PiContext,
+            options: {},
+            attribution: { purpose: "test" }
+          })
+        )
+        const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
+        assert.lengthOf(calls, 1)
+        const body = calls[0]!.body!
+        assert.notProperty(body, "reasoning_effort")
+        assert.notDeepInclude([body.reasoning ?? {}], { effort: "none" })
+        assert.notDeepInclude([body.reasoning ?? {}], { enabled: false })
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+    )
+})
+
 describe("the samplers a model's page shows", () => {
   it("are the ones the request sends", () => {
     assert.deepStrictEqual(samplersSent({ kind: "openai-chat", api: "openai-completions", key: "local-model" }), [
