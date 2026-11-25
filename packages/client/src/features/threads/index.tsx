@@ -142,7 +142,7 @@ export const register = () => [
   chatNoteActions.register({ id: "threads.also-change", order: 10, component: AlsoChangeNote }),
   // Sending to several threads (§6): the strip's chip, among the choices before the next request's size and
   // cache, and the send it takes over once one is ticked.
-  composerControls.register({ id: "composer.threads", order: 40, placement: "strip", component: SendToThreadsChip }),
+  composerControls.register({ id: "composer.threads", order: 140, placement: "strip", component: SendToThreadsChip }),
   composerSendRoutes.register({
     id: "threads.send",
     order: 10,
