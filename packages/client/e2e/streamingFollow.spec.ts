@@ -98,7 +98,7 @@ for (const width of [390, 1440])
 test.describe("touch input", () => {
   test.use({ hasTouch: true })
 
-  test("a touch drag releases follow during a continuous reply", async ({ page, browserName }) => {
+  test("a touch drag releases follow during a continuous reply at 390px", async ({ page, browserName }) => {
     test.skip(browserName !== "chromium", "Uses CDP to send a native touch drag")
     const stream = await openStream(page, 390)
     await expect.poll(stream.fromEnd).toBeLessThanOrEqual(1)
@@ -132,29 +132,34 @@ const scrollbarTest = test.extend({ launchOptions: { ignoreDefaultArgs: ["--hide
 scrollbarTest.describe("native scrollbar", () => {
   scrollbarTest.skip(({ browserName }) => browserName !== "chromium", "Uses the Chromium scrollbar thumb geometry")
 
-  scrollbarTest("a scrollbar drag through the end keeps control during a continuous reply", async ({ page }) => {
-    const stream = await openStream(page, 1440, true)
-    await expect.poll(stream.fromEnd).toBeLessThanOrEqual(1)
-    const thumb = await bottomThumb(stream.list)
-    await page.mouse.move(thumb.x, thumb.y)
-    await page.mouse.down()
-    await page.mouse.move(thumb.x, thumb.y - 24, { steps: 3 })
-    await expectReadingHistory(stream)
-    // Place the growing list exactly at its current end with the thumb still held.
-    await stream.list.evaluate((node) => {
-      node.scrollTop = node.scrollHeight
-      node.dispatchEvent(new Event("scroll"))
-    })
-    await page.mouse.move(thumb.x, thumb.y - 32, { steps: 3 })
-    await page.mouse.up()
-    await expectReadingHistory(stream)
-  })
+  scrollbarTest(
+    "a scrollbar drag through the end keeps control during a continuous reply at 1440px",
+    async ({ page }) => {
+      const stream = await openStream(page, 1440, true)
+      await expect.poll(stream.fromEnd).toBeLessThanOrEqual(1)
+      const thumb = await bottomThumb(stream.list)
+      await page.mouse.move(thumb.x, thumb.y)
+      await page.mouse.down()
+      await page.mouse.move(thumb.x, thumb.y - 24, { steps: 3 })
+      await expectReadingHistory(stream)
+      // Place the growing list exactly at its current end with the thumb still held.
+      await stream.list.evaluate((node) => {
+        node.scrollTop = node.scrollHeight
+        node.dispatchEvent(new Event("scroll"))
+      })
+      await page.mouse.move(thumb.x, thumb.y - 32, { steps: 3 })
+      await page.mouse.up()
+      await expectReadingHistory(stream)
+    }
+  )
 
   for (const width of [1440, 390])
     scrollbarTest(
       `releasing the scrollbar short of the end keeps the reading position at ${width}px`,
       async ({ page }) => {
         const { list, fromEnd } = await openHistory(page, width, true, 14)
+        // The fixture has no model. Its asynchronous composer notice shortens the scrollport.
+        await expect(page.getByText("No model chosen", { exact: true })).toBeVisible()
         await page.evaluate(async () => {
           await document.fonts.ready
         })

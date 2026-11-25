@@ -1,3 +1,5 @@
+import { AnchoredScrollEvent } from "./anchorScroll.ts"
+
 // Bringing something just added into view (owner, 2026-11-02): "It should only scroll if
 // needed." A new lorebook entry or prompt usually appears where the user is looking, so the
 // page stays put; only when its header (or the field that gets the cursor) is hidden, under a
@@ -66,15 +68,22 @@ export function revealIfHidden(header: HTMLElement, parts: ReadonlyArray<HTMLEle
 export function keepInPlace(element: HTMLElement, ms = 600) {
   const top = element.getBoundingClientRect().top
   const until = performance.now() + ms
+  const released: Array<() => void> = []
+  element.dispatchEvent(new AnchoredScrollEvent((listener) => released.push(listener)))
   const hold = () => {
-    if (!element.isConnected) return
-    const delta = element.getBoundingClientRect().top - top
-    if (Math.abs(delta) >= 1) {
-      const scroller = scrollParentOf(element)
-      if (scroller) scroller.scrollTop += delta
-      else window.scrollBy(0, delta)
+    if (element.isConnected) {
+      const delta = element.getBoundingClientRect().top - top
+      if (Math.abs(delta) >= 1) {
+        const scroller = scrollParentOf(element)
+        if (scroller) scroller.scrollTop += delta
+        else window.scrollBy(0, delta)
+      }
+      if (performance.now() < until) {
+        requestAnimationFrame(hold)
+        return
+      }
     }
-    if (performance.now() < until) requestAnimationFrame(hold)
+    for (const listener of released) listener()
   }
   requestAnimationFrame(hold)
 }

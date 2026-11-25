@@ -31,7 +31,7 @@ test("development scroll synchronization does not emit lifecycle errors", async 
     page.on("console", (message) => {
       if (message.type() === "error") errors.push(message.text())
     })
-    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.setViewportSize({ width: Number(process.env.FOLLOW_TEST_WIDTH ?? 1440), height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const { chat, lastSlot } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {

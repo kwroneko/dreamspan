@@ -103,7 +103,6 @@ export interface ChatView {
   /** Where to continue reading newer history; null when the window reaches the leaf. */
   readonly newer: SlotId | null
   /** Whether a message added at the end scrolls into view: not while paging down. */
-  readonly follow: boolean
   /** Bumped when the window is replaced rather than extended, so the list can position it. */
   readonly opened: number
   /** History changed, including outside the loaded window; streamed text doesn't bump this. */
@@ -190,7 +189,6 @@ export class ChatSession {
     branchNames: new Map(),
     older: null,
     newer: null,
-    follow: true,
     opened: 0,
     pathRevision: 0,
     loading: true,
@@ -279,8 +277,7 @@ export class ChatSession {
     this.notice = notice
     // A chat just saved from its pending page opens on what that page had, and reads it again.
     const seed = requestedFork === null ? seeds.get(chatId) : undefined
-    if (seed !== undefined)
-      this.view = { ...this.view, ...seed, follow: seed.newer === null, opened: 1, loading: false }
+    if (seed !== undefined) this.view = { ...this.view, ...seed, opened: 1, loading: false }
     const peers = viewsOf.get(chatId) ?? new Set<ChatSession>()
     peers.add(this)
     viewsOf.set(chatId, peers)
@@ -871,7 +868,6 @@ export class ChatSession {
         entries: window.entries,
         older: window.older,
         newer: window.newer,
-        follow: window.newer === null,
         opened: reposition ? this.view.opened + 1 : this.view.opened,
         loading: false,
         error: null
@@ -1073,7 +1069,7 @@ export class ChatSession {
         entries = entries.slice(0, MAX_LOADED)
         newer = entries.at(-1)!.slotId
       }
-      this.update({ entries, older: window.older, newer, follow: newer === null && this.view.follow })
+      this.update({ entries, older: window.older, newer })
       for (const entry of window.entries) this.track(entry.version)
     })
   }
@@ -1096,7 +1092,7 @@ export class ChatSession {
         older = entries[0]!.parentSlotId
       }
       // A page read on the way down never scrolls to the end by itself.
-      this.update({ entries, older, newer: window.newer, follow: false })
+      this.update({ entries, older, newer: window.newer })
       for (const entry of window.entries) this.track(entry.version)
     })
   }
@@ -1109,11 +1105,6 @@ export class ChatSession {
     // Position subscribers can read synchronously when notified: they must see the new fork.
     this.forgetPositions()
     void this.open(anchor)
-  }
-
-  /** At the bottom of the whole path: new messages follow again. */
-  followAtBottom() {
-    if (this.view.newer === null && !this.view.follow) this.update({ follow: true })
   }
 
   // --- Events
@@ -1491,7 +1482,6 @@ export class ChatSession {
    */
   private appended(entry: PathEntry, chat: Chat) {
     this.update({ chat })
-    this.followAtBottom()
     if (this.applySlot(entry)) return
     // The fork it went to is the current one now.
     this.requestedFork = null

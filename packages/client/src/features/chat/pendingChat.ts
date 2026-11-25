@@ -222,7 +222,6 @@ const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCard | nu
     branchNames: new Map(),
     older: null,
     newer: null,
-    follow: true,
     opened: 0,
     pathRevision: 0,
     loading: false,
