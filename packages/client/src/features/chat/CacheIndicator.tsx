@@ -154,6 +154,9 @@ const useBeforeReply = (session: ChatSession, replying: boolean) => {
   return waiting
 }
 
+/** The chip's text keeps the room its fullest state needs ("↻ 12k of 130k uncached"), so a state change moves nothing after it. */
+const SPAN = "inline-block min-w-[22ch] text-center"
+
 export function CacheChip({ session, view }: { session: ChatSession; view: ChatView }) {
   const warmth = view.cache
   const waiting = useBeforeReply(
@@ -178,15 +181,28 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  // Nothing to say (no lifetime known for this provider, or nothing changed): no chip, never a
-  // dead one. It's last in the strip, so its coming and going moves nothing else.
-  if (view.loading || (shown === null && notes.length === 0)) return null
+  // Nothing to say yet (no estimate, or nothing changed): the chip still shows, muted, so its
+  // coming later never moves the chips after it.
+  if (!waiting && (view.loading || (shown === null && notes.length === 0)))
+    return (
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={<span className={SPAN}>Cache –</span>}
+        triggerLabel="Cache: shown after the first reply. Details"
+        hint="Whether your next reply can read this chat from the provider's cache. Shown after the first reply"
+        triggerClassName={`${chipClass("neutral")} text-muted`}
+        title="Cache"
+      >
+        <p className="text-sm">The cache shows after the first reply.</p>
+      </Popover>
+    )
   if (waiting)
     return (
       <Popover
         open={open}
         onOpenChange={setOpen}
-        trigger={<span>Cache after reply</span>}
+        trigger={<span className={SPAN}>Cache after reply</span>}
         triggerLabel="Cache: worked out again when this reply ends. Details"
         hint="Whether your next reply can read this chat from the provider's cache, at a lower price: known once this reply ends"
         triggerClassName={chipClass("neutral")}
@@ -229,7 +245,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     <Popover
       open={open}
       onOpenChange={setOpen}
-      trigger={<span className="tabular-nums">{text}</span>}
+      trigger={<span className={`${SPAN} tabular-nums`}>{text}</span>}
       triggerLabel={label}
       hint={
         shown?.kind === "uncached"

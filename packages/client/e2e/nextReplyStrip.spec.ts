@@ -172,7 +172,7 @@ test("a workshop's first Cache chip leaves the capabilities and working folder i
   await expect(capabilities).toBeVisible()
   await expect(folder).toBeVisible()
   await expect(contextChip(page)).toBeVisible()
-  await expect(cacheChip(page)).toHaveCount(0)
+  await expect(cacheChip(page)).toHaveText("Cache –")
   // Measure from the context chip's right edge, since its token count can change its width.
   const offsets = async () => {
     const context = (await contextChip(page).boundingBox())!
@@ -219,9 +219,9 @@ test.describe("a model added by hand gets a working cache chip, or none", () => 
       await expect(contextChip(page)).toBeVisible()
       if (warm) await expect(cacheChip(page)).toHaveText(/^Cache warm \d+:\d\d$/)
       else {
-        // No dead chip: absent, not disabled, once the estimate is in.
+        // Muted, with nothing to show, once the estimate is in; it never turns into a warm or uncached chip.
         await expect(contextChip(page)).toBeVisible()
-        await expect(nextReply(page).getByRole("button", { name: /^Cache/ })).toHaveCount(0)
+        await expect(cacheChip(page)).toHaveText("Cache –")
       }
     })
 })
