@@ -426,6 +426,11 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       )
     )
 
+  const branchSource = Effect.fnUntraced(function* (fork: ForkRow, parentSlotId: SlotId | null) {
+    if (parentSlotId === null || (yield* onForkPath(sql, fork.chat_id, fork, parentSlotId))) return fork
+    return (yield* forkThrough(sql, fork.chat_id, parentSlotId)) ?? fork
+  })
+
   /** Fork `row`, just made from `from` at `baseSlotId`, shows what `from` shows up to there (forkOrder.ts). */
   const placeAsShown = (chatId: string, from: ForkRow, baseSlotId: string | null, row: ForkRow) =>
     followParent(sql, chatId, from, baseSlotId, row)
@@ -486,6 +491,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
     readonly forkId?: ForkId | null
     readonly parentSlotId: SlotId | null
     readonly branch: boolean
+    /** The source already resolved in this transaction when authorizing a send. */
+    readonly branchSource?: ForkRow | undefined
     readonly version: VersionWithLibraryPins
     readonly commitDraft: CommitDraft | null
     /** False for the queue posting what was sent earlier: the fork was chatted in then. */
@@ -510,10 +517,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         parent = row
       }
       if (branch) {
-        const from =
-          parentSlotId === null || (yield* onForkPath(sql, chatId, fork, parentSlotId))
-            ? fork
-            : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
+        const from = params.branchSource ?? (yield* branchSource(fork, parentSlotId))
         // At a fork's own tip it just continues. Elsewhere it makes a fork, checked above: a
         // parent no live fork's path holds (below a deleted branch) still takes a branch, as
         // it did before forks.
@@ -612,6 +616,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
     ownedSlot,
     ownedVersion,
     ownedFork,
+    branchSource,
     createFork,
     carryChatNoteDrafts,
     placeAsShown,

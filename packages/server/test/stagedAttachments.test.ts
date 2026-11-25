@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { Deferred, Effect, Fiber, Stream } from "effect"
 import { expect } from "vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
+import { NewVersion } from "@dreamspan/shared/chat.ts"
 import type { AttachmentComposer } from "@dreamspan/shared/composerApi.ts"
 import type { StagedFile } from "@dreamspan/shared/files.ts"
 import { nameOf } from "@dreamspan/shared/files.ts"
@@ -417,6 +418,75 @@ it.live("refuses to send or consume another fork's staged upload", () =>
     assert.strictEqual(yield* Effect.promise(() => response.text()), "A's draft upload.")
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
+
+for (const status of ["complete", "generating"] as const) {
+  it.live(`refuses a staged branch send to another fork's ${status} tip`, () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const { id: userId } = yield* api.Whoami()
+      const chat = yield* api.CreateWorkshop({ title: "Separate branch paths" })
+      const chatId = chat.id
+      const forkId = chat.currentForkId!
+      const base = chat.activeLeafSlotId
+      const draft = yield* api.OpenComposer({ chatId, forkId })
+      const staged = yield* stage("branch.txt", "Staged on the original fork.", {
+        chatId,
+        draftId: draft.id,
+        id: "branch-file"
+      })
+      const { fork: other } = yield* api.CreateFork({ chatId, fromForkId: forkId, atSlotId: base })
+      // Keep the generating parent at its initial status without starting a model run.
+      const tip = yield* writer.AppendMessage({
+        userId,
+        chatId,
+        forkId: other.id,
+        parentSlotId: base,
+        branch: false,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "model",
+          content: "Other fork.",
+          status,
+          macroMode: "verbatim",
+          origin: "generated"
+        }),
+        commitDraft: null
+      })
+      const send = (parentSlotId: typeof base) =>
+        api.SendMessage({
+          chatId,
+          forkId,
+          parentSlotId,
+          branch: true,
+          content: "Attached.",
+          reply: false,
+          composer: { draftId: draft.id, session: draft.session },
+          imageDraftIds: ["branch-file"],
+          images: [{ mediaId: staged.mediaId, kind: "file", name: staged.name }]
+        })
+      const result = yield* outcome(send(tip.slotId), ({ _tag }) => _tag)
+      const file = yield* rawFile(staged.name)
+      const remaining = yield* api.GetComposerImages({ chatId, draftId: draft.id, ids: [] })
+      assert.deepStrictEqual(
+        { result, fileStatus: file.status, remaining: remaining.map(({ id }) => id) },
+        { result: "NotFound", fileStatus: 404, remaining: ["branch-file"] }
+      )
+      yield* posted(api.SendMessage({ chatId, forkId, parentSlotId: base, branch: false, content: "Original fork." }))
+      const sent = yield* posted(send(base))
+      const forks = yield* api.ListForks({ chatId })
+      const created = forks.find(({ id }) => id === sent.chat.currentForkId)
+      assert.strictEqual(created?.parentForkId, forkId)
+      assert.strictEqual(created?.tipSlotId, sent.entry.slotId)
+      assert.strictEqual(forks.find(({ id }) => id === other.id)?.tipSlotId, tip.slotId)
+      assert.strictEqual(sent.entry.version.images?.[0]?.path, `${workspace}/${staged.name}`)
+      assert.deepStrictEqual(yield* api.GetComposerImages({ chatId, draftId: draft.id, ids: [] }), [])
+      const published = yield* rawFile(staged.name)
+      assert.strictEqual(yield* Effect.promise(() => published.text()), "Staged on the original fork.")
+      assert.strictEqual((yield* rawFile("branch (2).txt")).status, 404)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+}
 
 it.live("binds a multi-thread send's staged upload to the first target's composer", () =>
   Effect.gen(function* () {

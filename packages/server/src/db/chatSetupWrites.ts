@@ -33,7 +33,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { chatStateAt, loadCards } from "./cards.ts"
-import { forkRecency, forkThrough, onForkPath } from "./forks.ts"
+import { forkRecency } from "./forks.ts"
 import { selectedIn, slotDeletedIn, nextSeq, writeSelect } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
@@ -502,6 +502,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         yield* graph.ownedChat(userId, chatId)
         let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
         const draftForkId = fork.id
+        const branchSource = branch ? yield* graph.branchSource(fork, parentSlotId) : undefined
         // An Auto turn is admitted here, in the transaction that writes its reply: nothing can
         // change between this check and the reply's placeholder (db/autoGuard.ts).
         const autoAt = { userId, chatId, forkId: fork.id }
@@ -519,7 +520,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         yield* composerImages(sql).publish(
           userId,
           chatId,
-          draftForkId,
+          branchSource?.id ?? draftForkId,
           commitDraft?.draftId,
           imageDraftIds ?? [],
           images ?? [],
@@ -557,14 +558,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             if (immediate) return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
             const at = Date.now()
             // A branch queued onto a reply still being written waits in a fork of its own.
-            if (branch && parentSlotId !== fork.tip_slot_id) {
-              const through = (yield* onForkPath(sql, chatId, fork, parentSlotId))
-                ? fork
-                : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
-              if (through.tip_slot_id === parentSlotId) fork = through
+            if (branchSource !== undefined) {
+              if (branchSource.tip_slot_id === parentSlotId) fork = branchSource
               else {
-                fork = yield* graph.createFork(chatId, through, parentSlotId, at, true)
-                yield* graph.carryChatNoteDrafts(userId, chatId, through, fork)
+                fork = yield* graph.createFork(chatId, branchSource, parentSlotId, at, true)
+                yield* graph.carryChatNoteDrafts(userId, chatId, branchSource, fork)
               }
             }
             const [next] = yield* sql<{ n: number }>`
@@ -623,6 +621,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           forkId: fork.id as ForkId,
           parentSlotId,
           branch,
+          branchSource,
           version:
             kind === "message"
               ? userMessage(content, speakerEntityId, images, rewrite, libraryPins)
