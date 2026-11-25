@@ -355,11 +355,7 @@ export function PicturePeek({
         picture && (
           <IconButton
             label="Open in image column"
-            hint={
-              stored
-                ? "Opens this image in the image column, beside the chat."
-                : "This image can open there once it has finished uploading."
-            }
+            hint={stored ? "Opens this image in the image column, beside the chat." : "This image can open there once it has finished uploading."}
             icon="sidebar"
             disabled={!stored || viewer === null}
             onClick={() => {
