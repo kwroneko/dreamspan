@@ -81,7 +81,6 @@ export function Dialog({
   finalFocus,
   initialFocus,
   centerOnColumnOf,
-  headerAction,
   children
 }: {
   open: boolean
@@ -108,8 +107,6 @@ export function Dialog({
    * than the window, following its size; the window when the dialog doesn't fit in it.
    */
   centerOnColumnOf?: RefObject<HTMLElement | null> | undefined
-  /** An icon button in the header, beside the close button. */
-  headerAction?: ReactNode
   children: ReactNode
 }) {
   const content = useRef<HTMLDivElement>(null)
@@ -151,10 +148,7 @@ export function Dialog({
           <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
           {description && <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {headerAction}
-          <WindowClose onClick={() => onOpenChange(false)} />
-        </div>
+        <WindowClose onClick={() => onOpenChange(false)} />
       </div>
       <TitledContainer title={title}>{children}</TitledContainer>
     </>

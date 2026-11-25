@@ -343,30 +343,8 @@ export function PicturePeek({
   src?: string | undefined
   onClose: () => void
 }) {
-  const viewer = usePortraitViewer()
-  const stored = picture !== null && picture.mediaId !== null
   return (
-    <Dialog
-      open={picture !== null}
-      onOpenChange={(open) => !open && onClose()}
-      title={picture?.name ?? ""}
-      wide
-      headerAction={
-        picture && (
-          <IconButton
-            label="Open in image column"
-            hint={stored ? "Opens this image in the image column, beside the chat." : "This image can open there once it has finished uploading."}
-            icon="sidebar"
-            disabled={!stored || viewer === null}
-            onClick={() => {
-              viewer?.show(picture)
-              onClose()
-            }}
-            className="[@media(pointer:coarse)]:size-11"
-          />
-        )
-      }
-    >
+    <Dialog open={picture !== null} onOpenChange={(open) => !open && onClose()} title={picture?.name ?? ""} wide>
       {picture && (
         <div
           data-picture-peek
