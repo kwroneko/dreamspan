@@ -79,7 +79,9 @@ const startSlowProvider = async () => {
       const done = body.messages.filter((m) => m.role === "tool").length
       const call = (name: string, args: string): Array<Part> => [
         [
-          chunk({ tool_calls: [{ index: 0, id: `call_${done}`, type: "function", function: { name, arguments: "" } }] }),
+          chunk({
+            tool_calls: [{ index: 0, id: `call_${done}`, type: "function", function: { name, arguments: "" } }]
+          }),
           0
         ],
         ...args
@@ -196,12 +198,8 @@ const expectOpenedOnceThenFolded = (log: ReadonlyArray<Sample>, pattern: RegExp)
       full++
       const opened = list.find((s) => s.open === true)!
       const folded = list.find((s) => s.open === false && s.t > opened.t)!
-      expect(opened.t - list[0]!.t, `${pattern} opened early: ${story}`).toBeGreaterThanOrEqual(
-        AUTO_OPEN.afterMs - 100
-      )
-      expect(folded.t - opened.t, `${pattern} folded early: ${story}`).toBeGreaterThanOrEqual(
-        AUTO_OPEN.minOpenMs - 100
-      )
+      expect(opened.t - list[0]!.t, `${pattern} opened early: ${story}`).toBeGreaterThanOrEqual(AUTO_OPEN.afterMs - 100)
+      expect(folded.t - opened.t, `${pattern} folded early: ${story}`).toBeGreaterThanOrEqual(AUTO_OPEN.minOpenMs - 100)
     }
   }
   expect(full, `${pattern} opened and folded once: ${JSON.stringify(log)}`).toBeGreaterThanOrEqual(1)

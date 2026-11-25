@@ -39,7 +39,7 @@ export function useAutoOpen(
       return undefined
     }
     if (!streaming && openedAt.current !== null) {
-      const wait = Math.max(0, openedAt.current +AUTO_OPEN.minOpenMs - Date.now())
+      const wait = Math.max(0, openedAt.current + AUTO_OPEN.minOpenMs - Date.now())
       const timer = setTimeout(() => {
         openedAt.current = null
         latest.current.setOpen(false)
