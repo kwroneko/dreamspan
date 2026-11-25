@@ -1132,11 +1132,7 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     onRemove={state.remove}
                   />
                   {state.entries.length === 0 ? null : state.attacher ? (
-                    <p role="status" className="text-sm text-muted">
-                      {`Saved in ${state.attacher.folder}. The assistant is told where each one is${
-                        images && vision === false ? "; this model can't see images" : ""
-                      }.`}
-                    </p>
+                    images && vision === false ? <VisionNote vision={vision} maxImages={maxImages} /> : null
                   ) : (
                     <VisionNote vision={vision} maxImages={maxImages} />
                   )}
