@@ -816,6 +816,10 @@ it("copies every stamped worker source, tokenizer and licence, and installs exte
   for (const name of readdirSync(tokenizerDir)) {
     expect(readFileSync(join(dir, "tokenizers", name)).equals(readFileSync(join(tokenizerDir, name))), name).toBe(true)
   }
+  const fontDir = join(server, "src/importer/fonts")
+  for (const name of readdirSync(fontDir)) {
+    expect(readFileSync(join(dir, "fonts", name)).equals(readFileSync(join(fontDir, name))), name).toBe(true)
+  }
   for (const [worker] of workers) {
     for (const { fileName: specifier } of ts.preProcessFile(
       readFileSync(join(dir, `${worker}.mjs`), "utf8"),

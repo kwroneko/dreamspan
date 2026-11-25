@@ -230,20 +230,21 @@ export function PortraitView({
       {header(
         <div
           data-portrait-toolbar
-          className={`flex flex-wrap items-center gap-x-3 border-b border-border px-3 ${alignToChatHeader ? "h-shell-header" : "min-h-14 @max-[22rem]:pt-2"}`}
+          className={`flex flex-wrap items-center gap-x-3 border-b border-border px-3 ${alignToChatHeader ? "h-shell-header" : "min-h-14"}`}
         >
           {title(portrait.name)}
           {visible && scale && (
-            // Narrower than its row (a narrow column), the zoom takes a row of its own under the name.
+            // Two rows until the name and all controls fit. Below 18rem keep the presets
+            // and readout, hiding the slider rather than squeezing its track below 80px.
             <div
               data-zoom-controls
-              className={`flex h-14 items-center gap-3 @max-[22rem]:order-last @max-[22rem]:w-full ${alignToChatHeader ? "@max-[22rem]:h-8" : ""}`}
+              className="flex h-14 items-center gap-3 @max-[34rem]:order-last @max-[34rem]:h-8 @max-[34rem]:w-full"
             >
-              <div data-zoom-group className="flex min-w-0 items-center gap-1 @max-[22rem]:flex-1">
+              <div data-zoom-group className="flex shrink-0 items-center gap-1 @min-[18rem]:@max-[34rem]:flex-1">
                 <ToolbarSlider
                   label="Zoom"
                   hint="Zoom: drag to enlarge or shrink the picture. The wheel and a pinch zoom too."
-                  className="w-20 shrink-0 @max-[22rem]:w-auto @max-[22rem]:min-w-0 @max-[22rem]:flex-1"
+                  className="hidden w-20 min-w-20 shrink-0 @min-[18rem]:flex @min-[18rem]:@max-[34rem]:flex-1"
                   value={toSlider(shownScale, min)}
                   min={0}
                   max={SLIDER_STEPS}
@@ -274,6 +275,7 @@ export function PortraitView({
               </div>
               <Segmented
                 label="Zoom presets"
+                size="compact"
                 inlineDescription={false}
                 value={zoom === "fit" ? "fit" : atOwnSize ? "actual" : null}
                 onValueChange={(value) => setZoom(value === "fit" ? "fit" : 1)}
@@ -343,8 +345,34 @@ export function PicturePeek({
   src?: string | undefined
   onClose: () => void
 }) {
+  const viewer = usePortraitViewer()
+  const stored = picture !== null && picture.mediaId !== null
   return (
-    <Dialog open={picture !== null} onOpenChange={(open) => !open && onClose()} title={picture?.name ?? ""} wide>
+    <Dialog
+      open={picture !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title={picture?.name ?? ""}
+      wide
+      headerAction={
+        picture && (
+          <IconButton
+            label="Open in image column"
+            hint={
+              stored
+                ? "Opens this image in the image column, beside the chat."
+                : "This image can open there once it has finished uploading."
+            }
+            icon="sidebar"
+            disabled={!stored || viewer === null}
+            onClick={() => {
+              viewer?.show(picture)
+              onClose()
+            }}
+            className="[@media(pointer:coarse)]:size-11"
+          />
+        )
+      }
+    >
       {picture && (
         <div
           data-picture-peek

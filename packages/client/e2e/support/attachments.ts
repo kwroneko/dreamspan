@@ -44,18 +44,17 @@ export function expectGrewUpward(before: ComposerPlaces, after: ComposerPlaces) 
 }
 
 /**
- * An image's tile: a 104 px thumbnail (80 px before 2026-11-23) with two icon buttons over it
- * and no text button; the X centred on the thumbnail's top-right corner, the column button
- * inside at its bottom right.
+ * An image's tile: a 104 px thumbnail (80 px before 2026-11-23) with one icon button over it
+ * (the X centred on the thumbnail's top-right corner) and no text button.
  */
 export async function expectImageTile(list: Locator, name: string) {
   const tile = list.getByRole("listitem").filter({ has: list.page().getByRole("button", { name: `View ${name}` }) })
   const buttons = tile.getByRole("button")
-  await expect(buttons).toHaveCount(3)
+  await expect(buttons).toHaveCount(2)
   const view = tile.getByRole("button", { name: `View ${name}`, exact: true })
-  const column = tile.getByRole("button", { name: "Open in image column", exact: true })
+  await expect(tile.getByRole("button", { name: "Open in image column", exact: true })).toHaveCount(0)
   const x = tile.getByRole("button", { name: `Remove ${name}`, exact: true })
-  for (const overlay of [column, x]) await expect(overlay).toHaveText("")
+  await expect(x).toHaveText("")
   await expect(tile.getByText("Remove", { exact: true })).toHaveCount(0)
   const image = await view.getByRole("img").boundingBox()
   expect(image).toMatchObject({ width: 104, height: 104 })
@@ -63,9 +62,5 @@ export async function expectImageTile(list: Locator, name: string) {
   const corner = (await x.boundingBox())!
   expect(Math.abs(corner.x + corner.width / 2 - (thumb.x + thumb.width))).toBeLessThanOrEqual(1)
   expect(Math.abs(corner.y + corner.height / 2 - thumb.y)).toBeLessThanOrEqual(1)
-  const open = (await column.boundingBox())!
-  expect(open.x + open.width).toBeLessThanOrEqual(thumb.x + thumb.width)
-  expect(open.y + open.height).toBeLessThanOrEqual(thumb.y + thumb.height)
-  expect(open.y).toBeGreaterThan(corner.y + corner.height)
-  return { tile, view, column, x }
+  return { tile, view, x }
 }

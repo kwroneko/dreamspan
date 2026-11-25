@@ -34,6 +34,7 @@ export const transcriptEntries = (
   return messages.flatMap((m, at): Array<TranscriptEntry> => {
     if (m.role === "assistant") {
       assistantAt = at
+      const { inspectionRequestId } = m as typeof m & { readonly inspectionRequestId?: string }
       return [
         {
           role: "assistant",
@@ -53,6 +54,7 @@ export const transcriptEntries = (
           ],
           stopReason: m.stopReason,
           toolsOffered: ++request < turnCap && tools > 0,
+          ...(inspectionRequestId ? { requestId: inspectionRequestId } : {}),
           ...(m.errorMessage ? { error: m.errorMessage } : {})
         }
       ]

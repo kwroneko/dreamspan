@@ -1,6 +1,7 @@
 // Connections and models (spec/PROVIDERS.md §2, §3). Shared so the client can show the
 // same kinds, fields and merged model descriptions the server uses.
 import { ASSUMED_CONTEXT, ModelSettings } from "./modelSettings.ts"
+import { openAIStructuredTools } from "./modelFamilies.ts"
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
 import { RefId } from "./library.ts"
@@ -627,7 +628,46 @@ export interface EffectiveModel {
   readonly route: Omit<RoutedUpstream, "upstream">
 }
 
-/** Defaults for fields no source knows: the safe choice, shown as unknown, never as "no". */
+type ModelConnection = {
+  readonly kind: string
+  readonly api: string
+  readonly provider?: string | null
+}
+
+const claudeAssistantPrefill =
+  /(?:^|[./])claude-(?:(?:sonnet|opus|haiku)-4(?:[.-][0-5](?!\d)|(?![.-]\d{1,2}(?:$|[-@:])))|3(?:[.-]\d+)?-(?:sonnet|opus|haiku)|(?:sonnet|opus|haiku)-3(?:[.-]\d+)?)(?:$|[-@:])/
+
+const providerPrefill = (connection: ModelConnection | undefined, key: string): typeof Prefill.Type | undefined => {
+  if (!connection) return
+  const { kind, api, provider } = connection
+  if (
+    claudeAssistantPrefill.test(key) &&
+    (api === "anthropic-messages" || (kind === "openrouter" && key.startsWith("anthropic/")))
+  )
+    return "assistant"
+  if (kind === "deepseek") return "assistant"
+  if (
+    (api === "openai-completions" || api === "openai-responses") &&
+    openAIStructuredTools.test(key) &&
+    (provider === "openai" || (kind === "openrouter" && key.startsWith("openai/")))
+  )
+    return "tool_schema"
+  if (kind === "openrouter" && /^(?:deepseek\/|xiaomi\/mimo)/.test(key)) return "assistant"
+}
+
+/** A versioned family can declare vision even when a list supplies only its ID. */
+const providerVision = (connection: ModelConnection | undefined, key: string): boolean =>
+  !!connection &&
+  ((connection.kind === "deepseek" && /(?:^|[./])deepseek-(?:flash|v4-flash(?:-vision-exp)?)(?:$|-)/i.test(key)) ||
+    (connection.api === "anthropic-messages" &&
+      /(?:^|[./])claude-(?:(?:sonnet|opus|haiku|fable|mythos)-)?[3-9](?:$|[-.@])/i.test(key)) ||
+    (connection.kind === "google" &&
+      /(?:^|[./])gemini-(?:2\.5|[3-9](?:\.\d+)?)-(?:flash|pro|argon|carbon|hydrogen|neon)(?:$|-)/i.test(key)) ||
+    ((connection.provider === "openai" || connection.provider === "openai-bedrock") &&
+      (connection.api === "openai-completions" || connection.api === "openai-responses") &&
+      openAIStructuredTools.test(key)))
+
+/** Defaults for fields no source knows, shown as unknown, never as "no". Vision is on unless a source says no (owner, 2026-11-25). */
 const DEFAULT_MAX_OUTPUT = 4096
 
 /**
@@ -643,7 +683,8 @@ export const resolveModel = (
   listed: ModelUpstream,
   overrides: ModelOverrides,
   connectionCompat: Compat = {},
-  provider: ProviderSettings = {}
+  provider: ProviderSettings = {},
+  connection?: ModelConnection
 ): EffectiveModel => {
   const routing = { ...listed.settings, ...overrides.settings }.routing
   const { upstream, ...route } = routedUpstream(listed, routing)
@@ -673,18 +714,22 @@ export const resolveModel = (
   const reasoning = pick("reasoning", true)
   const assumed = reasoning.source === "unknown"
   const levels = pick("thinkingLevels", null)
+  const vision = pick("vision", true)
+  const prefill = pick("prefill", "none" as const)
+  const defaultPrefill = prefill.source === "unknown" ? providerPrefill(connection, key) : undefined
   return {
     name: pick("name", key),
     context: pick("context", ASSUMED_CONTEXT),
     maxOutput: pick("maxOutput", DEFAULT_MAX_OUTPUT),
-    vision: pick("vision", false),
+    vision:
+      vision.source === "unknown" && providerVision(connection, key) ? { value: true, source: "provider" } : vision,
     maxImages: pick("maxImages", 4),
     midChatSystem: pick("midChatSystem", false),
     reasoning,
     thinkingLevels:
       assumed && levels.value?.off === undefined ? { ...levels, value: { ...levels.value, off: null } } : levels,
     tools: pick("tools", false),
-    prefill: pick("prefill", "none" as const),
+    prefill: defaultPrefill === undefined ? prefill : { value: defaultPrefill, source: "provider" },
     cacheTtlS: pick("cacheTtlS", null),
     cacheBreakpoints:
       breakpoints.source === "user" || provider.cacheBreakpoints === undefined

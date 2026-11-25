@@ -19,9 +19,11 @@ import { Field, focusFirstInvalid, formText, Input, SecretInput } from "../../ui
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
+import { refreshHint, useRefreshModels } from "./refreshModels.ts"
 import { CheckResult, TEST_HINT } from "./check.tsx"
 import {
   effectiveOrigin,
+  connectionsAtom,
   freshConnections,
   generationDefaultsAtom,
   parseOptionalInt,
@@ -45,6 +47,9 @@ export function ConnectionsPage() {
   const [importing, setImporting] = useState(false)
   const action = useAction()
   const navigate = useNavigate()
+  const refreshing = useRefreshModels()
+  const known = useAtomValue(connectionsAtom)
+  const targets = AsyncResult.isSuccess(known) ? known.value : []
   return (
     <Card>
       <CardHeader
@@ -52,6 +57,14 @@ export function ConnectionsPage() {
         title="Connections"
         actions={
           <>
+            <Button
+              pending={refreshing.pending}
+              disabled={targets.length === 0}
+              hint={refreshHint(null)}
+              onClick={() => void refreshing.run(targets)}
+            >
+              Refresh all models
+            </Button>
             <Button
               hint="Makes a connection from an ST preset’s API type, address and model. Keys aren’t read."
               onClick={() => setImporting(true)}
@@ -66,6 +79,11 @@ export function ConnectionsPage() {
           </>
         }
       />
+      {refreshing.error && (
+        <div className="mb-3">
+          <ErrorAlert error={refreshing.error} />
+        </div>
+      )}
       {importing && (
         <Dialog
           open

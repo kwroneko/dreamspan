@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import type { ChatId, SlotId } from "@dreamspan/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
+import { expectOneScroller, scrollPane } from "./support/scrollPane.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -149,11 +150,9 @@ const settled = (chatId: ChatId, slotId: SlotId) =>
   )
 
 for (const transport of ["native", "dispatcher"] as const)
-  for (const width of [1440, 390])
+  for (const width of [1340, 390])
     for (const theme of ["light", "dark"] as const)
-      test(`tools sent, loaded and never loaded, in the ${transport} run inspector, at ${width} ${theme}`, async ({
-        page
-      }, info) => {
+      test(`per-request tools in the ${transport} run inspector, at ${width} ${theme}`, async ({ page }, info) => {
         test.setTimeout(120_000)
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme })
@@ -195,9 +194,9 @@ for (const transport of ["native", "dispatcher"] as const)
         )
         const entry = await settled(run.chatId, run.slotId)
         expect(entry.version.status).toBe("complete")
-        // A new process must derive the same loaded groups from the saved transcript.
+        // A new process must read the same per-request definitions and provenance.
         await server().restart()
-        await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}#run-steps`)
+        await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}`)
 
         if (transport === "dispatcher") {
           await expect(
@@ -207,38 +206,92 @@ for (const transport of ["native", "dispatcher"] as const)
           ).toBeVisible({ timeout: 30_000 })
           await expectLayout(page, info, `reasoning-notice-${width}-${theme}`)
         }
-        const tools = page.getByRole("region", { name: "Tools offered" })
-        const sentFirst = tools.getByRole("region", { name: "Sent from the start" })
-        const loaded = tools.getByRole("region", { name: "Loaded during the run" })
-        const never = tools.getByRole("region", { name: "Never loaded" })
-        await expect(sentFirst).toBeVisible({ timeout: 30_000 })
-        await expect(sentFirst.getByRole("heading")).toHaveText(
-          new RegExp(`^Sent from the start · ${sentFromStart.length} tools, [\\d,]+ tokens$`)
+        const tools = page.getByRole("region", { name: "Tools", exact: true }).first()
+        const summary = tools.locator("summary").first()
+        const messages = page.getByRole("region", { name: "Messages", exact: true })
+        const total = page.getByText(/^[\d,]+ tokens: [\d,]+ messages, [\d,]+ tools$/)
+        await expect(total).toBeVisible({ timeout: 30_000 })
+        const usage = page.getByRole("region", { name: "Usage", exact: true }).locator("details")
+        await expect(usage).toHaveJSProperty("open", false)
+        await usage.locator("summary").click()
+        await expect(usage).toContainText("Cache read")
+        await usage.locator("summary").click()
+        await scrollPane(tools, { to: "start" })
+        await expect(summary).toHaveText(/^Tools[\d,]+ tokens$/)
+        await expect(tools.locator("details").first()).toHaveJSProperty("open", false)
+        const read = tools.getByRole("region", { name: "read_card", exact: true })
+        await expect(read).toHaveCount(0)
+        const counts = (await total.innerText()).match(/\d[\d,]*/g)!.map((value) => Number(value.replaceAll(",", "")))
+        const [, messageTokens, toolTokens] = counts
+        expect(counts[0]).toBe(messageTokens! + toolTokens!)
+        expect(toolTokens).toBeGreaterThan(0)
+        expect((await summary.innerText()).replaceAll(",", "")).toContain(`${toolTokens} tokens`)
+        expect(await tools.evaluate((element) => element.nextElementSibling?.getAttribute("aria-label"))).toBe(
+          "Messages"
         )
-        expect(sentFromStart).toContain("list_library")
-        for (const name of sentFromStart)
-          await expect(sentFirst.getByRole("region", { name, exact: true })).toBeVisible()
-        await expect(sentFirst.getByRole("region", { name: "list_library", exact: true })).toBeVisible()
-        await expect(sentFirst.getByRole("region", { name: "load_skill", exact: true })).toBeVisible()
-        // The Cards skill's seven tools, with ownturn1's move_card_text and edit_card_note, and
-        // wsb3's persona flag (notes are their own skill).
-        await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 8 tools, [\d,]+ tokens$/)
-        await expect(loaded.getByRole("region", { name: "read_card", exact: true })).toContainText(
-          /[\d,]+ tokens · loaded by load_skill/
-        )
-        await expect(never.getByRole("region", { name: "start_chat", exact: true })).toBeVisible()
-        await expect(never.getByRole("region", { name: "read_card", exact: true })).toHaveCount(0)
-
-        await sentFirst.scrollIntoViewIfNeeded()
-        if (shots) {
+        await expect(page.getByRole("region", { name: "Tools offered" })).toHaveCount(0)
+        const shot = async (state: string) => {
+          if (!shots || transport !== "native") return
           mkdirSync(shots, { recursive: true })
           await page.screenshot({
-            path: resolve(shots, `tool-loading-${transport}-${width}-${theme}.png`),
+            path: resolve(shots, `request-tools-${width}-${theme}-${state}.png`),
             animations: "disabled"
           })
         }
+        await shot("overview")
+        await scrollPane(tools, { at: -110 })
+        await summary.scrollIntoViewIfNeeded()
+        const beforeHover = await summary.boundingBox()
+        await summary.hover()
+        const explanation = page.getByText(
+          "Show or hide the tool definitions included in this request. The token count is an estimate.",
+          { exact: true }
+        )
+        await expect(explanation).toBeVisible()
+        expect(await summary.boundingBox()).toEqual(beforeHover)
+        await page.mouse.move(1, 1)
+        await expect(explanation).toBeHidden()
+        const toolsBox = (await tools.boundingBox())!
+        const messagesBox = (await messages.boundingBox())!
+        expect(Math.round(messagesBox.y - toolsBox.y - toolsBox.height)).toBe(16)
+        await shot("collapsed")
+        await summary.click()
+        await expect(read).toContainText("Loaded by load_skill")
+        await expect(tools.getByRole("region", { name: "start_chat", exact: true })).toHaveCount(0)
+        await read.locator("summary").click()
+        await expect(read.locator("pre")).toContainText('"properties"')
+        await scrollPane(read, { at: -16 })
+        await page.mouse.move(1, 1)
+        await shot("expanded")
+        await expectOneScroller(tools, "expanded tools and parameters")
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         await expectLayout(page, info, `tool-loading-${transport}-${width}-${theme}`, {
-          scope: '[aria-label="Tools offered"]'
+          scope: '[aria-label="Tools"]'
         })
+
+        const steps = page.getByRole("region", { name: "Steps", exact: true })
+        const requestTools = (number: number) =>
+          steps
+            .getByRole("heading", { name: `Request ${number}`, exact: true })
+            .locator("xpath=ancestor::section[1]")
+            .getByRole("region", { name: "Tools", exact: true })
+        const first = requestTools(1)
+        const second = requestTools(2)
+        if (transport === "dispatcher") {
+          const retry = steps.getByRole("heading", { name: "Attempt 1", exact: true })
+          await expect(
+            retry.locator("xpath=ancestor::section[1]").getByRole("region", { name: "Tools", exact: true })
+          ).toBeVisible()
+        }
+        await expect(first.locator("details").first()).toHaveJSProperty("open", false)
+        await first.locator("summary").click()
+        expect(await first.getByRole("region").all()).toHaveLength(sentFromStart.length)
+        expect(sentFromStart).toContain("list_library")
+        for (const name of sentFromStart) await expect(first.getByRole("region", { name, exact: true })).toBeVisible()
+        await expect(first.getByRole("region", { name: "read_card", exact: true })).toHaveCount(0)
+        await second.locator("summary").click()
+        await expect(second.getByRole("region", { name: "read_card", exact: true })).toContainText(
+          "Loaded by load_skill"
+        )
+        await expect(second.getByRole("region", { name: "start_chat", exact: true })).toHaveCount(0)
       })

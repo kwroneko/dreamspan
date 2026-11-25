@@ -3,7 +3,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { Effect } from "effect"
-import { applyRouterCacheControl } from "../src/providers/breakpoints.ts"
+import { applyRouterCacheControl, routerCacheFamily } from "../src/providers/breakpoints.ts"
 import { documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
 import { pricedCost } from "../src/providers/usage.ts"
 import { Reader } from "../src/db/Database.ts"
@@ -47,6 +47,24 @@ const text = (message: WireMessage | undefined) =>
   typeof message?.content === "string" ? message.content : JSON.stringify(message?.content ?? "")
 
 describe("default cache markers", () => {
+  it("puts one ephemeral marker at the deepest point on Alibaba's explicit-cache wire", () => {
+    const routing = { only: ["alibaba"], allow_fallbacks: false }
+    assert.strictEqual(routerCacheFamily("qwen/qwen3.7-plus", routing), "alibaba")
+    assert.isNull(routerCacheFamily("qwen/qwen3.5-plus-02-15", routing))
+    assert.isNull(routerCacheFamily("qwen/qwen3.7-plus", { only: ["other"] }))
+    const payload = {
+      messages: [
+        { role: "user", content: "Old" },
+        { role: "user", content: "New" }
+      ]
+    }
+    applyRouterCacheControl(payload, "alibaba", { breakpoints: [0, 1], cacheRetention: "long" })
+    assert.deepStrictEqual(payload.messages, [
+      { role: "user", content: "Old" },
+      { role: "user", content: [{ type: "text", text: "New", cache_control: { type: "ephemeral" } }] }
+    ])
+  })
+
   it.live("Anthropic's automatic layout ends its markers before the end-of-request instruction", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -173,32 +191,32 @@ describe("default cache markers", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("a custom server gets no prompt_cache_key unless its connection turns it on", () => {
+  it.live("a custom server defaults to a prompt_cache_key and honors explicit Off", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* resource(completionReply)
       const api = yield* client()
-      yield* generateReply(api, {
+      const { chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: {}
       })
-      assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
-      const { chat } = yield* generateReply(api, {
+      assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+      yield* generateReply(api, {
         connection: {
           provider: "openai-compatible",
           kind: "openai-chat",
           baseUrl: mock.url,
-          providerSettings: { promptCacheKey: true }
+          providerSettings: { promptCacheKey: false }
         },
         modelKey: "gpt-5.4-nano",
         model: {}
       })
-      assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+      assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("a custom Responses server gets no SDK-generated cache key until opted in", () => {
+  it.live("a custom Responses server respects Off for SDK-generated cache keys", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* resource((_req, res) =>

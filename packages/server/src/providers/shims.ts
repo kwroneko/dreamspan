@@ -206,6 +206,36 @@ const withoutBreakpoints = (payload: Record<string, unknown>) => {
   return payload
 }
 
+// Gemini 4 uses levels and keeps thinking on. These models are absent from pi-ai 1.0.3's catalog.
+const googleGemini4Thinking = {
+  id: "google-gemini-4-thinking-levels",
+  label: "Thinking stays on, with low, medium or high effort.",
+  models: "Gemini 4 except Neon and Hydrogen",
+  providers: ["google"],
+  apis: ["google-generative-ai"],
+  model: /^(?:models\/)?gemini-4-(?!(?:neon|hydrogen)(?:-|$))/i,
+  capabilities: {
+    reasoning: true,
+    vision: true,
+    thinkingLevels: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null }
+  },
+  fixed: ["reasoning", "thinkingLevels"],
+  payload: (payload) => {
+    const config = object(payload.config)
+    const thinking = object(config?.thinkingConfig)
+    if (config && thinking && Object.hasOwn(thinking, "thinkingBudget")) {
+      const { thinkingBudget, ...rest } = thinking
+      if (rest.thinkingLevel !== undefined || thinkingBudget === 0) {
+        payload.config = {
+          ...config,
+          thinkingConfig: { ...rest, thinkingLevel: rest.thinkingLevel === undefined ? "LOW" : rest.thinkingLevel }
+        }
+      }
+    }
+    return payload
+  }
+} satisfies CompatShim
+
 /** The built-in shims, for what the live provider suite found (liveapi, 2026-11-07), and documented limits. */
 export const builtinShims: ReadonlyArray<CompatShim> = [
   {
@@ -240,29 +270,16 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
       return payload
     }
   },
+  googleGemini4Thinking,
   {
-    // These models are absent from pi-ai 1.0.3's catalog; never infer their prices.
-    id: "google-gemini-4-thinking-levels",
-    label: "Thinking stays on, with low, medium or high effort.",
-    models: "Gemini 4 Carbon and Argon",
-    providers: ["google"],
-    apis: ["google-generative-ai"],
-    model: /^(?:models\/)?gemini-4-(?:argon|carbon)(?:-|$)/i,
+    ...googleGemini4Thinking,
+    id: "google-gemini-4-xhigh-thinking-levels",
+    label: "Thinking stays on, with low, medium, high or extra high effort.",
+    models: "Gemini 4 Neon and Hydrogen",
+    model: /^(?:models\/)?gemini-4-(?:neon|hydrogen)(?:-|$)/i,
     capabilities: {
-      reasoning: true,
-      vision: true,
-      thinkingLevels: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null }
-    },
-    fixed: ["reasoning", "thinkingLevels"],
-    payload: (payload) => {
-      const thinking = object(object(payload.config)?.thinkingConfig)
-      // A saved raw override must not send Google's mutually exclusive controls.
-      if (thinking?.thinkingLevel !== undefined) delete thinking.thinkingBudget
-      else if (thinking?.thinkingBudget === 0) {
-        delete thinking.thinkingBudget
-        thinking.thinkingLevel = "LOW"
-      }
-      return payload
+      ...googleGemini4Thinking.capabilities,
+      thinkingLevels: { ...googleGemini4Thinking.capabilities.thinkingLevels, xhigh: "xhigh" }
     }
   },
   {
@@ -323,6 +340,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     retryWhen: (e) =>
       e.status === 400 &&
       !e.afterTokens &&
+      !/\breasoning\s+(?:is\s+mandatory|(?:cannot|can not|can't)\s+be\s+disabled)\b/i.test(e.message) &&
       /Function tools with reasoning_effort are not supported/i.test(e.message) &&
       /reasoning_effort to ['"]none['"]/i.test(e.message),
     payload: (payload) => {
@@ -339,17 +357,19 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F11: "Reasoning is mandatory for this endpoint and cannot be disabled."
     id: "openrouter-gemini-4-argon-reasoning-on",
     label: "Reasoning stays on: this model can’t turn it off.",
-    models: "Gemini 4 Argon",
+    models: "Gemini 4 (all)",
     providers: ["openrouter"],
-    model: /^google\/gemini-4-argon/i,
+    model: /^google\/gemini-4-/i,
     capabilities: { thinkingLevels: { off: null } },
     payload: (payload) => {
       // Model settings and user-edited thinking levels can bypass the SDK's off mapping.
       if (payload.reasoning_effort === "none") delete payload.reasoning_effort
       const current = object(payload.reasoning)
-      if (current?.effort === "none") {
-        const { effort: _effort, ...rest } = current
-        if (Object.keys(rest).length > 0) payload.reasoning = rest
+      if (current && (current.effort === "none" || current.enabled === false)) {
+        const reasoning = { ...current }
+        if (reasoning.effort === "none") delete reasoning.effort
+        if (reasoning.enabled === false) delete reasoning.enabled
+        if (Object.keys(reasoning).length > 0) payload.reasoning = reasoning
         else delete payload.reasoning
       }
       return payload

@@ -188,13 +188,13 @@ export const registerComposerControls = () => [
     placement: "strip",
     component: DraftContextChip
   }),
-  // The strip reads as a sentence: who replies, with which model and preset (and the other
-  // choices, 11 to 79), then what that next request is (its size, then its cache). A chat kind's
-  // own chips (a workshop's: 100 on) come after these, so the shared ones keep their places; only
-  // the subagents' models (25) sit inside, after the model they extend.
+  // The strip: first the chips every chat kind has, in the same places (model, preset, the next
+  // request's size, its cache; the subagents' models chip, where shown, right after the model: it is another
+  // model selector), then each kind's own (a story's Next at 100; a workshop's
+  // capabilities and folder from 110), then send-to-threads. Owner, 2026-11-25.
   composerControls.register({
     id: "composer.next",
-    order: 10,
+    order: 100,
     placement: "strip",
     component: ({ reply }) => <NextReplyChip {...reply} />
   }),
@@ -221,8 +221,8 @@ export const registerComposerControls = () => [
   }),
   composerControls.register({
     id: "composer.cache",
-    // Last, after the workshop's folder, so it can appear without moving earlier chips.
-    order: 130,
+    // Shared by every chat kind, so it sits with model, preset and size, before any kind's own chips.
+    order: 85,
     placement: "strip",
     component: ({ session, view }) => <CacheChip session={session} view={view} />
   }),

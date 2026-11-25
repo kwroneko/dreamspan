@@ -14,6 +14,7 @@ import type { RefId } from "@dreamspan/shared/library.ts"
 import { Effect, Option, Redacted, Schema } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
+import { newCardDoc } from "@dreamspan/shared/editing.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { readChunks } from "../src/formats/png.ts"
 import { defaultLimits } from "../src/formats/safety.ts"
@@ -142,6 +143,44 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         yield* Effect.promise(() => decoded(run(importCard(bytes)).avatar!.bytes)),
         yield* Effect.promise(() => decoded(avatar))
       )
+    })
+  )
+
+  it.effect("a card made with no portrait exports in every format and each file imports back as the same card", () =>
+    Effect.gen(function* () {
+      const writer = yield* Writer
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      const doc = {
+        ...newCardDoc("Mira"),
+        description: "A text-only card.",
+        first_mes: "Hello.",
+        tags: ["synthetic"]
+      }
+      const made = yield* writer.CreateEntity({
+        userId: me.id,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc,
+        schemaVersion: 1,
+        origin: "agent",
+        sourcePath: null
+      })
+      for (const [format, name] of [
+        ["card-png", "mira.png"],
+        ["card-v2-json", "mira2.json"],
+        ["card-v3-json", "mira3.json"],
+        ["card-charx", "mira.charx"]
+      ] as const) {
+        const out = yield* exported(made.ref.id, format)
+        assert.strictEqual(out.status, 200, `${format}: ${new TextDecoder().decode(out.bytes).slice(0, 200)}`)
+        const again = (yield* imported(out.bytes, name)).library!
+        const back = (yield* api.OpenEditor({ refId: again.ref.id })).doc as unknown as Record<string, unknown>
+        for (const key of ["name", "description", "first_mes", "tags", "personality", "scenario"])
+          assert.deepStrictEqual(back[key], (doc as Record<string, unknown>)[key], `${format} ${key}`)
+        if (format === "card-v2-json" || format === "card-v3-json") assert.isNull(back.avatar_media_id, format)
+      }
     })
   )
 

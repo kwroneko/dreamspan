@@ -118,11 +118,8 @@ export const uncachedTotal = (tokens: number, warmth: CacheWarmth | null) => {
   return total === undefined || total < tokens ? undefined : total
 }
 
-/** The chip's uncached count, out of the next request's total when it's known. */
-export const uncachedText = (tokens: number, total: number | undefined) =>
-  total === undefined
-    ? `↻ ${compactTokens(tokens)} uncached`
-    : `↻ ${compactTokens(tokens)} of ${compactTokens(total)} uncached`
+/** The chip's uncached count; the request's total is in its name and popover, so the chip stays within its width. */
+export const uncachedText = (tokens: number) => `↻ ${compactTokens(tokens)} uncached`
 
 /** How long the chip waits after a reply for the estimate that follows it (one that fails never comes). */
 const AFTER_REPLY_MS = 30_000
@@ -154,6 +151,9 @@ const useBeforeReply = (session: ChatSession, replying: boolean) => {
   return waiting
 }
 
+/** The chip keeps the room of its widest common text ("Cache after reply"), so the usual state changes move nothing after it; a rare long change note may grow it. */
+const SPAN = "inline-block min-w-[17ch] text-left"
+
 export function CacheChip({ session, view }: { session: ChatSession; view: ChatView }) {
   const warmth = view.cache
   const waiting = useBeforeReply(
@@ -178,15 +178,28 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  // Nothing to say (no lifetime known for this provider, or nothing changed): no chip, never a
-  // dead one. It's last in the strip, so its coming and going moves nothing else.
-  if (view.loading || (shown === null && notes.length === 0)) return null
+  // Nothing to say yet (no estimate, or nothing changed): the chip still shows, muted, so its
+  // coming later never moves the chips after it.
+  if (!waiting && (view.loading || (shown === null && notes.length === 0)))
+    return (
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={<span className={SPAN}>No cache yet</span>}
+        triggerLabel="Cache: shown after the first reply. Details"
+        hint="Whether your next reply can read this chat from the provider's cache. Shown after the first reply"
+        triggerClassName={`${chipClass("neutral")} text-muted`}
+        title="Cache"
+      >
+        <p className="text-sm">The cache shows after the first reply.</p>
+      </Popover>
+    )
   if (waiting)
     return (
       <Popover
         open={open}
         onOpenChange={setOpen}
-        trigger={<span>Cache after reply</span>}
+        trigger={<span className={SPAN}>Cache after reply</span>}
         triggerLabel="Cache: worked out again when this reply ends. Details"
         hint="Whether your next reply can read this chat from the provider's cache, at a lower price: known once this reply ends"
         triggerClassName={chipClass("neutral")}
@@ -215,7 +228,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
   const ofTotal = total === undefined ? "" : ` of ${total.toLocaleString()}`
   const text =
     shown?.kind === "uncached"
-      ? uncachedText(shown.tokens, total)
+      ? uncachedText(shown.tokens)
       : warm
         ? `Cache warm${left ? ` ${left}` : ""}`
         : `↻ ${notes[0]!.short}`
@@ -229,7 +242,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     <Popover
       open={open}
       onOpenChange={setOpen}
-      trigger={<span className="tabular-nums">{text}</span>}
+      trigger={<span className={`${SPAN} tabular-nums`}>{text}</span>}
       triggerLabel={label}
       hint={
         shown?.kind === "uncached"

@@ -14,14 +14,9 @@ import type { ExportFormatInfo } from "@dreamspan/shared/libraryImport.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 import { describeImage } from "./images.ts"
+import { placeholderPortrait } from "./placeholder.ts"
 import { renderPicture } from "./thumbnail.ts"
 import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@dreamspan/shared/media.ts"
-
-/** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
-const PLACEHOLDER_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-  "base64"
-)
 
 const EXTENSIONS: Record<string, string> = {
   "image/png": "png",
@@ -162,7 +157,8 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "image/png",
     extension: "png",
     media: "avatar",
-    description: "A PNG of its avatar with the card inside, as most apps share cards. Embedded assets stay out.",
+    description:
+      "A PNG of its avatar with the card inside, as most apps share cards; a card without one gets its initials on a plain tile. Embedded assets stay out.",
     write: cardWriter((originalCard, input) =>
       Effect.gen(function* () {
         let card = originalCard
@@ -173,7 +169,10 @@ const builtins: ReadonlyArray<Exporter> = [
               try: () => renderPicture(input.avatar!.bytes, picture),
               catch: () => new ExportRefused({ message: "The picture couldn't be rendered as PNG." })
             })
-          : PLACEHOLDER_PNG
+          : yield* Effect.tryPromise({
+              try: () => placeholderPortrait(card.name),
+              catch: () => new ExportRefused({ message: "A default picture couldn't be made for this card." })
+            })
         if (crop) {
           const ours = card.extensions[OUR_EXTENSION]
           const size = describeImage(image)

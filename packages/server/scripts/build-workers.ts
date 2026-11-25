@@ -22,9 +22,11 @@ export const buildWorkers = async (outDir = fileURLToPath(new URL("../dist/worke
     })
     moduleIds.push(...output[0].moduleIds)
   }
-  const data = new URL("../src/importer/tokenizers/", import.meta.url)
-  cpSync(data, `${outDir}/tokenizers`, { recursive: true })
-  moduleIds.push(...readdirSync(data).map((name) => fileURLToPath(new URL(name, data))))
+  for (const folder of ["tokenizers", "fonts"]) {
+    const data = new URL(`../src/importer/${folder}/`, import.meta.url)
+    cpSync(data, `${outDir}/${folder}`, { recursive: true })
+    moduleIds.push(...readdirSync(data).map((name) => fileURLToPath(new URL(name, data))))
+  }
   writeStamp(outDir, moduleIds)
   return outDir
 }

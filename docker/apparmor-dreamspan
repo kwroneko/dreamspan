@@ -2,8 +2,8 @@
 #
 # Docker's own `docker-default` (moby/profiles, apparmor/template.go, as Docker 29 generates
 # it), with one change: `deny mount` is replaced by what bubblewrap needs to build each
-# command's sandbox inside its own user namespace (mount, remount, umount, pivot_root) and the
-# entrypoint needs for the commands' cgroup view (a cgroup2 mount). Everything else is
+# command's sandbox inside its own user namespace (mount, remount, umount, pivot_root), the one
+# /proc/sys file its --disable-userns writes (user/max_user_namespaces), and the entrypoint needs for the commands' cgroup view (a cgroup2 mount). Everything else is
 # docker-default: the /proc and /sys write denials, no access to /sys/firmware,
 # /sys/kernel/security, kcore or sysrq-trigger, signals only within the profile.
 #
@@ -45,7 +45,10 @@ profile dreamspan flags=(attach_disconnected,mediate_deleted) {
   deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
   # deny write to files not in /proc/<number>/** or /proc/sys/**
   deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
-  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel) and the one file
+  # bubblewrap's --disable-userns writes: /proc/sys/user/max_user_namespaces
+  deny @{PROC}/sys/{[^ku]**,u[^s]**,us[^e]**,use[^r]**,user[^/]**,user/[^m]**,user/m[^a]**,user/ma[^x]**,user/max[^_]**} w,
+  deny @{PROC}/sys/user/max_{cgroup,ipc,mnt,net,pid,time,uts}_namespaces w,
   deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
   deny @{PROC}/sysrq-trigger rwklx,
   deny @{PROC}/kcore rwklx,

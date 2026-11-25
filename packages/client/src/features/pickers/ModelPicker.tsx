@@ -5,12 +5,16 @@ import { ChatLock } from "./PickerParts.tsx"
 // come from. The body is the registered `model.picker` entry.
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useCallback, useId, useMemo, useRef, useState } from "react"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import { ErrorAlert } from "../../actions.tsx"
+import { refreshHint, useRefreshModels } from "../connections/refreshModels.ts"
+import { connectionsAtom } from "../connections/data.ts"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import {
   type PickerBodyProps,
@@ -84,6 +88,8 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
   const nextOrder = ready ? pinOrder(order, prefs.modelPins, query, connection) : order
   if (nextOrder !== order) setOrder(nextOrder)
   const orderPins = nextOrder?.pins ?? null
+  const refreshing = useRefreshModels()
+  const allConnections = useAtomValue(connectionsAtom)
   const search = useRef<HTMLInputElement>(null)
   const searchRef = focus === "search" ? focusRef : search
   const navigation = useRef<ModelListNavigation>(null)
@@ -126,6 +132,10 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
     ],
     [choices, ordered, prefs.modelSort, query, connection, orderPins, prefs.modelPins, used]
   )
+  // Refresh reads each connection's model list again: every connection, or the one filtered.
+  const known = AsyncResult.isSuccess(allConnections) ? allConnections.value : []
+  const refreshTargets = connection === ALL ? known : known.filter((entry) => entry.id === connection)
+  const refreshName = connection === ALL ? null : refreshTargets[0]?.name
   const choose = useCallback(
     async (next: string) => {
       if (choosing.current) return
@@ -221,11 +231,23 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
           No connection lists a model yet. Add a connection, and its models show here.
         </p>
       )}
-      <ErrorAlert error={selection.error ?? error} />
-      <ConnectionsLink className={pickerRowClass}>
-        <Icon name={models.length === 0 ? "plus" : "sliders"} size={14} />
-        {models.length === 0 ? "Add a connection…" : "Manage connections…"}
-      </ConnectionsLink>
+      <ErrorAlert error={selection.error ?? error ?? refreshing.error} />
+      {/* Where models come from, and the button that reads them again: the filter row has no room for it at phone width. */}
+      <div className="flex shrink-0 items-center gap-2">
+        <ConnectionsLink className={`${pickerRowClass} min-w-0 flex-1 w-auto! shrink!`}>
+          <Icon name={models.length === 0 ? "plus" : "sliders"} size={14} />
+          {models.length === 0 ? "Add a connection…" : "Manage connections…"}
+        </ConnectionsLink>
+        <IconButton
+          label="Refresh model lists"
+          hint={refreshHint(refreshName ?? null)}
+          icon="regenerate"
+          disabled={refreshing.pending || refreshTargets.length === 0}
+          aria-busy={refreshing.pending}
+          className={refreshing.pending ? "[&_svg]:animate-spin motion-reduce:[&_svg]:animate-none" : ""}
+          onClick={() => void refreshing.run(refreshTargets)}
+        />
+      </div>
     </div>
   )
 }

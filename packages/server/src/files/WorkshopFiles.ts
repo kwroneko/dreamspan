@@ -185,6 +185,7 @@ export class WorkshopFiles extends Context.Service<
         onChanged: changed
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
+      yield* execution.portraitSources.register(files.portraits)
       yield* execution.subagentWorkspaces.register(files.workspaces)
       // Subagents' copies the app left unsettled when it stopped mid-run (spec/SUBAGENTS.md
       // §3.3): settled now, then checked again every hour.

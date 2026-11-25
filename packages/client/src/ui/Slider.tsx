@@ -2,7 +2,7 @@
 // drag (and each key press); `onValueCommitted` fires once the pointer lets go, or after a key,
 // so a caller can show a value live and save it once.
 import { Slider as BaseSlider } from "@base-ui/react/slider"
-import { type KeyboardEvent, useId, type ReactNode } from "react"
+import { type KeyboardEvent, useId, type ReactNode, useState } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { LOG_POSITIONS, logScale } from "./logScale.ts"
 import { useRepeatsTitle } from "./titledContainer.tsx"
@@ -192,6 +192,10 @@ export function ToolbarSlider({
   className?: string
   onValueChange: (value: number) => void
 }) {
+  // Base UI's edge-aligned thumb observes its control on mount. Mount the thumb only
+  // after that control has registered its ref, including when the toolbar starts hidden;
+  // otherwise it can miss the observer and stay invisible when the column grows.
+  const [control, setControl] = useState<HTMLDivElement | null>(null)
   return (
     <BaseSlider.Root
       value={value}
@@ -205,15 +209,17 @@ export function ToolbarSlider({
       className={`flex items-center data-disabled:opacity-50 ${className}`}
     >
       <Tooltip label={hint}>
-        <BaseSlider.Control className="flex h-8 w-full touch-none items-center select-none">
+        <BaseSlider.Control ref={setControl} className="flex h-8 w-full touch-none items-center select-none">
           <BaseSlider.Track className="h-1 w-full rounded-full bg-surface-raised ring-1 ring-border">
             <BaseSlider.Indicator className="rounded-full bg-accent" />
-            <BaseSlider.Thumb
-              data-layout-overlay="Slider thumb rides over its track and fill"
-              aria-label={label}
-              getAriaValueText={(_formatted, current) => valueText(current)}
-              className="size-3.5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
-            />
+            {control && (
+              <BaseSlider.Thumb
+                data-layout-overlay="Slider thumb rides over its track and fill"
+                aria-label={label}
+                getAriaValueText={(_formatted, current) => valueText(current)}
+                className="size-3.5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
+              />
+            )}
           </BaseSlider.Track>
         </BaseSlider.Control>
       </Tooltip>

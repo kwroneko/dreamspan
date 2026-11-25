@@ -32,7 +32,11 @@ export type ContinuousSnapshot = ContextSnapshot & {
   readonly continuity?: ContinuityRecord
   readonly storyAt?: StoryAt
   readonly storyStamp?: string | null
-  readonly agent?: { readonly tools: ReadonlyArray<FrozenTool>; readonly cardSkills?: ReadonlyArray<Skill> }
+  readonly agent?: {
+    readonly tools: ReadonlyArray<FrozenTool>
+    readonly cardSkills?: ReadonlyArray<Skill>
+    readonly turnCap?: number
+  }
 }
 
 /** A gone or unowned story has no reusable read material. */

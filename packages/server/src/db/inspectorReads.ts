@@ -15,6 +15,7 @@ import {
   type ContextMessage,
   type ContextSource,
   type RequestFigures,
+  type RequestTools,
   RunContext,
   versionMetricsOf
 } from "@dreamspan/shared/inspectorApi.ts"
@@ -26,6 +27,7 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import type {
   ContextSnapshot,
+  ModelInput,
   Source,
   WireContext,
   InspectionInputs,
@@ -38,6 +40,11 @@ import type { LlmRequestRow } from "./providers.ts"
 import type { InspectorUsage } from "@dreamspan/shared/inspectorApi.ts"
 import { query } from "./tx.ts"
 import { recordedPromptTotal } from "./requestInput.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import { loadPoints } from "../agent/toolLoading.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
+import { type CapturedRequestTools, type CapturedTool, toolText } from "../providers/requestTools.ts"
+import type { FrozenTool } from "../agent/tools.ts"
 
 const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
 
@@ -355,6 +362,84 @@ const decisionsOffOf = (snapshot: unknown) => {
   return points.length ? { decisionsOff: points } : {}
 }
 
+/** Count each distinct definition once with the local tokenizer, and add frozen labels. */
+export const requestToolDisplay = Effect.fnUntraced(function* (
+  capture: CapturedRequestTools,
+  frozenTools: ReadonlyArray<FrozenTool>,
+  assembler: Assembler,
+  model: ModelInput | null
+): Effect.fn.Return<RequestTools> {
+  const { definitions, ...requests } = capture
+  const entries = Object.entries(definitions)
+  if (entries.length === 0) return { ...requests, definitions: {} }
+  const count = yield* prepareTextTokens(assembler.textCounters.list(), model)
+  const frozenByName = new Map(frozenTools.map((tool) => [tool.name, tool]))
+  return {
+    ...requests,
+    definitions: Object.fromEntries(
+      entries.map(([id, json]) => {
+        const tool = JSON.parse(json) as CapturedTool
+        const frozen = frozenByName.get(tool.name)
+        const mcp = frozen?.mcp
+        return [
+          id,
+          {
+            ...tool,
+            label: frozen?.label ?? tool.name,
+            tokens: count(toolText(tool)),
+            ...(mcp
+              ? {
+                  mcp: {
+                    connection: mcp.connection,
+                    connectionName: mcp.connectionName,
+                    host: mcp.host,
+                    listedAt: mcp.listedAt ?? null
+                  }
+                }
+              : {})
+          }
+        ]
+      })
+    )
+  }
+})
+
+/** For a pre-capture rollout, estimate the latest offer from its frozen tools and load points. */
+function legacyRequestToolCapture(
+  latest: string,
+  frozenTools: ReadonlyArray<FrozenTool>,
+  transcript: ReadonlyArray<AgentMessage>,
+  turnCap: number | undefined,
+  model: ModelInput | null
+): CapturedRequestTools | undefined {
+  const at = transcript.findLastIndex((entry) => entry.role === "assistant")
+  const beforeAnswer = transcript.slice(0, Math.max(0, at))
+  const lastUser = beforeAnswer.findLastIndex((entry) => entry.role === "rpUser")
+  const turns = beforeAnswer.slice(lastUser + 1).filter((entry) => entry.role === "assistant").length + 1
+  // Anthropic keeps declarations on a capped turn and forbids calls through tool_choice.
+  if (turnCap !== undefined && turns >= turnCap && model?.api !== "anthropic-messages") return undefined
+  const loaders = new Map(
+    beforeAnswer.flatMap((entry) => (entry.role === "toolResult" ? [[entry.toolCallId, entry.toolName] as const] : []))
+  )
+  const loaded = new Map(
+    loadPoints(beforeAnswer, new Set(frozenTools.filter((tool) => tool.deferred).map((tool) => tool.name))).flatMap(
+      (point) => point.names.map((name) => [name, loaders.get(point.toolCallId) ?? "a loading call"] as const)
+    )
+  )
+  const active = frozenTools.filter((tool) => !tool.deferred || loaded.has(tool.name))
+  if (active.length === 0) return undefined
+  return {
+    latest,
+    attempts: { [latest]: active.map((tool) => tool.name) },
+    definitions: Object.fromEntries(
+      active.map(({ name, description, parameters }) => [
+        name,
+        JSON.stringify({ name, description, parameters, loadedBy: loaded.get(name) })
+      ])
+    )
+  }
+}
+
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
@@ -382,14 +467,32 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
       const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
       const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
       const display = wire?.display
+      const frozenTools = snapshot.agent?.tools ?? []
+      let capturedTools = wire?.toolDeclarations
+      if (display && capturedTools === undefined && frozenTools.length > 0) {
+        const [legacy] = yield* sql<{ transcript_json: string | null }>`
+          SELECT transcript_json FROM rollout_payloads WHERE rollout_id = ${row.rollout_id}`
+        capturedTools = legacyRequestToolCapture(
+          requests.at(-1)?.id ?? "",
+          frozenTools,
+          legacy?.transcript_json ? (JSON.parse(legacy.transcript_json) as ReadonlyArray<AgentMessage>) : [],
+          snapshot.agent?.turnCap,
+          snapshot.inputs.model
+        )
+      }
+      const toolDeclarations =
+        display && capturedTools
+          ? yield* requestToolDisplay(capturedTools, frozenTools, assembler, snapshot.inputs.model)
+          : undefined
       // Captured wire messages are text; their images are the snapshot's, with its estimates.
       const images = wire ? wireImages(wire.messages, snapshot.request) : []
+      const texts = (wire?.messages ?? []).map((m) => m.content + (m.name ?? ""))
       const textCounts = yield* textDisplay(
         sql,
         userId,
         snapshot.inputs.model,
         assembler,
-        (wire?.messages ?? []).map((m) => m.content + (m.name ?? "")),
+        [...texts, ...(wire?.extraMessageText ?? [])],
         snapshot.inputs.now
       )
       const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
@@ -406,6 +509,25 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         }
       }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
       const separateContext = yield* separateContextOf(sql, snapshot)
+      const messages = display
+        ? contextMessages(wire!, images, textCounts.counts, (source) => {
+            if (!source.summary) return source
+            const now = current.get(source.summary.id)
+            return {
+              ...source,
+              summary: {
+                ...source.summary,
+                changed: !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
+              }
+            }
+          })
+        : []
+      const messageTokens =
+        messages.reduce(
+          (n, message) =>
+            n + (wire?.toolDeclarations && message.prefill?.protocol === "tool_schema" ? 0 : message.tokens),
+          0
+        ) + textCounts.counts.slice(texts.length).reduce((n, count) => n + count, 0)
       return new RunContext({
         ...(snapshot.continuity
           ? {
@@ -430,19 +552,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         ...speakerPickOf(row.speaker_pick_json),
         ...decisionsOffOf(snapshot),
         ...(separateContext ? { separateContext } : {}),
-        messages: display
-          ? contextMessages(wire!, images, textCounts.counts, (source) => {
-              if (!source.summary) return source
-              const now = current.get(source.summary.id)
-              return {
-                ...source,
-                summary: {
-                  ...source.summary,
-                  changed: !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
-                }
-              }
-            })
-          : [],
+        messages,
+        ...(display ? { messageTokens } : {}),
+        ...(toolDeclarations ? { toolDeclarations } : {}),
         samplers: display ? { ...wire!.samplers } : {},
         ...(display ?? {
           model: null,

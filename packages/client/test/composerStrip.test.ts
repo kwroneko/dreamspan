@@ -91,27 +91,23 @@ describe("the cache chip", () => {
     })
   })
 
-  it("shows the uncached count out of the next request's total when it's known", () => {
-    expect(uncachedText(7_046, 7_046)).toBe("↻ 7.0k of 7.0k uncached")
-    expect(uncachedText(2_926, 96_906)).toBe("↻ 2.9k of 97k uncached")
-    expect(uncachedText(2_926, undefined)).toBe("↻ 2.9k uncached")
+  it("shows the uncached count alone, short enough that the chip never grows", () => {
+    expect(uncachedText(7_046)).toBe("↻ 7.0k uncached")
+    expect(uncachedText(2_926)).toBe("↻ 2.9k uncached")
+    expect(uncachedText(130_000).length).toBeLessThanOrEqual(17)
   })
 
   it("takes the total from the estimate itself, and shows none rather than one below the uncached part", () => {
     const changed = { reason: "Message 2 was edited, or another of its swipes chosen.", tokens: 2_926 }
     // The normal case: the estimate's own total, counted as its uncached part is.
     expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 96_906 }))).toBe(96_906)
-    expect(uncachedText(2_926, uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 })))).toBe(
-      "↻ 2.9k of 2.9k uncached"
-    )
+    expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 }))).toBe(2_926)
     // A total below the uncached part (an expired cache counted on the last request) isn't raised to it.
     const lower = uncachedTotal(7_046, warmth({ prefixTokens: 7_046, requestTokens: 5_000 }))
     expect(lower).toBeUndefined()
-    expect(uncachedText(7_046, lower)).toBe("↻ 7.0k uncached")
-    // No total in the estimate: the chip reads as it did without one.
+    // No total in the estimate.
     const missing = uncachedTotal(2_926, warmth({ changed }))
     expect(missing).toBeUndefined()
-    expect(uncachedText(2_926, missing)).toBe("↻ 2.9k uncached")
     expect(uncachedTotal(2_926, null)).toBeUndefined()
   })
 
@@ -160,10 +156,10 @@ describe("strip and box placements", () => {
   const ids = (placement: Parameters<typeof availableComposerControls>[0], c: ComposerControlContext) =>
     availableComposerControls(placement, c).map((entry) => entry.id)
 
-  // What's chosen first (who replies, the model, the preset), then what the next request is: its
-  // size, then its cache.
-  const order = ["composer.next", "composer.model", "composer.preset", "composer.context", "composer.cache"]
-  it("puts the choices first and the next request's size and cache last, Next keeping its place without a choice", () => {
+  // The chips every chat kind has first, in the same places (model, preset, the next request's size,
+  // its cache), then a kind's own: a story's Next (owner, 2026-11-25).
+  const order = ["composer.model", "composer.preset", "composer.context", "composer.cache", "composer.next"]
+  it("puts the chips every chat kind has first and a story's Next after them, Next keeping its place without a choice", () => {
     expect(ids("strip", context(false, 1))).toEqual(order)
     expect(ids("strip", context(false, 3))).toEqual(order)
   })
@@ -184,12 +180,12 @@ describe("strip and box placements", () => {
       component: () => null
     })
     expect(ids("strip", context(false, 1))).toEqual([
-      "composer.next",
       "composer.model",
       "composer.preset",
       "synthetic.chip",
       "composer.context",
-      "composer.cache"
+      "composer.cache",
+      "composer.next"
     ])
     expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip", "composer.history"])
     close()

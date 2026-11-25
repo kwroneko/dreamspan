@@ -42,12 +42,13 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { AppClient } from "../../rpc.ts"
-import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
-import { ImageEstimate } from "./imageTokens.tsx"
+import { Alert, Badge, Card, CardHeader, Disclosure } from "../../ui/Surface.tsx"
+import { ImageEstimate, ImagesInTags, SentImagesScope } from "./imageTokens.tsx"
 import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { runInspectorSections, runInspectorTranscript } from "./presentation.tsx"
+import { RequestTools, requestTokenText, toolsForRequest, toolTokens } from "./agent/RequestTools.tsx"
 
 /** How much of a collapsed message shows. */
 const PREVIEW = 200
@@ -264,7 +265,13 @@ function ScriptsNote({ source }: { source: ContextSource }) {
 
 /** Prompt text exactly as sent: monospace, so it never reads as the inspector's own labels. */
 function PromptText({ text }: { text: string }) {
-  return <p className="font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-text">{text}</p>
+  return (
+    <ImagesInTags text={text}>
+      {(piece) => (
+        <p className="font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-text">{piece}</p>
+      )}
+    </ImagesInTags>
+  )
 }
 
 /** A titled box: what its text is and where it came from, above the text or the parts it holds. */
@@ -312,11 +319,15 @@ function Frame({ text, owner, quiet }: { text: string; owner: string | null; qui
   if (shown.trim() === "") return null
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 px-2.5">
-      <p
-        className={`font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap ${quiet ? "text-muted" : "text-text"}`}
-      >
-        {shown}
-      </p>
+      <ImagesInTags text={shown}>
+        {(piece) => (
+          <p
+            className={`font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap ${quiet ? "text-muted" : "text-text"}`}
+          >
+            {piece}
+          </p>
+        )}
+      </ImagesInTags>
       {owner && <span className="font-sans text-[11px] text-muted italic">{owner}</span>}
     </div>
   )
@@ -529,13 +540,15 @@ function Message({
         )}
         {open && (
           <div className="flex flex-col gap-2 border-t border-border px-3 py-2.5">
-            {raw ? (
-              <div className="rounded-md border border-border bg-canvas px-2.5 py-2">
-                <PromptText text={message.content} />
-              </div>
-            ) : (
-              <Parts message={message} chatId={chatId} />
-            )}
+            <SentImagesScope message={message} raw={raw}>
+              {raw ? (
+                <div className="rounded-md border border-border bg-canvas px-2.5 py-2">
+                  <PromptText text={message.content} />
+                </div>
+              ) : (
+                <Parts message={message} chatId={chatId} />
+              )}
+            </SentImagesScope>
             {cut(message) && (
               <Button
                 variant="ghost"
@@ -813,14 +826,24 @@ function Messages({ run }: { run: Pick<RunContext, "messages"> & { chatId: ChatI
 }
 
 function Inspector({ run }: { run: RunContext }) {
-  const tokens = run.messages.reduce((sum, m) => sum + m.tokens, 0)
+  const tools = toolsForRequest(run.toolDeclarations) ?? []
+  const messages = run.messageTokens ?? run.messages.reduce((sum, m) => sum + m.tokens, 0)
+  const several = Object.keys(run.toolDeclarations?.attempts ?? {}).length > 1
   const breakpointsSent = run.model?.breakpoints === "explicit"
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader
-          title="Request"
-          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}. ${run.tokenizer ? tokenizerText(run.tokenizer) : ""}`}
+          title={several ? "Latest request" : "Request"}
+          about="The latest captured request. The estimated input includes cached messages and the tool definitions available to the model."
+          description={
+            <>
+              {run.capture === "captured" && (
+                <span className="block tabular-nums text-text">{requestTokenText(messages, toolTokens(tools))}</span>
+              )}
+              Built {new Date(run.builtAt).toLocaleString()}. {run.tokenizer && tokenizerText(run.tokenizer)}
+            </>
+          }
         />
         {run.continuity && (
           <p className="text-sm text-muted">
@@ -893,16 +916,31 @@ function Inspector({ run }: { run: RunContext }) {
       )}
       <SlotOutlet slot={runInspectorSections} props={{ run }} />
       <NotSent run={run} />
-      <Card>
-        <CardHeader
-          title="Usage"
-          about="First token: the time from sending to the first text or reasoning. Reasoning time isn't recorded."
-        />
-        <Usage requests={run.requests} />
-      </Card>
-      {/* The prompt last, in the page's own flow: the pane scrolls it, nothing inside does. */}
+      {tools.length > 0 ? (
+        <section aria-label="Usage" className="rounded-md border border-border bg-surface px-2.5 py-1.5">
+          <Disclosure
+            title={<h2 className="font-semibold text-text">Usage</h2>}
+            hint="Show or hide the provider’s usage for each attempt, including timing and cost."
+            className="[&>div]:pl-0"
+            lazy
+          >
+            <Usage requests={run.requests} />
+          </Disclosure>
+        </section>
+      ) : (
+        <Card>
+          <CardHeader
+            title="Usage"
+            about="The provider’s usage for each attempt. First token is the time from sending to the first text or reasoning."
+          />
+          <Usage requests={run.requests} />
+        </Card>
+      )}
+      <RequestTools key={run.versionId} tools={tools} />
       <section aria-label="Messages" className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold">Messages</h2>
+        <Tooltip label="The message blocks of this request in provider order.">
+          <h2 className="w-fit text-base font-semibold">Messages</h2>
+        </Tooltip>
         {run.capture === "unavailable" ? (
           <p className="text-sm text-muted">Not sent, or the exact request wasn't kept.</p>
         ) : (
@@ -934,6 +972,7 @@ export function DraftRequestView({
       <Card>
         <CardHeader
           title="Request"
+          about="A preview of the assembled messages, with a local token estimate."
           description={`Built now: ${counted(request.messages.length, "message")}, about ${counted(tokens, "token")}. ${request.tokenizer ? tokenizerText(request.tokenizer) : ""}`}
         />
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm [&_dd]:break-words">
@@ -969,7 +1008,9 @@ export function DraftRequestView({
       <ViewedFork.Provider value={forkId === null ? {} : { fork: forkId }}>
         <NotSent run={run} />
         <section aria-label="Messages" className="flex flex-col gap-2">
-          <h2 className="text-base font-semibold">Messages</h2>
+          <Tooltip label="The message blocks of this request in provider order.">
+            <h2 className="w-fit text-base font-semibold">Messages</h2>
+          </Tooltip>
           <Messages run={run} />
         </section>
       </ViewedFork.Provider>

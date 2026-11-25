@@ -3,7 +3,7 @@
 // enables agent replies; the next reply's steps stream open as "Working…", folding
 // during the run sticks as the user's preference, and when the reply arrives they fold to
 // "2 steps · N s", with the same badge in the header, which opens them again (read from the
-// transcript). The run inspector shows the tools offered and every request; the Activity tab lists
+// transcript). The run inspector shows each request’s tools and messages; the Activity tab lists
 // a summary with its tokens and cost. Layout audit on each surface, at 1440 and 390, light and dark.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
@@ -182,13 +182,14 @@ for (const width of [1440, 390])
       await shot("steps-done")
       await expectLayout(page, info, `steps-done-${width}-${theme}`, { scope: "article:last-of-type" })
 
-      // The run inspector: the tools offered and every request after the first.
+      // The latest request's tools appear before its messages. Each step also has its own tools.
       await panel.getByRole("link", { name: "Open the run" }).click()
-      const tools2 = page.getByRole("region", { name: "Tools offered" })
-      await expect(tools2.getByRole("region", { name: "search_chat" })).toBeVisible()
+      const requestTools = page.getByRole("region", { name: "Tools", exact: true }).first()
+      await requestTools.locator("summary").click()
+      await expect(requestTools.getByRole("region", { name: "search_chat" })).toBeVisible()
       const steps = page.getByRole("region", { name: "Steps", exact: true })
       await expect(steps.getByText("Request 3", { exact: true })).toBeVisible()
-      await expect(steps.getByText("The tools above were offered.", { exact: true })).toHaveCount(3)
+      await expect(steps.getByRole("region", { name: "Tools", exact: true })).toHaveCount(3)
       await expect(steps.getByRole("region", { name: "Tool call: search_chat" }).first()).toContainText('"bridge"')
       await expect(steps.getByRole("region", { name: /^Result of search_chat/ }).first()).toBeVisible()
       // The reply went through the send tool (spec/REPLY-CONTRACT.md §3.1).

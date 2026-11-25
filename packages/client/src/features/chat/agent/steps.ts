@@ -2,7 +2,6 @@
 // React so it's tested on its own: the live steps while the reply is written, the version's
 // summary (`Version.steps`) once it's done.
 import type { RolloutStep, StepsSummary, TranscriptEntry } from "@dreamspan/shared/agent.ts"
-import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
 import { Atom } from "effect/reactivity"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
 
@@ -70,13 +69,17 @@ export const statusText = { running: "Running", waiting: "Waiting for you", done
 
 /**
  * Whether the element is open: what the user chose for this version, while that choice is for the
- * same phase (streaming or done); otherwise, open while streaming as the user prefers, folded after.
+ * same phase (streaming or done); otherwise `auto`, which opens a streaming element once it has run a
+ * while and folds it a while after the reply is done (useAutoOpen).
  */
 export const isOpen = (
   chosen: { readonly open: boolean; readonly streaming: boolean } | null,
   streaming: boolean,
-  preferred: ReasoningDisplay
-) => (chosen !== null && chosen.streaming === streaming ? chosen.open : streaming ? preferred === "expanded" : false)
+  auto: boolean
+) => (chosen !== null && chosen.streaming === streaming ? chosen.open : auto)
+
+/** Whether a version's steps are open on their own account (useAutoOpen), shared by the element and its badge. */
+export const stepsAutoOpen = Atom.family((_id: VersionId) => Atom.make(false))
 
 /** The user's choice for one version's steps, shared by the element and the header badge that opens it. */
 export const stepsChoice = Atom.family((_id: VersionId) =>

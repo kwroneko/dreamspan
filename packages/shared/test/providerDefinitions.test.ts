@@ -101,3 +101,29 @@ describe("resolveModel with a provider", () => {
     expect(model.cacheLayout.source).toBe("unknown")
   })
 })
+
+describe("provider capability defaults", () => {
+  it("uses the prefill dialect supported by the provider and model generation", () => {
+    const messages = { kind: "anthropic", api: "anthropic-messages" }
+    const chat = { kind: "openai-chat", api: "openai-completions", provider: "openai" }
+    const prefill = (key: string, connection: typeof messages, upstream = {}) =>
+      resolveModel(key, upstream, {}, {}, {}, connection).prefill
+    expect(prefill("claude-haiku-4-5-20251001", messages)).toEqual({ value: "assistant", source: "provider" })
+    for (const key of ["claude-sonnet-4-6", "claude-fable-5-2", "opaque-alias"])
+      expect(prefill(key, messages).value, key).toBe("none")
+    expect(prefill("upstream.gpt-5.6-sol", chat).value).toBe("tool_schema")
+    expect(prefill("gpt-5.4-mini", chat, { prefill: "none" }).value).toBe("none")
+    expect(prefill("gpt-5.4-mini", { kind: "openai-chat", api: "openai-completions" }).value).toBe("none")
+  })
+
+  it("uses a recognized vision family only when model metadata is absent", () => {
+    const connection = { kind: "deepseek", api: "openai-completions" }
+    const resolve = (key: string, upstream = {}, overrides = {}) =>
+      resolveModel(key, upstream, overrides, {}, {}, connection).vision
+    expect(resolve("upstream.deepseek-v4-flash")).toEqual({ value: true, source: "provider" })
+    // Unknown vision stays on (owner, 2026-11-25): no family match leaves it unknown, not off.
+    expect(resolve("opaque-alias")).toEqual({ value: true, source: "unknown" })
+    expect(resolve("deepseek-flash", { vision: false }).value).toBe(false)
+    expect(resolve("deepseek-flash", {}, { vision: false }).source).toBe("user")
+  })
+})

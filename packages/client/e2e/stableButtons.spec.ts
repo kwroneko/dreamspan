@@ -138,8 +138,8 @@ for (const width of [1440, 390]) {
     const branch = page.getByRole("button", { name: /^Branch:.*switch branch$/ })
     await expect(branch).toBeDisabled()
     await hint(page, branch, "No other branches yet.")
-    // No dead cache chip: before any estimate there is none.
-    await expect(page.getByRole("button", { name: /^Cache/ })).toHaveCount(0)
+    // Before any estimate the cache chip is muted and empty, in its place from the start.
+    await expect(page.getByRole("button", { name: /^Cache/ })).toHaveText("No cache yet")
     const composer = page.getByTestId("composer-controls")
     const guidance = composer.getByRole("switch", { name: "Guidance", exact: true })
     const send = composer.getByRole("button", { name: "Send", exact: true })
@@ -226,8 +226,8 @@ for (const width of [1440, 390]) {
     await expect(strip.getByRole("button", { name: /^(Choose a model$|Model: )/ })).toBeVisible()
     // The chips have their values, not the "…" they show while loading.
     await expect(strip.getByRole("button", { name: /: loading$/ })).toHaveCount(0)
-    // The model and preset chips, after Next (whose label names who replies): their sizes hold.
-    const sizes = async () => (await boxes(strip)).slice(1, 3).map(({ width, height }) => ({ width, height }))
+    // The model and preset chips, first on the strip: their sizes hold.
+    const sizes = async () => (await boxes(strip)).slice(0, 2).map(({ width, height }) => ({ width, height }))
     const before = await sizes()
     await admin((api) =>
       Effect.gen(function* () {
@@ -239,9 +239,9 @@ for (const width of [1440, 390]) {
     )
     await expect(next).toBeEnabled()
     expect(await sizes()).toEqual(before)
-    // Next, model and preset: Reply now is the empty Send, Auto replies are in the Cast tab, and
-    // with no model there's no request to size or cache, so no context or cache chip.
-    await expect(strip.locator("button")).toHaveCount(3)
+    // Next, model, preset and the muted cache chip: Reply now is the empty Send, Auto replies are in the Cast tab, and
+    // with no model there is no request to size, so no context chip.
+    await expect(strip.locator("button")).toHaveCount(4)
     const controls = page.getByTestId("composer-controls")
     const emptySend = controls.getByRole("button", { name: / repl(?:y|ies)$/ })
     await expect(emptySend).toBeVisible()

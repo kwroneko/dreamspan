@@ -93,7 +93,7 @@ it("names a part for each of the assembler's sources, and the parts add up to th
 })
 
 it("counts images as their own part, and a message without recorded parts as its first source's", () => {
-  const image = { tokens: 85, basis: "formula" as const, budgeted: 85, sent: true }
+  const image = { mediaId: "m1", tokens: 85, basis: "formula" as const, budgeted: 85, sent: true }
   const size = requestSize(
     { pieces },
     {

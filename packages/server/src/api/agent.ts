@@ -650,6 +650,9 @@ export const regenerateSeveral = Effect.fnUntraced(function* (input: {
   const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
   if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
     return null
+  // A swipe past a reply still being written starts another reply beside it (DESIGN §3.1): the
+  // unfinished run has no transcript to carry on, so the new version is written afresh.
+  if (material.value.versionStatus === "generating" || material.value.status === "running") return null
   const located = yield* reader.GetVersion({ userId, versionId: input.versionId })
   const storyAt = yield* serverStoryAt(
     reader,

@@ -93,13 +93,16 @@ limits (some don't delegate the memory controller).
 
 ## AppArmor
 
-Docker's `docker-default` profile denies `mount`, which bubblewrap needs.
-`docker/apparmor-dreamspan` is `docker-default` (as Docker 29 generates it) with `deny mount`
-replaced by `mount`, `remount`, `pivot_root` and `userns`; every other rule is the same (the
+Docker's `docker-default` profile blocks two things bubblewrap needs: `mount`, and writes under
+`/proc/sys` (its `--disable-userns` writes `0` to `/proc/sys/user/max_user_namespaces` in the
+sandbox's own user namespace, so commands can't make further ones). `docker/apparmor-dreamspan` is
+`docker-default` (as Docker 29 generates it) with `deny mount` replaced by `mount`, `remount`,
+`pivot_root` and `userns`, and the `/proc/sys` write denial narrowed so that exactly one file,
+`/proc/sys/user/max_user_namespaces`, can be written. Every other rule is the same (the other
 `/proc` and `/sys` write denials, no `/sys/firmware`, `/sys/kernel/security`, `kcore` or
-`sysrq-trigger`). The kernel still checks each mount against the namespace's own capabilities,
-so the server, without `CAP_SYS_ADMIN`, can mount only inside a user namespace of its own.
-It replaces `apparmor=unconfined`, which removed AppArmor from the whole server process.
+`sysrq-trigger`). The kernel still checks each mount and each write against the namespace's own
+capabilities, so the server, without `CAP_SYS_ADMIN`, can mount only inside a user namespace of
+its own. It replaces `apparmor=unconfined`, which removed AppArmor from the whole server process.
 
 ```sh
 sudo apparmor_parser -r -W docker/apparmor-dreamspan   # load (and on each boot, e.g. from /etc/apparmor.d)
@@ -110,10 +113,11 @@ Then `security_opt: apparmor=dreamspan`. `userns,` is an AppArmor 4 rule (Ubuntu
 later restrict unprivileged user namespaces to profiles that allow them); AppArmor 3 parsers
 (Debian 12) don't know it: delete that line there. Hosts without AppArmor need nothing.
 
-**Untested at runtime:** the profile has only been compiled (AppArmor
-parser 4.1.7, `apparmor_parser -Q -K`), never enforced. Check it on the AppArmor host before
-relying on it: with it loaded, a command should run, and the workshop's "Run commands" row
-should not say commands are unavailable.
+**Tested at runtime** (Ubuntu, kernel 6.8, AppArmor 4.0.1, Docker 29): with the settings above
+and this profile loaded, the command sandbox's probe (`bwrap --unshare-user --unshare-pid
+--unshare-net --disable-userns ... --proc /proc`) passes as root and as uid 1000. With the
+previous profile it failed with "bwrap: cannot open /proc/sys/user/max_user_namespaces: Permission
+denied". Loopback setup for `--unshare-net` needed nothing beyond the seccomp file.
 
 ## Commands may not reach the server itself
 

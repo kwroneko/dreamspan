@@ -97,13 +97,15 @@ test.describe("chats started from the Chats page", () => {
       await expect(page.getByRole("button", { name: /^Prompt preset: / })).toBeVisible()
       const chip = page.getByRole("button", { name: /^What the assistant may do: / })
       await expect(chip).toBeVisible()
-      // The chips every chat has come first, in a story's order; the workshop's own after them (striporder1).
+      // The chips every chat kind has come first, in the same places; the workshop's own after them (owner, 2026-11-25).
       const strip = page.getByRole("group", { name: "Next reply", exact: true }).getByRole("button")
       const names = await strip.evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-label") ?? ""))
       const at = (pattern: RegExp) => names.findIndex((name) => pattern.test(name))
       expect(at(/^Model: /)).toBeGreaterThanOrEqual(0)
       expect(at(/^Model: /)).toBeLessThan(at(/^Prompt preset: /))
       expect(at(/^Prompt preset: /)).toBeLessThan(at(/^What the assistant may do: /))
+      // The subagents' models chip, where it shows, sits right after Model: another model selector.
+      if (at(/^Subagents/) >= 0) expect(at(/^Subagents/)).toBe(at(/^Model: /) + 1)
       expect((await workshops()).length).toBe(before)
       await shot(page, `new-workshop-pending-${width}`)
       await expectLayout(page, info, `new-workshop-pending-${width}`)

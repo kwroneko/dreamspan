@@ -233,6 +233,8 @@ export interface SnapshotInputs {
 
 /** Safe provider mapping with indices back to the assembled messages. No transport settings. */
 export interface WireContext {
+  readonly toolDeclarations?: import("../providers/requestTools.ts").CapturedRequestTools
+  readonly extraMessageText?: ReadonlyArray<string>
   /** Actual request cache policy after transforms; server-only. */
   readonly cache?: { readonly ttlS: number | null; readonly fixed: boolean; readonly source: string | null }
   /** Complete sanitized historical display, present only after final capture. */
@@ -892,7 +894,7 @@ export interface PresetInput {
 /** The model a generation uses, and what assembly needs to know about it. */
 export interface ModelInput {
   /** Non-secret endpoint classification; no transport address enters the snapshot. */
-  readonly openaiDirect?: boolean
+  readonly openRouterResponses?: boolean
   /** Connection provider identity, kept separately from its API kind. */
   readonly provider?: string
   readonly connectionId: string

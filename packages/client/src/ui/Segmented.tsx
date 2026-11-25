@@ -10,6 +10,8 @@ export function Segmented<Value extends string>(
   props: {
     label: string
     wrap?: boolean
+    /** 32 px overall, matching toolbar icon buttons. */
+    size?: "default" | "compact"
     className?: string
     /** Compact toolbars keep explanations on hover and focus, without a second line. */
     inlineDescription?: boolean
@@ -33,7 +35,16 @@ export function Segmented<Value extends string>(
       }
   )
 ) {
-  const { label, wrap = false, inlineDescription = true, className = "", options, value, multiple = false } = props
+  const {
+    label,
+    wrap = false,
+    size = "default",
+    inlineDescription = true,
+    className = "",
+    options,
+    value,
+    multiple = false
+  } = props
   const isChosen = (item: Value) => (Array.isArray(value) ? value.includes(item) : value === item)
   const id = useId()
   const described = options.some((option) => option.description)
@@ -65,7 +76,7 @@ export function Segmented<Value extends string>(
                 )
               else props.onValueChange(option.value)
             }}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-[5px] ${multiple ? "px-1.5 text-xs font-medium" : "px-2.5 text-sm"} whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium aria-pressed:text-text`}
+            className={`inline-flex items-center gap-1.5 rounded-[5px] ${size === "compact" ? "h-6.5 px-2 text-xs" : `h-8 ${multiple ? "px-1.5 text-xs font-medium" : "px-2.5 text-sm"}`} whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium aria-pressed:text-text`}
           >
             {option.label}
           </button>

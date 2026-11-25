@@ -595,6 +595,15 @@ export const ImportedMedia = Schema.Struct({
   height: Schema.NullOr(Schema.Int)
 })
 
+/** A card portrait an agent set from an image, already written to media storage. */
+const AgentPortrait = Schema.Struct({
+  sha256: Sha256,
+  mime: Schema.String,
+  byteSize: Schema.Int,
+  width: Schema.NullOr(Schema.Int),
+  height: Schema.NullOr(Schema.Int)
+})
+
 /** A stored file, at `path` under the data directory. */
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
@@ -2959,7 +2968,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       label: LibraryLabel,
       doc: Doc,
       tags: Schema.Array(Schema.String),
-      message: Schema.optionalKey(AgentMessage)
+      message: Schema.optionalKey(AgentMessage),
+      portrait: Schema.optionalKey(AgentPortrait)
     },
     success: Schema.String,
     error: Schema.Union([NotFound, InvalidDocument, EffectUndoRefused, StorageError])
@@ -2983,7 +2993,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc,
-      message: Schema.optionalKey(AgentMessage)
+      message: Schema.optionalKey(AgentMessage),
+      portrait: Schema.optionalKey(AgentPortrait)
     },
     success: Schema.String,
     error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
