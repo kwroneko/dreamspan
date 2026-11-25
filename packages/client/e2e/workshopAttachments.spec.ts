@@ -87,7 +87,7 @@ for (const width of [1440, 390])
     })
     const attached = page.getByRole("list", { name: "Attachments" })
     await expect(attached.getByRole("button", { name: "Open notes.txt" })).toBeVisible()
-    await expect(page.getByText("Saved in /files/Attachments.")).toBeVisible()
+    await expect(page.getByText("Saved in /files/Attachments.")).toHaveCount(0)
     await expect.poll(() => files.has("/files/Attachments/notes.txt")).toBe(true)
 
     // The Files tab attaches a file as it is.
