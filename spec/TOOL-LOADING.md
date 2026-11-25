@@ -8,6 +8,8 @@
 
 **Built finish1-prefill (2026-11-25), obsolete as a proposal.** Prefill defaults follow the wire and its dialect, with the recorded Claude refusals scoped to their tested model families/routes and existing fixed route facts retained. The older allowlist in §17.3 row 9 is historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
 
+**Built finish1-verbosity (2026-11-25), obsolete as a proposal.** Verbosity is visible on both OpenAI wires by default, using effective model and connection compat for overrides; Auto remains unchanged. The ID allowlist in §17.3 row 13 is historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
+
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
 This replaces WORKSHOP §1.2's "Skills … Not taken" row and AGENTIC §1.2's "dynamic tool loading" exclusion, for workshops only.

@@ -1,4 +1,3 @@
-import { openAIGpt5OrLater } from "./modelFamilies.ts"
 // Which samplers a request sends, per wire API, provider kind and model: the assembler's mapping
 // (server assembler/wire.ts) and the model page, which shows only the samplers that are sent.
 
@@ -113,15 +112,14 @@ export const samplersSent = ({
 
 /**
  * Whether a model takes OpenAI's `verbosity` (how long and detailed the answer is: low, medium,
- * high): OpenAI's GPT-5 and later on Chat Completions or Responses, directly or through a router.
+ * high): on the OpenAI Chat Completions and Responses wires unless explicitly disabled.
  * Separate from reasoning effort, which sets how much it thinks.
  */
 export const takesVerbosity = ({
   api,
-  key,
   supported
 }: {
   readonly api: string
   readonly key: string
   readonly supported?: boolean
-}) => (api === "openai-responses" || api === "openai-completions") && (supported ?? openAIGpt5OrLater.test(key))
+}) => (api === "openai-responses" || api === "openai-completions") && supported !== false

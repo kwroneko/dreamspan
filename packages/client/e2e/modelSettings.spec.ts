@@ -105,8 +105,8 @@ for (const [width, height] of [
     // One column on a phone; on a wide screen the samplers have a column of their own.
     if (width === 390) expect(await top(length)).toBeLessThan(await top(samplers))
     else expect(await top(samplers)).toBeLessThan(await top(length))
-    // Verbosity is for models that take it: not this one.
-    await expect(dialog.getByRole("group", { name: "Verbosity" })).toHaveCount(0)
+    // Unknown deployments on an OpenAI wire get verbosity too; Auto sends no override.
+    await expect(dialog.getByRole("group", { name: "Verbosity" })).toBeVisible()
     // No raw JSON anywhere.
     await expect(dialog.getByRole("textbox", { name: /JSON/ })).toHaveCount(0)
     await expectLayout(page, info, `model-settings-${width}`, { scope: "[role=dialog]" })

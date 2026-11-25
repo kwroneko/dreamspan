@@ -461,7 +461,8 @@ export function ModelFields({
       ? connections.value.find((entry) => entry.id === model.connectionId)
       : undefined
     if (!connection) return null
-    const verbosity = model.overrides.compat?.supportsVerbosity ?? model.upstream.compat?.supportsVerbosity
+    const verbosity = resolveModel(model.key, model.upstream, model.overrides, connection.compat).compat
+      .supportsVerbosity
     return {
       kind: connection.kind,
       api: connection.api,
