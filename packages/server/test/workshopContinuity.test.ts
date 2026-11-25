@@ -290,7 +290,6 @@ for (const [kind, cacheMode] of [
         connection: {
           kind,
           baseUrl: kind === "anthropic" ? mock.url : `${mock.url}/v1`,
-          providerSettings: { toolLoading: "every" },
           ...(kind === "anthropic" ? { apiKey: "synthetic-key" } : {})
         },
         model: { cacheBreakpoints: cacheMode },

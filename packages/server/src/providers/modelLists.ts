@@ -138,7 +138,6 @@ const fromOpenAi = (model: typeof OpenAiModel.Type): ModelUpstream => {
     vision: modalities ? modalities.includes("image") : undefined,
     tools: parameters ? parameters.includes("tools") : undefined,
     reasoning: parameters ? parameters.includes("reasoning") : undefined,
-    compat: parameters?.includes("verbosity") ? { supportsVerbosity: true } : undefined,
     price:
       input !== undefined && output !== undefined
         ? defined({

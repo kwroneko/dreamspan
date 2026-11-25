@@ -107,7 +107,7 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
     )
     const api = yield* client()
     yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {},
       preset: { openai_max_context: 32768 }
     })
@@ -210,7 +210,7 @@ for (const change of ["undo", "edit", "ancestor-undo", "ancestor-edit", "unchang
       )
       const api = yield* client()
       yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         preset: { openai_max_context: 32768 }
       })
@@ -273,7 +273,7 @@ it.live("resumes stopped multi-message setup work without repeating committed ca
     )
     const api = yield* client()
     yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {},
       preset: { openai_max_context: 32768 }
     })
@@ -360,7 +360,7 @@ it.live("enforces the mutation and argument limits independently in a carried tu
     )
     const api = yield* client()
     yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: { context: 128_000 },
       preset: { openai_max_context: 128_000 }
     })

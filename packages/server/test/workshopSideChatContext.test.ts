@@ -436,7 +436,7 @@ describe("side chat request", () => {
       )
       const api = yield* client()
       const story = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { context: 65536 },
         preset: { openai_max_context: 65536 }
       })

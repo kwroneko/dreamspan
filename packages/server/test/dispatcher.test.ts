@@ -133,7 +133,7 @@ describe("dispatcher boundaries", () => {
     assert.notInclude(JSON.stringify(dispatcherMessages([result], [tool as never])), DISPATCH_DEFINITIONS)
     assert.deepStrictEqual(dispatcherMessages([search], [tool as never]), [search])
   })
-  it.effect("uses native support and measured dispatcher exceptions with per-connection overrides", () =>
+  it.effect("uses measured profiles only, with a replaceable per-connection override", () =>
     Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
       const target = (
@@ -152,38 +152,24 @@ describe("dispatcher boundaries", () => {
         }) as unknown as ModelInput
       for (const t of [
         target("deepseek", "deepseek-flash"),
-        target("openrouter", "deepseek/deepseek-v4-flash", "deepseek")
+        target("openrouter", "deepseek/deepseek-v4-flash", "deepseek"),
+        target("openrouter", "anthropic/claude-haiku-4.5", "amazon-bedrock")
       ])
         assert.isTrue(loadingWireFor(registry, t)?.dispatcher)
       for (const t of [
         target("openai-chat", "gpt-5.4"),
         target("deepseek", "deepseek-chat"),
         target("deepseek", "deepseek-flash", undefined, undefined, "anthropic-messages"),
+        target("openrouter", "anthropic/claude-haiku-4.5"),
         target("google", "gemini"),
         target("bedrock", "claude"),
-        target("vertex", "claude")
+        target("vertex", "claude"),
+        target("openai-responses", "gpt-5.4", undefined, undefined, "openai-responses")
       ]) {
         assert.isTrue(loadingWireFor(registry, t)?.dispatcher)
         assert.isTrue(loadingWireFor(registry, { ...t, toolLoading: "dispatcher" })?.dispatcher)
         assert.isUndefined(loadingWireFor(registry, { ...t, toolLoading: "every" }))
       }
-      for (const candidate of [
-        target("openrouter", "anthropic/claude-haiku-4.5"),
-        target("openrouter", "anthropic/claude-sonnet-4.6", "azure"),
-        target("openrouter", "anthropic/claude-haiku-4.5", "amazon-bedrock"),
-        target("anthropic-vertex", "claude-sonnet-4-6@20261001", undefined, undefined, "anthropic-messages"),
-        target(
-          "anthropic-bedrock",
-          "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-          undefined,
-          undefined,
-          "anthropic-messages"
-        )
-      ])
-        assert.strictEqual(loadingWireFor(registry, candidate)?.id, candidate.api)
-      const grok = target("openrouter", "x-ai/grok-4.3")
-      assert.isUndefined(loadingWireFor(registry, grok))
-      assert.isTrue(loadingWireFor(registry, { ...grok, toolLoading: "dispatcher" })?.dispatcher)
       const native = target("anthropic", "claude-sonnet-4-5", undefined, undefined, "anthropic-messages")
       assert.strictEqual(loadingWireFor(registry, native)?.id, "anthropic-messages")
       assert.isTrue(loadingWireFor(registry, { ...native, toolLoading: "dispatcher" })?.dispatcher)

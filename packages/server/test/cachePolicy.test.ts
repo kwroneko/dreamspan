@@ -136,14 +136,6 @@ it("Bedrock only recognizes shaped markers in system, content and toolConfig.too
   )
 })
 
-it("OpenRouter estimates Alibaba's documented TTL only for a pinned, marked route", () => {
-  const target = { provider: "openrouter", api: "openai-completions", model: "qwen/qwen3.7-plus" }
-  const provider = { only: ["alibaba"] }
-  assert.equal(documentedCachePolicy(target, { ...explicit, provider })?.ttlS, 300)
-  assert.isNull(documentedCachePolicy(target, explicit))
-  assert.isNull(documentedCachePolicy(target, { provider, cache_control: { type: "ephemeral" } }))
-})
-
 it("Qwen only opts into caching through shaped content-block markers", () => {
   const target = { provider: "qwen", api: "openai-completions", model: "qwen-plus" }
   for (const payload of [

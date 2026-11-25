@@ -102,9 +102,6 @@ export const withCatalog = (kind: ProviderKindEntry, listed: ReadonlyArray<Liste
           upstream: {
             ...fromCatalog,
             ...model.upstream,
-            ...(model.upstream.compat && fromCatalog.compat
-              ? { compat: { ...fromCatalog.compat, ...model.upstream.compat } }
-              : {}),
             ...pricedFrom(kind, model, fromCatalog.price),
             ...(fields.length
               ? { catalog: { catalog: "pi-ai", label: "pi-ai's catalog", match: found.entry.id, fields } }

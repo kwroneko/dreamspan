@@ -96,7 +96,7 @@ const firstRequest = (presetFields?: Record<string, unknown>, agent = true) =>
     )
     const api = yield* client()
     const { version } = yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { promptCacheKey: false } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {},
       ...(presetFields ? { presetFields } : {}),
       state: agent ? [{ key: "agent.enabled", value: { on: true } }] : []

@@ -82,13 +82,14 @@ describe("tool loading review regressions", () => {
     assert.notInclude(index, own.instructions)
   })
 
-  it.effect("native loading respects the incompatible model generations", () =>
+  it.effect("only measured model profiles defer tools", () =>
     Effect.gen(function* () {
       const execution = yield* ExecutionRegistry
       for (const [kind, api, key] of [
-        ["openai-responses", "openai-responses", "gpt-5.4-nano"],
-        ["anthropic", "anthropic-messages", "claude-opus-4-1"],
-        ["anthropic", "anthropic-messages", "claude-sonnet-4-0"]
+        ["openai-responses", "openai-responses", "gpt-5.4-mini"],
+        ["anthropic", "anthropic-messages", "claude-opus-4-5"],
+        ["anthropic", "anthropic-messages", "claude-fable-5"],
+        ["anthropic", "anthropic-messages", "claude-sonnet-6"]
       ])
         assert.isFalse(
           execution.toolLoadingWires.get(api!)?.supports({ kind: kind!, api: api!, key: key! }) ?? false,

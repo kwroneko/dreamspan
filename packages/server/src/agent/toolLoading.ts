@@ -8,7 +8,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 import { CARD_SKILL_LIMITS, cardSkillList, readCardSkill } from "@dreamspan/shared/cardSkills.ts"
-import { modernClaudeTools, openAIResponseToolSearch } from "@dreamspan/shared/modelFamilies.ts"
+import { pinnedRoute } from "@dreamspan/shared/providers.ts"
 import type { FrozenTool, RolloutTool } from "./tools.ts"
 
 export const TOOL_SEARCH = "tool_search"
@@ -139,12 +139,13 @@ export const runSkills = (
 
 /** The model the run is sent to, as far as the decision needs it. */
 export interface WireTarget {
-  readonly openRouterResponses?: boolean
+  readonly openaiDirect?: boolean
   readonly provider?: string
   readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly kind: string
   readonly api: string
   readonly key: string
+  /** The model's settings in effect; a router's `routing` says which upstreams may serve it. */
   readonly settings?: { readonly routing?: Readonly<Record<string, unknown>> }
 }
 
@@ -170,38 +171,47 @@ const matchesPattern = (name: string, pattern: string) =>
 export const matchPatterns = (names: ReadonlyArray<string>, patterns: ReadonlyArray<string>) =>
   names.filter((name, i) => names.indexOf(name) === i && patterns.some((p) => matchesPattern(name, p)))
 
-const messagesKinds = new Set(["anthropic", "anthropic-bedrock", "anthropic-vertex"])
+// Only models measured in toolload1's live report are enabled. Public API support alone does
+// not prove cache behavior. Dated aliases of these same model versions use the same wire.
+const measuredClaude = /^(?:claude-(?:sonnet|haiku)-4-5(?:-\d{8})?|claude-(?:sonnet|opus|haiku)-5-5(?:-\d{8})?)$/
+
+// OpenRouter Chat Completions, measured live 2026-11-13 (spec/TOOL-LOADING.md §8): Claude only,
+// with its routing pinned to Anthropic or Google Vertex. Through Amazon Bedrock, and for models
+// OpenRouter defers itself (DeepSeek V4 Flash), each newly called loaded tool rewrote the cache
+// after the system prompt.
+const measuredRouterClaude = /^anthropic\/claude-(?:(?:sonnet|haiku)-4\.5|(?:sonnet|opus|haiku)-5\.5)$/
+const measuredRouterUpstreams: ReadonlySet<string> = new Set(["anthropic", "google-vertex"])
+
+// A provider label alone cannot establish a direct connection: users can override its URL.
+const directOpenAI = (t: WireTarget) => t.provider === "openai" && t.openaiDirect === true
 
 export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
   {
     id: "anthropic-messages",
-    supports: (t) => messagesKinds.has(t.kind) && modernClaudeTools.test(t.key),
+    supports: (t) => t.kind === "anthropic" && measuredClaude.test(t.key),
     declaresDeferred: true
   },
   {
     id: "openai-completions",
-    supports: (t) => t.kind === "openrouter" && t.key.startsWith("anthropic/") && modernClaudeTools.test(t.key),
+    supports: (t) =>
+      t.kind === "openrouter" &&
+      measuredRouterClaude.test(t.key) &&
+      measuredRouterUpstreams.has(pinnedRoute(t.settings?.routing) ?? ""),
     declaresDeferred: true
   },
   {
     id: "openai-responses",
     supports: (t) =>
-      t.kind === "openai-responses" &&
-      t.provider !== "openrouter" &&
-      !t.openRouterResponses &&
-      openAIResponseToolSearch.test(t.key) &&
-      !/(?:^|[./])gpt-5\.4-nano(?:-|$)/.test(t.key),
+      directOpenAI(t) && t.kind === "openai-responses" && /^(?:gpt-5\.4(?:-pro)?|gpt-5\.4-mini)$/.test(t.key),
     declaresDeferred: false
   },
   {
     id: "dispatcher",
     dispatcher: true,
     declaresDeferred: false,
-    // TOOL-LOADING §17.2: Grok 4.3 on OpenRouter twice described load_skill in prose
-    // with the dispatcher declared. The same sequence completed with every tool.
-    supports: (t) =>
-      t.toolLoading === "dispatcher" ||
-      (t.toolLoading !== "every" && !(t.kind === "openrouter" && t.key === "x-ai/grok-4.3"))
+    // TOOL-LOADING §15: every model, unless the user chose every tool. Native wires win first;
+    // §§11.1, 15 and 16 record no measured dispatcher failure, so there is no route exception.
+    supports: (t) => t.toolLoading !== "every"
   }
 ]
 

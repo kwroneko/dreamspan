@@ -110,7 +110,7 @@ const triItems = (upstream: boolean | undefined | "each", assumed: "yes" | "no" 
             ? assumed === "yes"
               ? "The provider doesn’t say, so it’s assumed. Choose No if the model refuses it."
               : "Treated as no until the provider reports it or you choose."
-            : "Use the provider default, including later updates."
+            : "Use what the provider reports, including later updates."
       },
   { value: "yes" as const, label: "Yes" },
   { value: "no" as const, label: "No" }
@@ -132,8 +132,8 @@ const prefillItems = (upstream: ModelOverrides["prefill"] | "each") => [
                 : "Provider: no",
         description:
           upstream === undefined
-            ? "Continue asks the model to go on from the reply so far."
-            : "Use the provider default, including later updates."
+            ? "No prefill is sent, and Continue stays off until you choose."
+            : "Use what the provider reports, including later updates."
       },
   {
     value: "assistant" as const,
@@ -460,15 +460,7 @@ export function ModelFields({
     const connection = AsyncResult.isSuccess(connections)
       ? connections.value.find((entry) => entry.id === model.connectionId)
       : undefined
-    if (!connection) return null
-    const verbosity = model.overrides.compat?.supportsVerbosity ?? model.upstream.compat?.supportsVerbosity
-    return {
-      kind: connection.kind,
-      api: connection.api,
-      provider: connection.provider,
-      key: model.key,
-      ...(typeof verbosity === "boolean" ? { supported: verbosity } : {})
-    }
+    return connection ? { kind: connection.kind, api: connection.api, key: model.key } : null
   })
   const known = wires.length > 0 && wires.every((wire) => wire !== null)
   const knownWires = known ? (wires as ReadonlyArray<NonNullable<(typeof wires)[number]>>) : []
@@ -491,10 +483,6 @@ export function ModelFields({
   const routing = { ...one?.upstream.settings, ...(settings as ModelSettings) }.routing
   const routed = one ? routedUpstream(one.upstream, routing) : null
   const prefillFixed = routed?.upstream.fixed?.includes("prefill") ?? false
-  const providerDefaults = one
-    ? resolveModel(one.key, one.upstream, { settings: settings as ModelSettings }, {}, {}, wires[0] ?? undefined)
-    : undefined
-  const prefillDefault = providerDefaults?.prefill
   const rules = routed?.upstream.shims ?? []
   const unpinned = routed?.unpinned ?? []
   const note = one ? priceNote(routedPrice(one.upstream, routing).source) : null
@@ -928,13 +916,7 @@ export function ModelFields({
                 "vision",
                 <Field label="Vision" about="Let the model see images. No leaves images out of its requests.">
                   <Select
-                    items={triItems(
-                      one
-                        ? providerDefaults?.vision.source === "unknown"
-                          ? undefined
-                          : providerDefaults?.vision.value
-                        : "each"
-                    )}
+                    items={triItems(reported("vision"))}
                     value={values.vision}
                     onValueChange={(vision: Tri) => update({ ...values, vision })}
                   />
@@ -964,9 +946,7 @@ export function ModelFields({
                   }
                 >
                   <Select
-                    items={prefillItems(
-                      one ? (prefillDefault?.source === "unknown" ? undefined : prefillDefault?.value) : "each"
-                    )}
+                    items={prefillItems(routed ? routed.upstream.prefill : "each")}
                     value={prefillFixed ? "auto" : values.prefill}
                     onValueChange={(prefill: PrefillChoice) => update({ ...values, prefill })}
                     disabled={prefillFixed}

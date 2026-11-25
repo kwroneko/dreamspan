@@ -396,14 +396,7 @@ describe("summaries kept per view (unit C7)", () => {
     "a chat set to shared plans and sends what a chat without the setting does",
     (server) =>
       Effect.gen(function* () {
-        const bodies = (requests: ReadonlyArray<Recorded>, chatId: string) =>
-          requests
-            .map(({ body }) => {
-              const { prompt_cache_key, ...request } = body ?? {}
-              assert.strictEqual(prompt_cache_key, chatId)
-              return JSON.stringify(request)
-            })
-            .sort()
+        const bodies = (requests: ReadonlyArray<Recorded>) => requests.map((r) => JSON.stringify(r.body)).sort()
         const absent = yield* chat(server, null)
         yield* absent.h.settle
         const shared = yield* chat(server, "shared")
@@ -415,10 +408,7 @@ describe("summaries kept per view (unit C7)", () => {
           )
           assert.strictEqual(own!.n, 0)
         }
-        assert.deepStrictEqual(
-          bodies(shared.h.mock.requests(), shared.h.chat.id),
-          bodies(absent.h.mock.requests(), absent.h.chat.id)
-        )
+        assert.deepStrictEqual(bodies(shared.h.mock.requests()), bodies(absent.h.mock.requests()))
         assert.include(sentText(yield* shared.assemble(shared.wren)), "SAW-MISSED.")
       }),
     { timeout: 120_000 }

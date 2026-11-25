@@ -24,7 +24,7 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
-import { findProvider, resolveProviderSettings, isOpenRouterEndpoint } from "@dreamspan/shared/providerDefinitions.ts"
+import { findProvider, resolveProviderSettings, isDirectOpenAI } from "@dreamspan/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
@@ -1057,12 +1057,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const provider = findProvider(providers, c.provider, c.kind, c.baseUrl)
         const cacheContract = provider ? provider.cacheContract : c.kind
         const providerSettings = resolveProviderSettings(provider, c.providerSettings)
-        const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat, providerSettings, {
-          ...c,
-          provider: provider?.id ?? c.provider
-        })
+        const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat, providerSettings)
         resolvedModel = {
-          openRouterResponses: c.api === "openai-responses" && isOpenRouterEndpoint(c.baseUrl),
+          openaiDirect: isDirectOpenAI(provider?.id, c.baseUrl),
           ...(provider ? { provider: provider.id } : {}),
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
@@ -1092,16 +1089,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ),
           ...(providerSettings.toolLoading ? { toolLoading: providerSettings.toolLoading } : {}),
           cacheBreakpoints: effective.cacheBreakpoints.value,
-          cacheLayout: {
-            ...effective.cacheLayout.value,
-            ...(effective.cacheBreakpoints.value === "explicit" &&
-            effective.cacheLayout.value.summarySplit === undefined &&
-            (c.api === "anthropic-messages" ||
-              (c.api === "openai-responses" && effective.cacheLayout.value.marker === "prompt_cache_breakpoint") ||
-              (c.kind === "openrouter" && m.key.startsWith("anthropic/claude")))
-              ? { summarySplit: true }
-              : {})
-          },
+          cacheLayout: effective.cacheLayout.value,
           vision: effective.vision.value,
           maxImages: effective.maxImages.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,

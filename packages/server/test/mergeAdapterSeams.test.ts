@@ -38,17 +38,17 @@ for (const [mode, target, expectedWire] of [
   ],
   [
     "direct Responses default",
-    { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4-mini", provider: "openai" },
+    { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4-mini", provider: "openai", openaiDirect: true },
     "openai-responses"
   ],
   [
     "direct Chat mini default",
-    { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4-mini", provider: "openai" },
+    { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4-mini", provider: "openai", openaiDirect: true },
     "dispatcher"
   ],
   [
     "direct Chat nano default",
-    { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4-nano", provider: "openai" },
+    { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4-nano", provider: "openai", openaiDirect: true },
     "dispatcher"
   ]
 ] as const)

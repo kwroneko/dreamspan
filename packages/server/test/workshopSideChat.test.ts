@@ -381,7 +381,7 @@ describe("side chat", () => {
       const api = yield* client()
       const userId = (yield* api.Whoami()).id
       const story = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {}
       })
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })

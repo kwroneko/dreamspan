@@ -138,7 +138,7 @@ export const workshop = (handler: (request: Recorded, res: ServerResponse) => vo
     const mock = yield* mockProvider(handler)
     const api = yield* client()
     const story = yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: {}
     })
     const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })

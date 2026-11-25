@@ -374,10 +374,7 @@ describe("workshop setup effects", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
-          model: {}
-        })
+        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
         const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const events = yield* watch(api, chat)
         const sent = yield* posted(
@@ -627,10 +624,7 @@ describe("workshop setup effects", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
-          model: {}
-        })
+        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
         const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const events = yield* watch(api, chat)
         const sent = yield* posted(
@@ -906,10 +900,7 @@ describe("workshop setup effects", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
-          model: {}
-        })
+        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
         const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
         const initial = (yield* api.ListLibrary({ kind: "card" })).map((r) => r.id)
         const events = yield* watch(api, chat)

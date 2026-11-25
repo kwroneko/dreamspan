@@ -326,7 +326,7 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
     baseUrlExample: "http://localhost:8000/v1",
     keyOptional: true,
     auth: [{ ...apiKey, about: "The server’s key, if it takes one." }],
-    defaults: { cacheBreakpoints: "auto", promptCacheKey: true },
+    defaults: { cacheBreakpoints: "auto", promptCacheKey: false },
     settings: ["promptCacheKey", "minTokens", "cacheTtlS"],
     // OpenAI's documented contract covers only OpenAI's own models (cachePolicy.ts), as served by
     // a router in front of OpenAI; a local server's models have none.
@@ -373,9 +373,9 @@ export const findProvider = <A extends ProviderResolution>(
   return providers.find((provider) => provider.defaultFor?.includes(kind))
 }
 
-/** Recognize OpenRouter on a custom Responses connection without retaining the address. */
-export const isOpenRouterEndpoint = (baseUrl: string | null | undefined) =>
-  baseUrl != null && URL.canParse(baseUrl) && new URL(baseUrl).hostname === "openrouter.ai"
+/** Classify the direct API without copying a transport address into a context snapshot. */
+export const isDirectOpenAI = (provider: string | undefined, baseUrl: string | null | undefined) =>
+  provider === "openai" && (baseUrl === null || /^https:\/\/api\.openai\.com\/v1\/?$/.test(baseUrl ?? ""))
 
 /** The data needed to resolve a stored connection, including in a database worker. */
 export type ProviderResolution = Pick<ProviderDefinition, "id" | "defaults" | "cacheContract" | "defaultFor">

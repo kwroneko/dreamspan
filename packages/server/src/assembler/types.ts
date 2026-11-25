@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 86
+export const ASSEMBLER_VERSION = 85
 
 export type Role = "system" | "user" | "assistant"
 
@@ -894,7 +894,7 @@ export interface PresetInput {
 /** The model a generation uses, and what assembly needs to know about it. */
 export interface ModelInput {
   /** Non-secret endpoint classification; no transport address enters the snapshot. */
-  readonly openRouterResponses?: boolean
+  readonly openaiDirect?: boolean
   /** Connection provider identity, kept separately from its API kind. */
   readonly provider?: string
   readonly connectionId: string

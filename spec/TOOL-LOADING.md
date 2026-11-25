@@ -1,6 +1,6 @@
 # Dynamic tool loading: tool_search, load_skill and card skills
 
-**Status**: Implemented portions obsolete as proposals (§2–§7, §10, §11.1(b), §15–§17), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
+**Status**: Implemented portions obsolete as proposals (§2–§7, §10, §11.1(b), §15–§16), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
 
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
@@ -23,7 +23,7 @@ Registry `ExecutionRegistry.toolLoadingProfiles`, keyed by chat kind: `{ id, imm
 
 A tool not matched is deferred, including a plugin's new tool: a plugin adds its tool to `immediate` by registering a replacement profile. The loaders are never deferred. A kind without a profile defers nothing.
 
-## 3. Original wires and profiles (current defaults in §17)
+## 3. Wires: where deferred tools are carried without breaking the cache
 
 Registry `ExecutionRegistry.toolLoadingWires`, keyed by wire API: `{ id, supports(target), declaresDeferred }`. If the run's model has no supporting wire, nothing is deferred and the request is exactly today's. That is the default for every wire until it is measured live (§8).
 
@@ -225,7 +225,7 @@ Schema portability is scoped to the measured OpenRouter OpenAI path through a re
 
 No provider calls during review. The measured allowlist remains the five Claude versions on Anthropic direct and the two OpenRouter upstreams recorded in §8. Unmeasured and failed routes remain disabled. Built-in skill selection continues through the existing frozen offer and permission boundary, including reserved names and imported text approval.
 
-## 15. Dispatcher implementation (calltool1, 2026-11-13; obsolete as a proposal, current defaults in §17)
+## 15. Dispatcher implementation (calltool1, 2026-11-13; obsolete as a proposal)
 
 Delta from reference-harness's `declare_deferred_tools` with references off: definitions still travel as text at successful transcript load points, but loaded tools are never added to the declared array. The fixed `call_tool {name, arguments}` accompanies the immediate tools from the first request. The model uses exact names; immediate tools, loaders and `call_tool` itself cannot be dispatched. The established final request without tools remains the turn-cap/partial-text exception.
 
@@ -259,7 +259,7 @@ Merged master and sidechat2. Dispatcher-mode completed calls reject malformed or
 
 Side-chat scope presentation uses the branch menu's live name and retains saved naming for a deleted branch; internal branch coordinates are omitted from positioned setup approval rows. Earlier positioned tool arguments, as well as results, are withheld by read_run at another story position. These fixes retain WORKSHOP's existing permission policy. See ARCHITECTURE §16 for implementation and regression details. No provider calls or new live measurements were made during review.
 
-## 16. Direct-provider measurements, 2026-11-13; fixes1114 implemented 2026-11-14 (current defaults in §17)
+## 16. Direct-provider measurements, 2026-11-13; fixes1114 implemented 2026-11-14
 
 These are the supplied live measurements, not new requests by this implementation job. Synthetic card task, four immediate and five deferred tools; repeated baseline, load, two reads, edit, read, reply. Tool-array bytes stayed constant within each run. OpenAI used about 7.7k synthetic tokens after the tools, a stable prompt cache key, `strict: false`, accumulated history, and Responses `store: false` plus encrypted reasoning replay. Cells are cached/input tokens. R3 is the first request containing the load; R4 and R5 are subsequent loaded-tool requests.
 
@@ -292,73 +292,3 @@ Anthropic direct used about 23k synthetic tokens after the tools: Haiku 5.5 thre
 | claude-sonnet-5-5 | Native | — | 23195/23261 | 23259/23790 | 23788/23904 | 24087/24177 | 24175/24241 | Holds |
 
 Haiku's other dispatcher runs read 23449/23942 at R3. Dispatcher loaded definitions cost about 490 written tokens versus native's 530; every-tool adds about 310 input tokens for these five definitions. Both models chose the dispatcher correctly at all loaded-tool steps, had zero argument violations, handled the unknown name as refused, and replayed signed thinking without errors or cache loss. Anthropic Automatic stays native; dispatcher is a measured cache-safe opt-in/fallback, with no default change. Other providers' measurements remain as recorded above.
-
-## 17. Provider default audit and live measurements, 2026-11-24
-
-This round starts from assembler version 85 with Automatic dispatcher already enabled for every workshop model outside its native profile. §17 records the current decisions and supersedes the Automatic profiles in §§3, 8, 14, 15 and 16. Assembler version 86 fences the changes to native selection, cache and model capability defaults. As in reference-harness, new compatible model IDs inherit tool loading. Dreamspan keeps the existing per-wire transforms and uses its fixed dispatcher when native loading is unavailable.
-
-### 17.1 Native loading
-
-The probes sent synthetic museum-catalog text after the tools. Each run repeated its first request, called an immediate tool twice, loaded a synthetic cards skill, called two newly loaded tools, repeated the first loaded-tool call, and produced a final reply. The local native loading transforms generated the deferred declarations and transcript items. Models chose the requested calls without forced tool choice. Each tool array had a constant hash throughout its run. Measurements are provider-reported cache read/total input. R4 produced the load, R5 carried it and called the first loaded tool, and R6 replayed that call and called the second loaded tool.
-
-| Wire and serving route | Model | Warm repeat R2 | Before load R4 | After load R5 | Replay R6 | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| Anthropic Messages | Opus 4.5 dated | 14545/14548 | 14646/14752 | 14749/15012 | 15009/15139 | Passed |
-| Anthropic Messages | Sonnet 4.6 | 14549/14552 | 14658/14764 | 14761/15024 | 15021/15151 | Passed |
-| Anthropic Messages | Opus 5 | 23304/23306 | 23404/23512 | 23510/23830 | 23828/23975 | Passed |
-| Anthropic Messages | Fable 5.2 | 23309/23313 | 23411/23523 | 23519/23843 | 23839/24052 | Passed |
-| OpenRouter Chat, Anthropic pin | Opus 4.6 | 15911/15914 | 16012/16118 | 16115/16356 | 16353/16483 | Passed |
-| OpenRouter Chat, Google Vertex pin | Sonnet 4.6 | 15905/15908 | 16006/16112 | 16109/16350 | 16347/16477 | Passed |
-| OpenRouter Chat, Azure pin | Sonnet 4.6 | 15905/15908 | 16006/16112 | 16109/16350 | 16347/16477 | Passed |
-| OpenRouter Chat, Amazon Bedrock pin | Sonnet 4.6 | 15912/15915 | 16026/16132 | 16129/16370 | 16367/16497 | Passed with advancing markers |
-| OpenRouter Chat, Amazon Bedrock pin | Haiku 4.5 | 15907/15910 | 16020/16126 | 16123/16364 | 16361/16491 | Passed with advancing markers |
-| OpenRouter Chat, unpinned, served by Amazon Bedrock | Haiku 4.5 | 15909/15912 | 16026/16132 | 16129/16370 | 16367/16497 | Passed |
-| OpenRouter Chat, Anthropic or Vertex permitted, served by Anthropic | Haiku 4.5 | 15906/15909 | 16023/16129 | 16126/16367 | 16364/16494 | Passed |
-| OpenAI Responses via forwarding gateway | GPT-5.4 dated | 13056/13650 | 13056/13802 | 13056/14099 | 13056/14190 | Passed, cache read plateaued until R7 |
-| OpenAI Responses via forwarding gateway | GPT-5.4 mini dated | 13440/13646 | 13568/13798 | 13696/14095 | 13952/14186 | Passed |
-| OpenAI Responses via forwarding gateway | GPT-5.6 Sol | 13645/13648 | 13720/13800 | 13797/14078 | 14075/14169 | Passed |
-
-The workshop's actual streaming path also completed Anthropic Sonnet 4.6, OpenRouter Sonnet 4.6 pinned to Azure and Amazon Bedrock, unpinned OpenRouter Haiku 4.5, and forwarded Responses GPT-5.6 Sol. The first request after the load read 12019/12020 of the preceding input on Anthropic, 36852/36853 on Azure, 36817/36818 on Bedrock, 36858/36863 on unpinned OpenRouter and 9823/9826 on OpenAI Responses.
-
-In the OpenRouter Bedrock static-marker controls the long user prefix remained cached through both newly loaded calls. Haiku read 15908 at R2, R5, R6 and R8. Sonnet read 15910 at the same positions. The earlier full rewrites in §8.2 did not reproduce with either layout in this round. An unpinned router can still change serving providers. The passing unpinned runs used one provider throughout.
-
-Automatic uses the Claude 4.5 and later tool-reference family on Anthropic Messages, including dated IDs and the built-in Bedrock InvokeModel and Vertex Messages transports. Their native capability is documented. Direct cloud transport requests could not be measured through the dev gateway because it exposed neither route. The OpenRouter cloud measurements used OpenRouter Chat and establish that path independently. Unversioned opaque IDs have no Claude family claim and take the dispatcher. A DeepSeek ID on a Messages gateway completed the synthetic sequence. A separate two-tool control used 10804 input tokens with deferral and 10986 without. The result is specific to the forwarding gateway and does not establish a first-party DeepSeek Messages deferral contract.
-
-OpenRouter Chat uses the same generation boundary for Claude independent of pins. OpenAI Responses uses native client search for GPT-5.4 and later compatible model IDs, including dated IDs and forwarded IDs. GPT-5.4 nano and its snapshots take dispatcher because the native loading transcript produced HTTP 400 in §16. OpenRouter's Responses wire takes dispatcher on the recognized endpoint because the client search pair rewrote cache in §8.2. Bedrock's OpenAI Responses kind retains dispatcher pending evidence that its runtime supports the same client search items.
-
-Sources for the wire decisions are the [Claude tool search contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool), [Bedrock InvokeModel tool use](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html), [OpenRouter client-side deferral](https://openrouter.ai/docs/guides/features/server-tools/tool-search) and [OpenAI client-executed tool search](https://developers.openai.com/api/docs/guides/tools-tool-search).
-
-### 17.2 Dispatcher
-
-The same sequence used only immediate tools and a fixed `call_tool`. The load result contained two definitions as text. The model returned the correct loaded tool name and arguments on each completed run. The app also completed the DeepSeek V4 Flash workshop in six requests. The dispatcher carried the load at R4, reading 8576 against 8554 input on the preceding request, and the recorded card tool completed.
-
-| Route | Model and mode | Warm repeat R2 | Before load R4 | After load R5 | Replay R6 | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| Anthropic Messages | Haiku 5.5, dispatcher | 23329/23333 | 23455/23633 | 23629/23934 | 23930/24149 | Passed |
-| OpenAI Chat | GPT-5.4 nano, dispatcher | 13056/13690 | 13056/13840 | 13056/14015 | 13056/14110 | Passed |
-| OpenAI Responses | GPT-5.4 nano, dispatcher | 13056/13686 | 13056/13838 | 13056/14014 | 13056/14110 | Passed, with the earlier tool choice caveat in §16 |
-| DeepSeek Chat | V4 Flash, dispatcher | 14080/14321 | 14336/14485 | 14464/14686 | 14592/14816 | Passed |
-| OpenRouter Chat, Google | Gemini 3.5 Flash Lite, dispatcher | 14231/14755 | 14187/14883 | 14115/14999 | 14086/15079 | Correct calls in three runs. Two runs had isolated zero reads at different positions |
-| OpenRouter Chat, DeepInfra | MiMo V2.6 Pro, dispatcher | 14464/14481 | 14544/14651 | 14624/14826 | 14800/14938 | Passed |
-| OpenRouter Chat, River at R8 | DeepSeek V4.1 Flash, dispatcher | 0/14360 | 14336/14566 | 14336/14768 | 14592/14899 | Passed after warmup |
-| OpenRouter Chat, xAI | Grok 4.3, dispatcher | 13824/13893 and 128/13896 | 14080/14349 and 14208/14412 | — | — | In 2/2 runs R4 returned prose describing `load_skill` with no tool call |
-| OpenRouter Chat, xAI | Grok 4.3, every tool control | 128/15162 | 15360/15583 | 15488/15724 | 15616/15875 | Completed all tool calls and replied DONE. R8 read only 128/16104 |
-
-Automatic uses Every tool on OpenRouter's exact `x-ai/grok-4.3` ID. Explicit dispatcher selection remains available. The control establishes tool choice for this model and does not establish improved caching. Native Google REST could not establish a baseline through the dev gateway. Nonstreaming requests returned 402 and streaming retries timed out or reported 503 with no upstream keys. OpenRouter's Gemini results are a separate observation.
-
-### 17.3 Other capability decisions
-
-| Audit row | Default and measured evidence |
-| --- | --- |
-| 5. OpenRouter content-block cache markers | Retain Claude's markers and Gemini's deepest marker. Recognize stable Qwen models that support Alibaba explicit caching and place one deepest ephemeral marker. With independent prefixes, pinned Qwen3.6 Plus wrote then read 11127 tokens with the marker, versus 0/0 without. Qwen3.7 Plus wrote and read 11125 with it, versus 10880 read and zero writes without. The Qwen3.5 Plus dated snapshot read and wrote zero with and without it. DeepSeek V3.2's Alibaba pin returned 404 in the test account, which did not exercise the marker. OpenAI and Grok returned reads with and without a marker and provided no evidence of block-marker support. [OpenRouter cache wire](https://openrouter.ai/docs/guides/best-practices/prompt-caching) |
-| 6. Compatible endpoint cache key | Default the existing switch on for OpenAI-compatible connections. Explicit Off removes SDK-injected keys. Forwarded OpenAI Chat and OpenRouter GPT-5.4 mini both accepted the key and read 9984 tokens on repeat. DeepSeek accepted the field and read 10368 on repeat, which does not isolate the key's effect on its automatic cache. |
-| 7. Previous checkpoint and older summary tier | Enable the older-tier split for explicit layouts with a block-marker encoder. Exact-position layouts continue to repeat the previous history checkpoint. Writing both checkpoints then editing the newer tier read 11579 of the older prefix on Anthropic and 11582 on OpenRouter Bedrock while writing 2290 tokens of the revised tier. Independent cold controls on those routes read zero after the same newer-tier edit when the first write omitted the older marker. Both routes could read the revised checkpoint on a later request that omitted the first marker. The dev gateway exposed no direct Bedrock route to test its no-lookback contract. |
-| 8. Responses SDK cache controls | First-party GPT-5.6 and later infer the SDK cache-mode flag even without a catalog entry. Forwarded GPT-5.6 Sol accepted the SDK's `ttl: "30m"` and explicit mode. GPT-5.4 mini rejected the SDK TTL payload twice as unsupported and accepted legacy retention. OpenRouter Responses refused `mode: "implicit"` and the SDK TTL payload, while accepting `mode: "explicit"`; this does not establish support for the full SDK option set on arbitrary OpenRouter endpoints. [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) |
-| 9. Assistant and schema prefill | Older Claude Messages and routed Claude default to assistant prefix. A prefilled Haiku 4.5 request with extended thinking returned HTTP 200 and no thinking block, as the Messages contract describes. Haiku 4.5 continued on both; direct Sonnet 4.6, Haiku 5.5, Sonnet 5 and Fable 5.2 returned HTTP 400, as did routed Haiku 5.5. DeepSeek Chat defaults to its prefix dialect where the endpoint supports it. Forwarded V4 Flash returned continuation text `1897.`. Direct production requires the beta route. OpenRouter DeepSeek and MiMo default to assistant prefix with the existing route refusals. Together reproduced an empty visible reply. DeepInfra and Fireworks replies in short controls varied between continuation and a restart, and the earlier longer route checks recorded continuations. OpenAI structured-tool GPT families default to an anchored reply tool on the measured OpenAI Chat and Responses wires, including OpenRouter's OpenAI Chat route. GPT-5.4 mini and GPT-5.6 Sol returned the exact prefix plus fresh text. Routed Gemini returned a 400 for assistant prefill and returned only the prefix with the forced schema tool. [Claude prefill limits](https://platform.claude.com/docs/en/build-with-claude/working-with-messages) |
-| 10. Other Chat native reasoning send-back | The preset keeps its zero default. OpenAI Chat accepted an assistant `reasoning_content` field but no replay semantics were observed, and its contract lacks that input. DeepSeek accepted the field without tools, which its contract says it ignores. OpenRouter accepted plain replay on a DeepSeek route and already has a same-writer rule. A paired hidden-token control returned UNKNOWN with and without the reasoning field on direct OpenAI Chat, DeepSeek Chat and the routed DeepInfra DeepSeek model. Prompt counts in each pair were identical. |
-| 11. Ordinary tool constraints | Infer strict tool capability for supported OpenAI and Claude generations and native grammar tools on first-party GPT-5 and later. A tool's constrained-sampling declaration determines whether the SDK sends it. Ordinary built-in tool definitions do not request constrained sampling. GPT-5.4 mini passed the strict forced color tool on Chat and Responses, and Sonnet 4.6 passed it on Messages. GPT-5.4 mini and GPT-5.6 Sol also returned the exact Lark-constrained value on the Chat and Responses custom-tool wires. The native Google `VALIDATED` control could not reach an upstream. Existing Gemini 3+ inference is based on its wire contract. [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling) |
-| 12. Other SDK capabilities | Infer Responses transcript tool changes for its native client-search family. GPT-5.6 Sol accepted an `additional_tools` item and followed a late developer message. Infer Claude system/tool changes for the documented Messages families. The managed effort default applies when a selected effort meets a transcript with a prior provider effort. A fresh transcript uses the ordinary top-level effort, and the signed-replay safeguard still applies. Haiku 5.5 accepted the late system message and the SDK's per-message effort headers. Fable 5.2 called a tool defined by an inline addition. Sonnet 4.6 returned 400 for a late system message, inline tool addition and per-message effort. These capabilities operate when a transcript or tool requests them. [Claude mid-conversation wire](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages), [Claude per-message effort](https://platform.claude.com/docs/en/build-with-claude/effort-per-message) |
-| 13. Verbosity picker | Recognize versioned GPT aliases and an explicit model-list claim. Auto remains provider-selected. Chat and Responses accepted low verbosity for GPT-5.4 mini and GPT-5.6 Sol. OpenRouter OpenAI also accepted it with `require_parameters`. DeepSeek accepted the extra Chat field without establishing a verbosity control. |
-| 14. Unknown vision support | Infer vision for recognized image-capable families when explicit model facts are absent. A synthetic blue PNG elicited blue from Anthropic Sonnet 4.6, GPT-5.4 mini, DeepSeek V4 Flash and its vision alias, OpenRouter DeepSeek V4.1 Flash and routed Gemini 3.5 Flash Lite. Native Google remained access-blocked. Explicit false and IDs with no vision claim retain their existing behavior. [DeepSeek vision contract](https://api-docs.deepseek.com/guides/vision/) |
-| 15. TTL, minimum and historical warmth | Use the documented five-minute window for a marked OpenRouter request pinned to Alibaba, and retain documented or user-supplied facts elsewhere. Pinned Qwen3.6 Plus wrote 4894, read all 4894 on immediate repeat, then read zero and rewrote 4894 at 327 seconds. Implicit OpenAI and DeepSeek controls read 9984 and 10368 respectively on immediate repeat. Those repeats establish neither expiry nor the minimum. The native Google cache checks could not reach an upstream. |
-| 16. Exact counters and catalog facts | Preserve user choice and the existing estimates for models without facts. Anthropic returned an exact count of 27 tokens for synthetic text and an inline PNG. The gateway refused the Google `countTokens` and OpenAI Responses `input_tokens` paths, which establishes an access limit on those measurement routes. Counts and prices from another model are not used as exact values. |

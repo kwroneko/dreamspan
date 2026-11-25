@@ -7,7 +7,7 @@
 // transcript with the payload in order, by role and text. pi-ai keeps user, assistant
 // and tool-result messages in order, but drops empty ones and merges consecutive tool
 // results, so a plain index mapping would break.
-import { type CacheLayout, pinnedRoute } from "@dreamspan/shared/providers.ts"
+import type { CacheLayout } from "@dreamspan/shared/providers.ts"
 import type { Message } from "@earendil-works/pi-ai"
 import { Predicate } from "effect"
 
@@ -253,25 +253,15 @@ export const applyAnthropicStableEndpoint = (
   return true
 }
 
-/** Which OpenRouter models take Chat Completions content-block markers. */
-type RouterCacheFamily = "anthropic" | "gemini" | "alibaba"
-
-export const routerCacheFamily = (
-  model: string | undefined,
-  routing?: Record<string, unknown>
-): RouterCacheFamily | null => {
-  if (!model) return null
-  if (/^anthropic\/claude/i.test(model)) return "anthropic"
-  if (/^google\/gemini/i.test(model)) return "gemini"
-  const pin = pinnedRoute(routing)
-  if (
-    (pin === null || pin === "alibaba") &&
-    /^qwen\/(?:qwen-plus|qwen3-(?:max|coder-plus|coder-flash)|qwen3\.(?:[6-9]|[1-9]\d+)-(?:plus|max))$/i.test(model)
-  )
-    return "alibaba"
-  if (pin === "alibaba" && model === "deepseek/deepseek-v3.2") return "alibaba"
-  return null
-}
+/** Which OpenRouter models take `cache_control` markers in Chat Completions content, and how. */
+export const routerCacheFamily = (model: string | undefined): "anthropic" | "gemini" | null =>
+  model === undefined
+    ? null
+    : /^anthropic\/claude/i.test(model)
+      ? "anthropic"
+      : /^google\/gemini/i.test(model)
+        ? "gemini"
+        : null
 
 const markText = (message: WireMessage, marker: Record<string, unknown>) => {
   if (typeof message.content === "string") {
@@ -289,12 +279,12 @@ const markText = (message: WireMessage, marker: Record<string, unknown>) => {
  * OpenRouter's `cache_control` markers on a Chat Completions payload whose messages the assembler
  * set (replacing the ones pi-ai marked), in assembly order. Claude
  * (https://openrouter.ai/docs/guides/best-practices/prompt-caching): the system message, then the
- * explicit breakpoints or the automatic layout's endpoint, within Anthropic's four markers.
- * Gemini and Alibaba use one deepest marker.
+ * explicit breakpoints or the automatic layout's endpoint, within Anthropic's four markers. Gemini:
+ * only the last marker counts, so one goes on the deepest of those.
  */
 export const applyRouterCacheControl = (
   payload: Record<string, unknown>,
-  family: RouterCacheFamily,
+  family: "anthropic" | "gemini",
   request: {
     readonly breakpoints: ReadonlyArray<number>
     readonly stable?: { readonly message: number; readonly end: number } | undefined
@@ -314,7 +304,7 @@ export const applyRouterCacheControl = (
         ? [stable.message, ...(wire.length > stable.end ? [wire.length - 1] : [])]
         : []
   if (targets.length === 0) return
-  if (family !== "anthropic") {
+  if (family === "gemini") {
     const deepest = wire[Math.max(...targets)]
     if (deepest) markText(deepest, { type: "ephemeral" })
     return

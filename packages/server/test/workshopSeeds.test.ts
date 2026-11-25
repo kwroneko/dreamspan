@@ -151,12 +151,7 @@ describe("workshop seed lifecycle", () => {
         )
         const api = yield* client()
         yield* generateReply(api, {
-          connection: {
-            kind: "openai-chat",
-            baseUrl: `${mock.url}/v1`,
-            apiKey: "synthetic-connection-secret",
-            providerSettings: { toolLoading: "every" }
-          },
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, apiKey: "synthetic-connection-secret" },
           model: {}
         })
         const user = yield* api.Whoami()

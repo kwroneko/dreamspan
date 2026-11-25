@@ -149,7 +149,7 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void, con
     )
     const api = yield* client()
     yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
       model: context === undefined ? {} : { context }
     })
     const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
