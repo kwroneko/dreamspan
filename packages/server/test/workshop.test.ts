@@ -24,6 +24,13 @@ import { client, login, outcome, posted, serverLayer, testConfig } from "./suppo
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
+// These providers script direct tool calls. Automatic uses the dispatcher on this connection.
+const everyToolConnection = (url: string) => ({
+  kind: "openai-chat",
+  baseUrl: `${url}/v1`,
+  providerSettings: { toolLoading: "every" as const }
+})
+
 const call = (name: string, args: unknown, id = "call_1") => [
   {
     id: "cmpl-t",
@@ -193,7 +200,7 @@ describe("workshop", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, { connection: everyToolConnection(mock.url), model: {} })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const before = mock.requests().length
@@ -208,6 +215,11 @@ describe("workshop", () => {
       assert.lengthOf(bodies, rounds + 1)
       // Every request offered the tools: none was the last-request-without-tools of a cap.
       assert.isTrue(bodies.every((b) => (b.tools as Array<unknown> | undefined)?.length))
+      const transcript = yield* api.GetRunTranscript({ versionId: version.id })
+      const successfulReads = transcript.entries.filter(
+        (e) => e.role === "toolResult" && e.tool === "read_card" && !e.isError
+      )
+      assert.lengthOf(successfulReads, rounds)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -233,7 +245,7 @@ describe("workshop", () => {
         const api = yield* client()
         // Existing fixture provisions a model; the workshop itself is created by its RPC.
         const setup = yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          connection: everyToolConnection(mock.url),
           model: {}
         })
         const chat = yield* api.CreateWorkshop({})
@@ -451,7 +463,7 @@ describe("workshop", () => {
       })
       const api = yield* client()
       const rp = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        connection: everyToolConnection(mock.url),
         model: {},
         state: [{ key: "agent.enabled", value: { on: true } }]
       })
@@ -544,7 +556,7 @@ describe("workshop", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, { connection: everyToolConnection(mock.url), model: {} })
       const user = yield* api.Whoami()
       const chat = yield* api.CreateWorkshop({})
       yield* api.ChangeCast({

@@ -158,7 +158,7 @@ export const register = () => [
   // What the reply may do: after the request's size and before the workshop's working folder.
   composerControls.register({
     id: CAPABILITY_CHIP,
-    order: 100,
+    order: 115,
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, CAPABILITY_CHIP),
     component: CapabilityChip

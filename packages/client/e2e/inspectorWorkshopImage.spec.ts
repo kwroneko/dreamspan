@@ -71,7 +71,7 @@ test("inspector: a workshop's sent image sits inside its attachment tags and ope
   await expect(page.getByTestId("composer")).toBeVisible()
   await expect(page.getByRole("button", { name: "Attach", exact: true })).toBeEnabled()
   await page.getByLabel("Choose files").setInputFiles({ name: "photo.jpg", mimeType: "image/jpeg", buffer: jpg })
-  await expect(page.getByText("Saved in /files/Attachments.")).toBeVisible()
+  await expect(page.getByRole("button", { name: "View photo.jpg" })).toBeVisible()
   await page.getByLabel("Message", { exact: true }).fill("What is in this photo?")
   await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
   await expect(page.getByRole("article").filter({ hasText: "I can see the photo." })).toBeVisible({ timeout: 60_000 })
