@@ -29,16 +29,16 @@ it.effect("limits new Automatic defaults to direct OpenAI and the specified mode
       "gpt-5.3",
       "gpt-5.4-mini-test"
     ])
-      assert.isUndefined(selected("openai-responses", "openai-responses", key), key)
+      assert.strictEqual(selected("openai-responses", "openai-responses", key), "dispatcher", key)
     for (const key of ["gpt-5.4", "gpt-5.4-pro", "gpt-5.4-nano-2026-03-17", "gpt-5.3", "gpt-5.5"])
-      assert.isUndefined(selected("openai-chat", "openai-completions", key), key)
+      assert.strictEqual(selected("openai-chat", "openai-completions", key), "dispatcher", key)
     for (const provider of ["openai-compatible", "openrouter", "openai-bedrock"])
       for (const key of ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"])
         for (const [kind, api] of [
           ["openai-chat", "openai-completions"],
           ["openai-responses", "openai-responses"]
         ])
-          assert.isUndefined(selected(kind!, api!, key, provider))
+          assert.strictEqual(selected(kind!, api!, key, provider), "dispatcher")
   }).pipe(Effect.provide(ExecutionRegistry.layer))
 )
 
@@ -56,14 +56,15 @@ it.effect("does not enable OpenAI defaults for a named OpenAI connection pointin
         ["openai-chat", "openai-completions", "gpt-5.4-mini"],
         ["openai-responses", "openai-responses", "gpt-5.4"]
       ])
-        assert.isUndefined(
+        assert.strictEqual(
           loadingWireFor(registry, {
             kind,
             api,
             key,
             provider: "openai",
             openaiDirect: isDirectOpenAI("openai", baseUrl)
-          } as unknown as ModelInput),
+          } as unknown as ModelInput)?.id,
+          "dispatcher",
           baseUrl
         )
     }
