@@ -186,7 +186,7 @@ scrollbarTest.describe("native scrollbar", () => {
         await page.mouse.up()
         expect(await gapAfterPaint()).toBe(gap)
 
-        // Exercise the delayed follow checks with a small scroll after their 300 ms intent window.
+        // A later offset change without user input leaves the reader in history.
         await page.waitForTimeout(350)
         await list.evaluate((node) => {
           node.scrollTop += 2
