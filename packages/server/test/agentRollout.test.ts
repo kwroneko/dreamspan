@@ -1147,7 +1147,10 @@ describe("agent rollouts", () => {
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(version.content, "Ansel waves.")
       type Block = { type: string; text?: string; id?: string; tool_use_id?: string; cache_control?: unknown }
-      type Body = { tools?: Array<{ name: string }>; messages: Array<{ role: string; content: Array<Block> }> }
+      type Body = {
+        tools?: Array<{ name: string; defer_loading?: boolean }>
+        messages: Array<{ role: string; content: Array<Block> }>
+      }
       const bodies = mock
         .requests()
         .filter((r) => r.path.startsWith("/v1/messages"))
@@ -1156,8 +1159,11 @@ describe("agent rollouts", () => {
       const [first, second] = bodies as [Body, Body]
       assert.deepStrictEqual(
         first.tools?.map((t) => t.name),
-        ["look_up"]
+        ["look_up", "__pi_deferred_placeholder__"]
       )
+      // Native tool changes keep the SDK's invisible placeholder deferred from the first request.
+      assert.strictEqual(first.tools?.at(-1)?.defer_loading, true)
+      assert.deepStrictEqual(second.tools, first.tools)
       // The prefix is the first request's, then the tool turn and its result.
       const strip = (blocks: Array<Block>) => blocks.map(({ cache_control: _, ...b }) => b)
       assert.deepStrictEqual(

@@ -194,7 +194,11 @@ for (const mode of ["every", "auto", "dispatcher"] as const) {
       const names = first.tools!.map((t) => t.name)
       assert.include(names, "load_skill")
       if (mode === "every") {
-        assert.isFalse(first.tools!.some((t) => t.defer_loading))
+        // The SDK keeps one invisible deferred placeholder for native transcript updates.
+        assert.deepStrictEqual(
+          first.tools!.filter((t) => t.defer_loading).map((t) => t.name),
+          ["__pi_deferred_placeholder__"]
+        )
         assert.notInclude(names, "tool_search")
         assert.include(names, "read_card")
       }

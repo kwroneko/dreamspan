@@ -4,6 +4,7 @@ import { summaryResponse } from "./summaryResponse.ts"
 import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
 import { captureRequestTools } from "./requestTools.ts"
+import { sdkCapabilityDefaults } from "./sdkDefaults.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
 import { imageSample, payloadImages } from "./imageSamples.ts"
@@ -21,7 +22,6 @@ import type { AssembledRequest, ModelInput, InspectionInputs } from "../assemble
 import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
 import { cacheIdentity, routeCacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
-import { openAIExplicitCacheMode, openAIResponseToolSearch } from "@dreamspan/shared/modelFamilies.ts"
 import type {
   Api,
   AssistantMessage,
@@ -847,42 +847,32 @@ const buildPiModel = async (
           .find((binding) => binding.appliesTo({ kind: prepared.kind.id, api: prepared.api, model: model.key }))
           ?.modelDefaults?.(model.key)
   const levels = { ...family?.thinkingLevelMap, ...effective.thinkingLevels.value }
-  const openai = prepared.provider === "openai" || prepared.provider === "openai-bedrock"
   const responses = prepared.api === "openai-responses"
-  // Strict sampling belongs to the wire. Opaque deployments and compatible forwarders
-  // have no measured strict refusal; explicit model/connection compat still wins below.
+  // Strict support follows the wire, while explicit connection/model compat wins below.
   const openaiStrict = prepared.api === "openai-completions" || responses
-  const openaiCacheMode = openai && responses && openAIExplicitCacheMode.test(model.key)
   const anthropicStrict = prepared.api === "anthropic-messages"
-  const responsesToolChanges =
-    prepared.provider === "openai" &&
-    responses &&
-    openAIResponseToolSearch.test(model.key) &&
-    !/(?:^|[./])gpt-5\.4-nano(?:-|$)/.test(model.key)
-  const claudeSystemUpdates =
-    prepared.provider === "anthropic" &&
-    prepared.api === "anthropic-messages" &&
-    /(?:^|[./])claude-(?:(?:fable|mythos|opus)-5(?:[.-]\d+)?|(?:sonnet|haiku)-5[.-]5|opus-4[.-]8)(?:$|[-@:])/.test(
-      model.key
-    )
-  // For inferred models the ordinary effort stays at the top level on a fresh transcript.
-  // Use the SDK's inline effort controls when there is a prior provider effort to preserve.
-  const claudeManagedEffort =
-    hasEffort &&
-    hasPriorEffort &&
-    claudeSystemUpdates &&
-    /(?:^|[./])claude-(?:(?:fable|mythos)-5[.-][12]|opus-5(?:[.-]5)?|(?:sonnet|haiku)-5[.-]5)(?:$|[-@:])/.test(
-      model.key
-    )
+  const sdkDefaults = sdkCapabilityDefaults({
+    api: prepared.api,
+    provider: prepared.provider,
+    baseUrl: prepared.baseUrl,
+    key: model.key,
+    hasEffort,
+    hasPriorEffort
+  })
+  // Measured wire refusals override generic catalog guesses. Explicit connection/model
+  // compat remains an intentional override; a model's own value takes precedence.
+  const exclusions = Object.fromEntries(
+    Object.entries(sdkDefaults)
+      .filter(([, enabled]) => !enabled)
+      .map(([key]) => {
+        const explicit = model.overrides.compat?.[key] ?? prepared.connection.compat[key]
+        return [key, typeof explicit === "boolean" ? explicit : false]
+      })
+  )
   const compatDefaults = {
-    ...(claudeManagedEffort ? { supportsMidConvoEffort: true } : {}),
-    ...(responsesToolChanges
-      ? { supportsAdditionalTools: true, supportsToolSearch: true, supportsMidConvoSystemMessages: true }
-      : {}),
-    ...(claudeSystemUpdates ? { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } : {}),
+    ...sdkDefaults,
     ...(openaiStrict ? { supportsStrictMode: true } : {}),
     ...(prepared.api === "openai-completions" || responses ? { supportsOpenAIGrammarTools: true } : {}),
-    ...(openaiCacheMode ? { supportsExplicitPromptCacheMode: true } : {}),
     ...(anthropicStrict ? { supportsStrictTools: true } : {})
   }
 
@@ -908,7 +898,7 @@ const buildPiModel = async (
     contextWindow: effective.context.value,
     maxTokens: effective.maxOutput.value,
     ...(effective.cacheTtlS.value !== null ? { promptCache: { short: effective.cacheTtlS.value } } : {}),
-    compat: { ...compatDefaults, ...family?.compat, ...effective.compat } as never,
+    compat: { ...compatDefaults, ...family?.compat, ...effective.compat, ...exclusions } as never,
     ...(Object.keys(effective.sampling).length > 0 ? { samplingParams: { ...effective.sampling } as never } : {})
   } as PiModel<Api>
 }
