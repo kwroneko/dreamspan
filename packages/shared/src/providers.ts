@@ -627,7 +627,7 @@ export interface EffectiveModel {
   readonly route: Omit<RoutedUpstream, "upstream">
 }
 
-/** Defaults for fields no source knows, shown as unknown, never as "no". Vision is on unless a source says no (owner, 2026-11-25). */
+/** Defaults for fields no source knows: the safe choice, shown as unknown, never as "no". */
 const DEFAULT_MAX_OUTPUT = 4096
 
 /**
@@ -677,7 +677,7 @@ export const resolveModel = (
     name: pick("name", key),
     context: pick("context", ASSUMED_CONTEXT),
     maxOutput: pick("maxOutput", DEFAULT_MAX_OUTPUT),
-    vision: pick("vision", true),
+    vision: pick("vision", false),
     maxImages: pick("maxImages", 4),
     midChatSystem: pick("midChatSystem", false),
     reasoning,
