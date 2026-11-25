@@ -526,11 +526,23 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         const offerTools = !last || cappedWithTools
         // Another model's thinking isn't sent to this one (a resume on another model, §12.3).
         const suffix = forTarget(liveSuffix(transcript.messages), target)
-        // Where each deferred tool was loaded, for the provider transform. A request sent without
-        // tools (the cap's) has no load points either: its history can't name undeclared tools.
+        // Native loading uses declared tools. A dispatcher also replays definition text in
+        // results when its capped request has no top-level tools.
+        const loads = deferred.size > 0 && (offerTools || dispatch) ? loadPoints(suffix, deferred) : []
+        const loaders = new Map(
+          loads.length === 0
+            ? []
+            : suffix.flatMap((message) =>
+                message.role === "toolResult" ? [[message.toolCallId, message.toolName] as const] : []
+              )
+        )
         const toolLoading =
-          deferred.size > 0 && offerTools && !dispatch
-            ? { api: model.api, deferred: deferredDefinitions, loads: loadPoints(suffix, deferred) }
+          deferred.size > 0 && (offerTools || dispatch)
+            ? {
+                api: dispatch ? "dispatcher" : model.api,
+                deferred: deferredDefinitions,
+                loads: loads.map((point) => ({ ...point, loader: loaders.get(point.toolCallId) ?? "a loading call" }))
+              }
             : undefined
         const requestSuffix = dispatch ? dispatcherMessages(suffix, deferredDefinitions) : suffix
         const wire = rolloutRequest(
@@ -556,6 +568,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         let prose = false
         let called = false
         let done: AssistantMessage | undefined
+        let requestId: string | undefined
         let rawArguments: Readonly<Record<string, string>> | undefined
         let partial: AssistantMessage = {
           ...emptyAssistant(piModel),
@@ -595,8 +608,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 Effect.gen(function* () {
                   if (event.type === "retrying" && event.notice) request.onNotice?.(event.notice)
                   else if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
+                  else if (event.type === "attempt") requestId = event.requestId
                   else if (event.type === "done") {
-                    done = event.message
+                    done = { ...event.message, inspectionRequestId: event.requestId } as AssistantMessage
                     rawArguments = event.toolArguments
                   } else if (event.type === "toolcall") {
                     const sending = sends && (event.name === SEND_MESSAGE || event.name === NO_REPLY) && !last
@@ -699,6 +713,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           }
           const message: AssistantMessage = {
             ...partial,
+            ...(requestId ? { inspectionRequestId: requestId } : {}),
             stopReason: aborted ? "aborted" : "error",
             errorMessage: aborted ? "Stopped." : failure!.message
           }

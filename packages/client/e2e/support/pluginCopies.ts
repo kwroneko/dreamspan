@@ -340,9 +340,9 @@ export const copiedPresenceTests = () =>
                 path: join(process.env.SCREENSHOT_DIR, `copied-presence-steps-${width}-${theme}.png`)
               })
             await reply.getByRole("link", { name: "Open the run" }).click()
-            await expect(page.getByRole("region", { name: "Tools offered" })).toContainText(
-              "Who's present (editable) (plugin)"
-            )
+            const tools = page.getByRole("region", { name: "Tools", exact: true }).first()
+            await tools.locator("summary").click()
+            await expect(tools).toContainText("Who's present (editable) (plugin)")
             await expectLayout(page, info, `copied-presence-inspector-${width}-${theme}`)
             if (process.env.SCREENSHOT_DIR)
               await page.screenshot({

@@ -619,9 +619,7 @@ export const markWireSources = (payload: Record<string, unknown>, sources: WireC
   }
 }
 
-/** Extract only text messages and numeric samplers from the final SDK/transformed body.
- * Headers, connection settings, tool definitions and arbitrary payload fields never enter storage.
- */
+/** Extract text messages and numeric samplers from the final body. Tool capture is separate. */
 export const sentWire = (
   payload: Record<string, unknown>,
   sources: WireContext,

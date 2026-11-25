@@ -131,6 +131,19 @@ it.live("review: final capture excludes transport fields and scrubs all request 
         api_key: key,
         proxy: { url: proxyUrl },
         private_field: password,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "synthetic_tool",
+              description: secretValues.join(" "),
+              parameters: {
+                type: "object",
+                properties: { [key]: { type: "string", description: password } }
+              }
+            }
+          }
+        ],
         messages: (p.messages as Message[]).map((m, i) =>
           i === 0 ? { ...m, name: key, content: m.content + " " + secretValues.join(" ") } : m
         )
@@ -148,7 +161,14 @@ it.live("review: final capture excludes transport fields and scrubs all request 
     const stored = yield* savedContexts(config.dataDir)
     const saved = (JSON.parse(stored) as Array<{ sent_context_json: string }>).at(-1)!.sent_context_json
     const parsed = JSON.parse(saved)
-    assert.deepEqual(Object.keys(parsed).sort(), ["cache", "display", "mapping", "messages", "samplers"])
+    assert.deepEqual(Object.keys(parsed).sort(), [
+      "cache",
+      "display",
+      "mapping",
+      "messages",
+      "samplers",
+      "toolDeclarations"
+    ])
     assert.deepEqual(parsed.cache, { ttlS: null, fixed: false, source: null })
     assert.isUndefined((run as unknown as Record<string, unknown>).cache)
     const actual = mock.requests().at(-1)!.body!.messages as Message[]
@@ -157,6 +177,14 @@ it.live("review: final capture excludes transport fields and scrubs all request 
     assert.notInclude(saved, key)
     assert.notInclude(saved, "authorization")
     assert.notInclude(saved, "private_field")
+    const declarations = run.toolDeclarations!
+    const [tool] = Object.values(declarations.definitions)
+    assert.equal(tool!.name, "synthetic_tool")
+    assert.include(tool!.description, "[redacted]")
+    assert.deepEqual(tool!.parameters, {
+      type: "object",
+      properties: { "[redacted]": { type: "string", description: "[redacted]" } }
+    })
     for (const value of secretValues) {
       assert.notInclude(saved, value)
       assert.notInclude(JSON.stringify(run), value)

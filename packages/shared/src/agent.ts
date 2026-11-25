@@ -301,6 +301,8 @@ export const TranscriptEntry = Schema.Union([
     stopReason: Schema.String,
     /** Whether this request included the run's frozen tools (the capped request does not). */
     toolsOffered: Schema.Boolean,
+    /** The ledger attempt that supplied this turn, when captured. */
+    requestId: Schema.optionalKey(Schema.String),
     error: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({

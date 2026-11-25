@@ -13,7 +13,7 @@ import {
   StepEdit,
   SubagentRow
 } from "./agent.ts"
-import { InspectorUsage } from "./inspectorApi.ts"
+import { InspectorUsage, RunContext } from "./inspectorApi.ts"
 import { ChatId, EntityId, ForkId, PathEntry, SlotId, VersionId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
@@ -73,6 +73,7 @@ export const SubagentRun = Schema.Struct({
   /** The type's instructions, as the subagent's first message held them. */
   instructions: Schema.String,
   tools: RunTranscript.fields.tools,
+  toolDeclarations: RunContext.fields.toolDeclarations,
   entries: RunTranscript.fields.entries,
   requests: Schema.Array(InspectorUsage),
   /** The run's error, when it failed. */

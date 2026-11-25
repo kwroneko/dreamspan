@@ -14,7 +14,11 @@ import { stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { transcriptEntries } from "./transcriptEntries.ts"
 import { ownedModel } from "./generationSettings.ts"
-import { rolloutUsage } from "./inspectorReads.ts"
+import { requestToolDisplay, rolloutUsage } from "./inspectorReads.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
+import type { ModelInput } from "../assembler/types.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
+import { type CapturedRequestTools, toolText } from "../providers/requestTools.ts"
 import { retainedChildRuns, resumeLineage } from "./subagentEffects.ts"
 import { LIMIT_STOP } from "@dreamspan/shared/subagents.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
@@ -426,6 +430,7 @@ export const withSubagents = <S extends { readonly kind: string }>(
 
 export const makeSubagentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const assembler = yield* WorkerAssembler
   return {
     SubagentStartRoom: ({ userId, parentRolloutId, perRun, runCost }) =>
       Effect.gen(function* () {
@@ -528,19 +533,32 @@ export const makeSubagentReadHandlers = Effect.gen(function* () {
         const snapshot = parse<{
           readonly subagent?: SubagentSnapshot
           readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool>; readonly turnCap?: number }
+          readonly inputs?: { readonly model?: ModelInput }
         }>(child.snapshot, {})
-        const tools = snapshot.agent?.tools ?? []
+        const tools = snapshot.subagent?.fork?.offered ?? snapshot.agent?.tools ?? []
+        const model = snapshot.inputs?.model ?? null
+        const [sent] = yield* sql<{ declarations: string | null }>`
+          SELECT json_extract(sent_context_json, '$.toolDeclarations') AS declarations
+          FROM rollout_payloads WHERE rollout_id = ${child.id}`
+        const declarations = parse<CapturedRequestTools | undefined>(sent?.declarations ?? null, undefined)
+        const toolDeclarations = declarations
+          ? yield* requestToolDisplay(declarations, tools, assembler, model)
+          : undefined
+        const count = tools.length > 0 ? yield* prepareTextTokens(assembler.textCounters.list(), model) : () => 0
         const messages = parse<ReadonlyArray<AgentMessage>>(child.transcript, [])
         const requests = yield* rolloutUsage(sql, userId, child.id)
         return {
           row: rowOf(child, yield* earlierRuns(sql, userId, versionId, child)),
           startedBy: { versionId, toolCallId: child.spawned_by_call_id },
           instructions: snapshot.subagent?.instructions ?? "",
+          ...(toolDeclarations ? { toolDeclarations } : {}),
           tools: tools.map((t) => ({
             name: t.name,
             label: t.label,
             description: t.description,
             parameters: t.parameters,
+            tokens: count(toolText(t)),
+            ...(t.deferred ? { deferred: true } : {}),
             ...(t.capability ? { capability: t.capability } : {}),
             ...(t.titleField ? { titleField: t.titleField } : {}),
             effect: t.effect

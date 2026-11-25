@@ -80,7 +80,7 @@ A card carries skills in `extensions.dreamspan.skills` (format **[P]**), which o
 
 ## 7. Inspector
 
-`GetRunTranscript.tools[]` gains `deferred`, `loadedBy` (the loading call's id) and `tokens` (the definition's size, counted with the run's model's tokenizer where the app has one). The run's Tools list groups them: "Sent from the start", "Loaded during the run" (each with the loader that loaded it) and "Never loaded", each heading with its tool count and tokens. A run with nothing deferred shows one group, "Available to this run". E2E: `e2e/toolLoading.spec.ts`, layout audit on the list at 1440/390, light and dark.
+**Built and obsolete as a proposal** (reqtools1, 2026-11-24, ARCHITECTURE §15). Each request lists the definitions that were active for it. The collapsed Tools block precedes its messages and contributes to the request’s estimated input total. Tool entries keep loader and MCP provenance.
 
 ## 8. Live measurements (2026-11-12)
 

@@ -14,7 +14,8 @@ import { Card, CardHeader } from "../../../ui/Surface.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useTitle } from "../../shell.tsx"
 import { effortLabel } from "../../connections/ReasoningEffort.tsx"
-import { Steps, Tools } from "./RunSteps.tsx"
+import { Steps } from "./RunSteps.tsx"
+import { legacyRequestTools, RequestTools, toolsForRequest } from "./RequestTools.tsx"
 import { subagentFacts } from "./SubagentPanel.tsx"
 
 const ended = {
@@ -88,6 +89,7 @@ export function SubagentRunView({
               <CardHeader title="Usage" about="Its requests, which the reply's cost includes." />
               <Usage requests={run.requests} />
             </Card>
+            <RequestTools tools={toolsForRequest(run.toolDeclarations) ?? legacyRequestTools(run.tools)} />
             <section aria-label="Its context" className="flex flex-col gap-2">
               <h2 className="text-base font-semibold">Its context</h2>
               <Card>
@@ -101,13 +103,14 @@ export function SubagentRunView({
                 <p className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{run.row.task}</p>
               </Card>
             </section>
-            {run.tools.length > 0 && <Tools tools={run.tools} entries={run.entries} />}
             {run.entries.length > 0 && (
               <Steps
                 requests={run.requests}
                 entries={run.entries}
                 cut={[]}
                 editing={null}
+                tools={run.tools}
+                declarations={run.toolDeclarations}
                 first="Every request after the first is its context above, then everything listed before it here."
               />
             )}
