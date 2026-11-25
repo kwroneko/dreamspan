@@ -166,7 +166,7 @@ describe("dispatcher boundaries", () => {
         target("vertex", "claude"),
         target("openai-responses", "gpt-5.4", undefined, undefined, "openai-responses")
       ]) {
-        assert.isUndefined(loadingWireFor(registry, t))
+        assert.isTrue(loadingWireFor(registry, t)?.dispatcher)
         assert.isTrue(loadingWireFor(registry, { ...t, toolLoading: "dispatcher" })?.dispatcher)
         assert.isUndefined(loadingWireFor(registry, { ...t, toolLoading: "every" }))
       }
