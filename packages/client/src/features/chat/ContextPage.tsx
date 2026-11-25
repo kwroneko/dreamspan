@@ -43,7 +43,7 @@ import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader, Disclosure } from "../../ui/Surface.tsx"
-import { ImageEstimate } from "./imageTokens.tsx"
+import { ImageEstimate, ImagesInTags, SentImagesScope } from "./imageTokens.tsx"
 import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -265,7 +265,13 @@ function ScriptsNote({ source }: { source: ContextSource }) {
 
 /** Prompt text exactly as sent: monospace, so it never reads as the inspector's own labels. */
 function PromptText({ text }: { text: string }) {
-  return <p className="font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-text">{text}</p>
+  return (
+    <ImagesInTags text={text}>
+      {(piece) => (
+        <p className="font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-text">{piece}</p>
+      )}
+    </ImagesInTags>
+  )
 }
 
 /** A titled box: what its text is and where it came from, above the text or the parts it holds. */
@@ -313,11 +319,15 @@ function Frame({ text, owner, quiet }: { text: string; owner: string | null; qui
   if (shown.trim() === "") return null
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 px-2.5">
-      <p
-        className={`font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap ${quiet ? "text-muted" : "text-text"}`}
-      >
-        {shown}
-      </p>
+      <ImagesInTags text={shown}>
+        {(piece) => (
+          <p
+            className={`font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap ${quiet ? "text-muted" : "text-text"}`}
+          >
+            {piece}
+          </p>
+        )}
+      </ImagesInTags>
       {owner && <span className="font-sans text-[11px] text-muted italic">{owner}</span>}
     </div>
   )
@@ -530,13 +540,15 @@ function Message({
         )}
         {open && (
           <div className="flex flex-col gap-2 border-t border-border px-3 py-2.5">
-            {raw ? (
-              <div className="rounded-md border border-border bg-canvas px-2.5 py-2">
-                <PromptText text={message.content} />
-              </div>
-            ) : (
-              <Parts message={message} chatId={chatId} />
-            )}
+            <SentImagesScope message={message} raw={raw}>
+              {raw ? (
+                <div className="rounded-md border border-border bg-canvas px-2.5 py-2">
+                  <PromptText text={message.content} />
+                </div>
+              ) : (
+                <Parts message={message} chatId={chatId} />
+              )}
+            </SentImagesScope>
             {cut(message) && (
               <Button
                 variant="ghost"
