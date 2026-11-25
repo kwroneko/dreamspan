@@ -189,7 +189,8 @@ export const registerComposerControls = () => [
     component: DraftContextChip
   }),
   // The strip: first the chips every chat kind has, in the same places (model, preset, the next
-  // request's size, its cache), then each kind's own (a story's Next at 100; a workshop's subagents,
+  // request's size, its cache; the subagents' models chip, where shown, right after the model: it is another
+  // model selector), then each kind's own (a story's Next at 100; a workshop's
   // capabilities and folder from 110), then send-to-threads. Owner, 2026-11-25.
   composerControls.register({
     id: "composer.next",
