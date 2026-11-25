@@ -785,6 +785,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           cardSkills: run.cardSkills ?? []
         },
         reader: run.reader,
+        ...(execution.portraitSources.list()[0] ? { portraits: execution.portraitSources.list()[0]! } : {}),
         ...(run.subagent?.onProgress ? { reportProgress: run.subagent.onProgress } : {}),
         ...(run.subagent?.workspace ? { workspace: run.subagent.workspace } : {}),
         // A subagent's tools start none of their own (spec/SUBAGENTS.md §6.1).

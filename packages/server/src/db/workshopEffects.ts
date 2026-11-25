@@ -56,6 +56,7 @@ const agentMessage = (message: string | undefined) => message?.replace(/\p{Cc}+/
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
   | "CreateEntity"
+  | "RecordMessageImage"
   | "EditRef"
   | "ForkCard"
   | "RestoreRevision"
@@ -1207,7 +1208,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            const doc = safeAgentDocument(input.kind, {}, valid.doc)
+            // A portrait's file is recorded for the user, as the editor's Replace picture records it.
+            const portrait = input.portrait
+              ? { avatar_media_id: yield* ops.RecordMessageImage({ userId: input.userId, media: input.portrait }) }
+              : {}
+            const doc = { ...safeAgentDocument(input.kind, {}, valid.doc), ...portrait }
             yield* checkDocument(doc)
             const { ref } = yield* ops.CreateEntity({
               userId: input.userId,
@@ -1236,10 +1241,18 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           Effect.gen(function* () {
             yield* checkDocument(input.doc)
             const before = yield* lib.ownedRef(input.userId, input.refId)
+            // A new picture takes the default cutout, never the old picture's (§14.5c).
+            const { avatar_crop: _cut, ...uncut } = input.doc
+            const doc = input.portrait
+              ? {
+                  ...uncut,
+                  avatar_media_id: yield* ops.RecordMessageImage({ userId: input.userId, media: input.portrait })
+                }
+              : input.doc
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
-              doc: input.doc,
+              doc,
               expectedRowVersion: input.expectedRowVersion,
               message: agentMessage(input.message) ?? "Edited in the workshop",
               commitDraft: null,

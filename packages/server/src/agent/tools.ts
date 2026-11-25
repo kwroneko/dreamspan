@@ -50,6 +50,8 @@ export interface ToolContext {
   readonly window?: number
   /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
   readonly writer: ToolWriter
+  /** Reads a card portrait from a path the agent can read (agent/portraits.ts); absent: none can be set. */
+  readonly portraits?: import("./portraits.ts").PortraitSource
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
   readonly cache: Map<string, unknown>
   /**
