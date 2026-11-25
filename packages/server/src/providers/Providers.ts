@@ -22,11 +22,9 @@ import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
 import { cacheIdentity, routeCacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
 import {
-  modernClaudeTools,
   openAIExplicitCacheMode,
   openAIGpt5OrLater,
-  openAIResponseToolSearch,
-  openAIStructuredTools
+  openAIResponseToolSearch
 } from "@dreamspan/shared/modelFamilies.ts"
 import type {
   Api,
@@ -855,10 +853,11 @@ const buildPiModel = async (
   const levels = { ...family?.thinkingLevelMap, ...effective.thinkingLevels.value }
   const openai = prepared.provider === "openai" || prepared.provider === "openai-bedrock"
   const responses = prepared.api === "openai-responses"
-  const openaiStrict = openai && openAIStructuredTools.test(model.key)
+  // Strict sampling belongs to the wire. Opaque deployments and compatible forwarders
+  // have no measured strict refusal; explicit model/connection compat still wins below.
+  const openaiStrict = prepared.api === "openai-completions" || responses
   const openaiCacheMode = openai && responses && openAIExplicitCacheMode.test(model.key)
-  const anthropicStrict =
-    prepared.provider === "anthropic" && prepared.api === "anthropic-messages" && modernClaudeTools.test(model.key)
+  const anthropicStrict = prepared.api === "anthropic-messages"
   const responsesToolChanges =
     prepared.provider === "openai" &&
     responses &&

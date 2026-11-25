@@ -2,6 +2,8 @@
 
 **Status**: Implemented portions obsolete as proposals (§2–§7, §10, §11.1(b), §15–§17), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
 
+**Built finish1-strict (2026-11-25), obsolete as a proposal.** Strict JSON-schema tool support follows the OpenAI and Messages wires by default, including compatible and opaque deployments; explicit compat overrides remain authoritative. The narrower defaults in §17.3 row 11 are historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
+
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
 This replaces WORKSHOP §1.2's "Skills … Not taken" row and AGENTIC §1.2's "dynamic tool loading" exclusion, for workshops only.

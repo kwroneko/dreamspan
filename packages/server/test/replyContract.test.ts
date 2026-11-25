@@ -473,7 +473,7 @@ describe("reply contract", () => {
   })
 
   it.live(
-    "a chat that sets Either keeps its requests: one send tool, the old instructions, text taken as the reply",
+    "a chat that sets Either keeps its reply contract: one send tool, the old instructions, text taken as the reply",
     () => {
       const config = testConfig()
       return Effect.gen(function* () {
@@ -487,12 +487,13 @@ describe("reply contract", () => {
         assert.strictEqual(version.content, "Ansel waves.")
         const sent = bodies(mock.requests())
         assert.lengthOf(sent, 1)
-        // Exactly the request a `both` chat sent before the send tool became the default.
+        // The old contract still offers one ordinary tool; the strict-capable SDK marks it false.
         assert.deepStrictEqual(sent[0]!.tools as unknown, [
           {
             type: "function",
             function: {
               name: "send_message",
+              strict: false,
               description:
                 "Sends your reply: the next message of the story, written as it should appear. Call it once, when the reply is ready; it ends your turn.",
               parameters: {
