@@ -7,7 +7,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 
 /** What went wrong, in plain words; the provider's own words follow. */
-const failure = (reason: ProviderErrorReason | null, status: number | null): string => {
+export const failure = (reason: ProviderErrorReason | null, status: number | null): string => {
   if (status === 404) return "Not found: check the address and the model id"
   switch (reason) {
     case "auth":

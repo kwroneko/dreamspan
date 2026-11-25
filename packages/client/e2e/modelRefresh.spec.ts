@@ -116,7 +116,7 @@ test("Refresh all models on the connections page reads every connection and name
   await button.hover()
   await expect(page.getByText("Fetch the latest model lists from all connections").last()).toBeVisible()
   await button.click()
-  await expect(page.getByText(/Couldn't refresh Dead end: /)).toBeVisible()
+  await expect(page.getByText("Couldn't refresh Dead end: the server couldn't be reached")).toBeVisible()
   await expect(button).toBeEnabled()
   expect(providers.map((provider) => provider.listings)).toEqual(before.map((n) => n + 1))
   if (process.env.SHOTS_DIR)
