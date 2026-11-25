@@ -68,7 +68,7 @@ function SentImage({ image, index }: { image: ContextImage; index: number }) {
           src={mediaUrl(image.mediaId, 320)}
           alt=""
           loading="lazy"
-          className="max-h-48 max-w-full rounded-md object-contain"
+          className="max-h-40 max-w-full rounded-md object-contain"
         />
       </button>
       <figcaption className="text-xs text-muted tabular-nums">{figure}</figcaption>
