@@ -59,6 +59,7 @@ const useModel = (api: Api, baseUrl: string, overrides: ModelOverrides) =>
       kind: "openai-chat",
       settings: {
         name: "Mock",
+        providerSettings: { toolLoading: "every" },
         baseUrl,
         compat: {},
         cacheTtlS: null,

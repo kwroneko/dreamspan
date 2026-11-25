@@ -60,7 +60,7 @@ const replyWith = (dataDir: string, about: (wren: EntityId) => ReadonlyArray<Sta
     const api = yield* client()
     const userId = (yield* api.Whoami()).id as UserId
     const made = yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { promptCacheKey: false } },
       model: {},
       characters: ["Wren"],
       ...(muted ? { muted: ["Wren"] } : {}),
