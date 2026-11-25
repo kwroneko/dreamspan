@@ -134,6 +134,14 @@ export const readModelChoices = (client: AppClient["Service"]) =>
  * every connection's models anew, the provider's list for each).
  */
 const lastReads = new Map<string, Read>()
+
+/** Counts the times lists were fetched from providers again (Refresh): every mounted list reads once more, in place. */
+let listVersion = 0
+const listWatchers = new Set<() => void>()
+export const modelListsChanged = () => {
+  listVersion++
+  for (const watcher of [...listWatchers]) watcher()
+}
 let reading: { readonly userId: string; readonly done: Promise<ActionResult<Read>> } | null = null
 
 export function useModelChoiceList(
@@ -153,6 +161,12 @@ export function useModelChoiceList(
   const [lookedFor, setLookedFor] = useState<string | null>(null)
   if (missing && lookedFor !== missing) setLookedFor(missing)
   const [attempt, setAttempt] = useState(0)
+  const [version, setVersion] = useState(listVersion)
+  useEffect(() => {
+    const watch = () => setVersion(listVersion)
+    listWatchers.add(watch)
+    return () => void listWatchers.delete(watch)
+  }, [])
   useEffect(() => {
     if (!enabled) return
     let live = true
@@ -172,7 +186,7 @@ export function useModelChoiceList(
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once when enabled, once per missing model, and per retry
-  }, [enabled, lookedFor, attempt])
+  }, [enabled, lookedFor, attempt, version])
   const choices = useMemo(
     () =>
       (read?.models ?? []).flatMap(({ hidden, ...choice }) =>
