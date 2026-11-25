@@ -123,7 +123,7 @@ describe("Gemini 4 on OpenRouter", () => {
     ["unreported", {}],
     ["provider says reasoning", { supported_parameters: ["tools", "temperature", "reasoning", "include_reasoning"] }]
   ] as const)
-    it.live(`${label}: no default request disables reasoning, with tools`, () =>
+    it.live(`${label}: Gemini 4 keeps reasoning on with tools and saved reasoning samplers`, () =>
       Effect.gen(function* () {
         const model = "google/gemini-4-neon"
         const server = yield* Effect.acquireRelease(
@@ -154,8 +154,9 @@ describe("Gemini 4 on OpenRouter", () => {
         })
         yield* providers.refreshModels(userId, connection.id)
         const listed = yield* reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
-        const modelId = listed.find((m) => m.key === model)!.id as ModelId
-        yield* Stream.runCollect(
+        const listedModel = listed.find((m) => m.key === model)!
+        const modelId = listedModel.id as ModelId
+        const send = Stream.runCollect(
           providers.stream({
             userId,
             connectionId: connection.id,
@@ -163,17 +164,31 @@ describe("Gemini 4 on OpenRouter", () => {
             context: {
               ...context,
               tools: [{ name: "note", description: "Note it.", parameters: { type: "object", properties: {} } }]
-            } as PiContext,
-            options: {},
+            },
             attribution: { purpose: "test" }
           })
         )
+        yield* send
+        const saved = yield* writer.EditModel({
+          userId,
+          modelId,
+          expectedRowVersion: listedModel.rowVersion,
+          overrides: { sampling: { reasoning: { enabled: false, exclude: true } } }
+        })
+        yield* send
+        yield* writer.EditModel({
+          userId,
+          modelId,
+          expectedRowVersion: saved.rowVersion,
+          overrides: { sampling: { reasoning: { enabled: false } } }
+        })
+        yield* send
         const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
-        assert.lengthOf(calls, 1)
-        const body = calls[0]!.body!
-        assert.notProperty(body, "reasoning_effort")
-        assert.notDeepInclude([body.reasoning ?? {}], { effort: "none" })
-        assert.notDeepInclude([body.reasoning ?? {}], { enabled: false })
+        assert.lengthOf(calls, 3)
+        for (const { body } of calls) assert.notProperty(body, "reasoning_effort")
+        assert.notProperty(calls[0]!.body!, "reasoning")
+        assert.deepEqual(calls[1]!.body!.reasoning, { exclude: true })
+        assert.notProperty(calls[2]!.body!, "reasoning")
       }).pipe(Effect.scoped, Effect.provide(layer()))
     )
 })
