@@ -70,12 +70,10 @@ test("inspector: a sent image shows at its message and opens in the viewer", asy
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.emulateMedia({ colorScheme: "dark" })
   await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
-  const thumbnail = page.getByRole("button", { name: "Image 1, sent to the model", exact: true })
+  const thumbnail = page.getByRole("button", { name: /^Image 1, sent to the model, / })
   await expect(thumbnail).toBeVisible()
   await expect(thumbnail.locator("img")).toBeVisible()
-  await expect(
-    page.getByTestId("messages").or(page.locator("body")).getByText("~255 tokens", { exact: true })
-  ).toBeVisible()
+  await expect(thumbnail).toHaveAccessibleName("Image 1, sent to the model, ~255 tokens")
   // It sits in the message that carries the image, not in another one.
   await expect(
     page.locator("details", { has: thumbnail }).getByText("What does this drawing show?").first()

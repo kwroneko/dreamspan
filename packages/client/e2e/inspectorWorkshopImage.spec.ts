@@ -93,7 +93,7 @@ test("inspector: a workshop's sent image sits inside its attachment tags and ope
     await page.goto(`${server().url}/chats/${workshop.id}/context/${reply.id}`)
     const expand = page.getByRole("button", { name: "Expand every turn", exact: true })
     if (await expand.isVisible()) await expand.click()
-    const thumbnail = page.getByRole("button", { name: "Image 1, sent to the model", exact: true })
+    const thumbnail = page.getByRole("button", { name: /^Image 1, sent to the model, / })
     await expect(thumbnail.locator("img")).toBeVisible()
     await expect(thumbnail.locator("img")).toHaveJSProperty("complete", true)
     const open = page.getByText(/^<attachment filename="photo\.jpg".*image_block="true">$/)

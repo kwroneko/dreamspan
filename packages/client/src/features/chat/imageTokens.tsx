@@ -57,10 +57,10 @@ function SentImage({ image, index }: { image: ContextImage; index: number }) {
   const name = `Image ${index + 1}`
   const figure = image.tokens === null ? "tokens unknown" : `~${image.tokens.toLocaleString()} tokens`
   return (
-    <figure className="m-0 flex flex-col items-start gap-1" data-sent-image={index + 1}>
+    <figure className="m-0 flex flex-col items-start" data-sent-image={index + 1}>
       <button
         type="button"
-        aria-label={`${name}, sent to the model`}
+        aria-label={`${name}, sent to the model, ${figure}`}
         onClick={() => viewer?.open(attachmentPicture(image.mediaId, name))}
         className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
@@ -71,7 +71,6 @@ function SentImage({ image, index }: { image: ContextImage; index: number }) {
           className="max-h-40 max-w-full rounded-md object-contain"
         />
       </button>
-      <figcaption className="text-xs text-muted tabular-nums">{figure}</figcaption>
     </figure>
   )
 }
