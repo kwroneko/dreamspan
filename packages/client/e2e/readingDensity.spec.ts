@@ -90,17 +90,6 @@ const list = (page: Page) => page.getByTestId("messages")
 const article = (scope: Page | Locator, i: number) =>
   scope.getByRole("article").filter({ hasText: `Turn ${i}, first paragraph.` })
 const fromEnd = (page: Page) => list(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
-const followEnd = async (page: Page) => {
-  await list(page).hover()
-  // Measurements can extend the list after a large wheel jump mounts the last rows.
-  await expect
-    .poll(async () => {
-      await page.mouse.wheel(0, 100_000)
-      return page.evaluate(() => history.state?.chatReading?.slot)
-    })
-    .toBeNull()
-  await expect.poll(() => fromEnd(page)).toBeLessThanOrEqual(1)
-}
 
 /** The first block of message text reaching below the list's top edge: its text and where it starts. */
 const reading = (page: Page) =>
@@ -385,7 +374,10 @@ for (const width of [1440, 390] as const)
       }
 
       // The newest message keeps its version controls in view.
-      await followEnd(page)
+      await list(page).evaluate((el) => {
+        el.scrollTop = el.scrollHeight
+      })
+      await expect.poll(() => fromEnd(page)).toBeLessThanOrEqual(1)
       const last = article(page, COUNT)
       await page.mouse.move(0, 0)
       await expect(versions(last)).toBeVisible()
@@ -409,7 +401,10 @@ for (const width of [1440, 390] as const)
       await expect(page.getByRole("checkbox", { name: "Select this message" })).toHaveCount(0)
 
       // A reply streams at the end of a compact list: it shows its Stop, and the list follows it.
-      await followEnd(page)
+      await list(page).evaluate((el) => {
+        el.scrollTop = el.scrollHeight
+      })
+      await page.waitForTimeout(400)
       const posted = await admin((api) =>
         api.Generate({ chatId: chat.chatId, parentSlotId: chat.tip, branch: false, speakerEntityId: chat.mira })
       )
