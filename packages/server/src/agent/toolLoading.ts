@@ -8,7 +8,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 import { CARD_SKILL_LIMITS, cardSkillList, readCardSkill } from "@dreamspan/shared/cardSkills.ts"
-import { modernClaudeTools, openAIResponseToolSearch } from "@dreamspan/shared/modelFamilies.ts"
 import type { FrozenTool, RolloutTool } from "./tools.ts"
 
 export const TOOL_SEARCH = "tool_search"
@@ -170,27 +169,27 @@ const matchesPattern = (name: string, pattern: string) =>
 export const matchPatterns = (names: ReadonlyArray<string>, patterns: ReadonlyArray<string>) =>
   names.filter((name, i) => names.indexOf(name) === i && patterns.some((p) => matchesPattern(name, p)))
 
-const messagesKinds = new Set(["anthropic", "anthropic-bedrock", "anthropic-vertex"])
+// Model snapshots, fine-tunes and routing suffixes share a measured model refusal.
+const responseModel = (key: string, model: "nano" | "mini") =>
+  new RegExp(`(?:^|[./:])gpt-5\\.4-${model}(?:$|[-@:])`, "i").test(key)
 
 export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
   {
     id: "anthropic-messages",
-    supports: (t) => messagesKinds.has(t.kind) && modernClaudeTools.test(t.key),
+    supports: (t) => t.api === "anthropic-messages",
     declaresDeferred: true
   },
   {
     id: "openai-completions",
-    supports: (t) => t.kind === "openrouter" && t.key.startsWith("anthropic/") && modernClaudeTools.test(t.key),
+    supports: (t) => t.kind === "openrouter" && t.key.startsWith("anthropic/"),
     declaresDeferred: true
   },
   {
     id: "openai-responses",
     supports: (t) =>
-      t.kind === "openai-responses" &&
-      t.provider !== "openrouter" &&
-      !t.openRouterResponses &&
-      openAIResponseToolSearch.test(t.key) &&
-      !/(?:^|[./])gpt-5\.4-nano(?:-|$)/.test(t.key),
+      t.api === "openai-responses" &&
+      !responseModel(t.key, "nano") &&
+      !((t.provider === "openrouter" || t.openRouterResponses) && responseModel(t.key, "mini")),
     declaresDeferred: false
   },
   {

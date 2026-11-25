@@ -222,17 +222,12 @@ describe("the split", () => {
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
-  it.effect("native partition leaves other wires, earlier model generations and RP unmodified", () =>
+  it.effect("native partition leaves unsupported Chat wires and RP unmodified", () =>
     Effect.gen(function* () {
       const { registry, tools } = yield* workshopTools
       for (const target of [
         { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4" },
-        { kind: "deepseek", api: "openai-completions", key: "deepseek-chat" },
-        // A plugin kind must register its native loading profile before it acquires it.
-        { kind: "bedrock", api: "anthropic-messages", key: "us.anthropic.claude-sonnet-4-5-v1:0" },
-        { kind: "vertex", api: "anthropic-messages", key: "claude-sonnet-4-5" },
-        { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-0" },
-        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.2" }
+        { kind: "deepseek", api: "openai-completions", key: "deepseek-chat" }
       ]) {
         const offer = split(registry, tools, "workshop", target)
         assert.strictEqual(offer.deferred.size, 0, target.key)
@@ -258,7 +253,7 @@ describe("the split", () => {
         ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], ignore: ["anthropic"] } }, true],
         ["anthropic/claude-sonnet-4.5", route(["anthropic", "amazon-bedrock"]), true],
         ["anthropic/claude-sonnet-4.5", route(["amazon-bedrock"]), true],
-        ["anthropic/claude-sonnet-4", route(["anthropic"]), false],
+        ["anthropic/claude-sonnet-4", route(["anthropic"]), true],
         ["openai/gpt-5.4-mini", undefined, false],
         // OpenRouter defers it itself, and each newly called loaded tool rewrote the cache (measured).
         ["deepseek/deepseek-v4-flash", route(["deepseek"]), false]

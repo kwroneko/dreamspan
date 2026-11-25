@@ -2,5 +2,3 @@
 export const openAIStructuredTools = /(?:^|[./])gpt-(?:4o|4\.1|[5-9]|[1-9]\d+)(?:$|[.-])/i
 export const openAIResponseToolSearch = /(?:^|[./])gpt-(?:5\.(?:[4-9]|[1-9]\d+)|(?:[6-9]|[1-9]\d+)(?:\.\d+)?)(?:$|-)/i
 export const openAIExplicitCacheMode = /(?:^|[./])gpt-(?:5\.(?:[6-9]|[1-9]\d+)|(?:[6-9]|[1-9]\d+)(?:\.\d+)?)(?:$|-)/i
-export const modernClaudeTools =
-  /(?:^|[./])claude-(?:(?:sonnet|opus|haiku)-4[.-](?:[5-9]|[1-9]\d+)|(?:sonnet|opus|haiku|fable|mythos)-(?:[5-9]|[1-9]\d+)(?:[.-]\d+)?)(?:$|[-@:])/i

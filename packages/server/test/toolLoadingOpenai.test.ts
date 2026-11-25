@@ -17,6 +17,8 @@ it.effect("uses the Responses native wire across supported GPT versions and endp
         ...target
       } as ModelInput)?.id
     for (const key of [
+      "gpt-5.3",
+      "opaque-model",
       "gpt-5.4",
       "gpt-5.4-mini",
       "gpt-5.4-pro",
@@ -27,11 +29,11 @@ it.effect("uses the Responses native wire across supported GPT versions and endp
       "gpt-6-astra"
     ])
       assert.strictEqual(selected(key), "openai-responses", key)
-    for (const key of ["gpt-5.3", "gpt-5.4-nano", "upstream.gpt-5.4-nano-2026-03-17", "opaque-model"])
+    for (const key of ["gpt-5.4-nano", "upstream.gpt-5.4-nano-2026-03-17"])
       assert.strictEqual(selected(key), "dispatcher", key)
     assert.strictEqual(selected("gpt-5.4", { provider: "openai-compatible" }), "openai-responses")
-    assert.strictEqual(selected("gpt-5.4", { provider: "openrouter" }), "dispatcher")
-    assert.strictEqual(selected("openai/gpt-5.4", { openRouterResponses: true }), "dispatcher")
+    assert.strictEqual(selected("gpt-5.4", { provider: "openrouter" }), "openai-responses")
+    assert.strictEqual(selected("openai/gpt-5.4", { openRouterResponses: true }), "openai-responses")
     assert.strictEqual(selected("gpt-5.4", { toolLoading: "dispatcher" }), "dispatcher")
     assert.isUndefined(selected("gpt-5.4", { toolLoading: "every" }))
     assert.strictEqual(selected("gpt-5.4", { kind: "openai-chat", api: "openai-completions" }), "dispatcher")

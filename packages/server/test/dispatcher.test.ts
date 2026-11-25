@@ -158,7 +158,6 @@ describe("dispatcher boundaries", () => {
       for (const t of [
         target("openai-chat", "gpt-5.4"),
         target("deepseek", "deepseek-chat"),
-        target("deepseek", "deepseek-flash", undefined, undefined, "anthropic-messages"),
         target("google", "gemini"),
         target("bedrock", "claude"),
         target("vertex", "claude")
@@ -168,6 +167,7 @@ describe("dispatcher boundaries", () => {
         assert.isUndefined(loadingWireFor(registry, { ...t, toolLoading: "every" }))
       }
       for (const candidate of [
+        target("deepseek", "deepseek-flash", undefined, undefined, "anthropic-messages"),
         target("openrouter", "anthropic/claude-haiku-4.5"),
         target("openrouter", "anthropic/claude-sonnet-4.6", "azure"),
         target("openrouter", "anthropic/claude-haiku-4.5", "amazon-bedrock"),
@@ -179,8 +179,11 @@ describe("dispatcher boundaries", () => {
           undefined,
           "anthropic-messages"
         )
-      ])
+      ]) {
         assert.strictEqual(loadingWireFor(registry, candidate)?.id, candidate.api)
+        assert.isTrue(loadingWireFor(registry, { ...candidate, toolLoading: "dispatcher" })?.dispatcher)
+        assert.isUndefined(loadingWireFor(registry, { ...candidate, toolLoading: "every" }))
+      }
       const grok = target("openrouter", "x-ai/grok-4.3")
       assert.isUndefined(loadingWireFor(registry, grok))
       assert.isTrue(loadingWireFor(registry, { ...grok, toolLoading: "dispatcher" })?.dispatcher)
