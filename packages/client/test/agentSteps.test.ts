@@ -64,14 +64,14 @@ describe("an agent reply's steps", () => {
   })
 
   it("opens while streaming as the user prefers, folds when done, and keeps a choice only for its phase", () => {
-    expect(isOpen(null, true, "expanded")).toBe(true)
-    expect(isOpen(null, true, "collapsed")).toBe(false)
-    expect(isOpen(null, false, "expanded")).toBe(false)
+    expect(isOpen(null, true, true)).toBe(true)
+    expect(isOpen(null, true, false)).toBe(false)
+    expect(isOpen(null, false, false)).toBe(false)
     // Folded during the run: folded while it runs, and folded after as every finished reply is.
-    expect(isOpen({ open: false, streaming: true }, true, "expanded")).toBe(false)
+    expect(isOpen({ open: false, streaming: true }, true, true)).toBe(false)
     // Opened during the run: when the message arrives it folds anyway (DESIGN §7.4).
-    expect(isOpen({ open: true, streaming: true }, false, "expanded")).toBe(false)
-    expect(isOpen({ open: true, streaming: false }, false, "collapsed")).toBe(true)
+    expect(isOpen({ open: true, streaming: true }, false, false)).toBe(false)
+    expect(isOpen({ open: true, streaming: false }, false, false)).toBe(true)
   })
 
   it("cuts a step's text to its first line", () => {

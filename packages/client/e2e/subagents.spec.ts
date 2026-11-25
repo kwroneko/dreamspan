@@ -108,7 +108,9 @@ for (const width of [1440, 390])
     const done = page.getByRole("article").filter({ hasText: PARENT_ANSWER })
     const badge = done.locator("[data-steps-badge]")
     const stopped = done.locator("[data-subagent]")
-    // A finished reply's steps fold; its header badge opens them (once the fold has settled).
+    // A finished reply's steps fold (after staying open a moment, if they had opened); its header
+    // badge opens them once the fold has settled.
+    await expect(badge).toHaveAttribute("aria-pressed", "false")
     await expect(async () => {
       if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
       await expect(stopped).toBeVisible({ timeout: 1_000 })

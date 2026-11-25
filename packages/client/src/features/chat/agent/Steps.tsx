@@ -16,12 +16,14 @@ import { Icon, type IconName } from "../../../ui/Icon.tsx"
 import { Spinner } from "../../../ui/Spinner.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../../ui/viewPrefs.ts"
+import { useAutoOpen } from "../autoOpen.ts"
 import { liveSteps, liveWaitingFor, type ChatSession } from "../session.ts"
 import {
   excerpt,
   isOpen,
   postedSteps,
   statusText,
+  stepsAutoOpen,
   stepsChoice,
   stepsText,
   stepsView,
@@ -173,7 +175,9 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
   const streaming = view?.running ?? false
   // A call waiting for the user stays in sight: the answer is in its row.
   const waiting = waitsForUser(view?.live)
-  const open = view !== null && (waiting || isOpen(chosen, streaming, preferred))
+  // Open on its own only after it has streamed a while, and folded a while after the reply (autoOpen.ts).
+  const auto = useAutoOpen(streaming, streaming, preferred === "expanded", useAtom(stepsAutoOpen(version.id)))
+  const open = view !== null && (waiting || isOpen(chosen, streaming, auto))
   const stored = useStoredSteps(session, version, open && view !== null && !view.running)
   const id = useId()
   const hintId = useId()
@@ -316,10 +320,11 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
   const view = stepsView(live, version.steps, generating, waitingFor)
   const viewer = useViewPrefs()
   const [chosen, setChosen] = useAtom(stepsChoice(version.id))
+  const auto = useAtomValue(stepsAutoOpen(version.id))
   if (view === null || (view.count === 0 && view.waitingFor === 0)) return null
   const streaming = view.running
   const waiting = waitsForUser(view.live)
-  const open = waiting || isOpen(chosen, streaming, viewer.prefs.steps)
+  const open = waiting || isOpen(chosen, streaming, auto)
   return (
     <Tooltip
       label={
