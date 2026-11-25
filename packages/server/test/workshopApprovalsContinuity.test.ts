@@ -148,7 +148,7 @@ const setup = (url?: string) =>
     const api = yield* client()
     if (url)
       yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${url}/v1` },
+        connection: { kind: "openai-chat", baseUrl: `${url}/v1`, providerSettings: { toolLoading: "every" } },
         model: {},
         preset: { openai_max_context: 32768 }
       })

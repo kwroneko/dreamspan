@@ -168,19 +168,17 @@ describe("the split", () => {
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
-  it.effect("sends everything where no wire is measured, for older models, and in RP", () =>
+  it.effect("native partition leaves other wires, earlier model generations and RP unmodified", () =>
     Effect.gen(function* () {
       const { registry, tools } = yield* workshopTools
       for (const target of [
         { kind: "openai-chat", api: "openai-completions", key: "gpt-5.4" },
-        { kind: "openrouter", api: "openai-completions", key: "anthropic/claude-sonnet-4.5" },
         { kind: "deepseek", api: "openai-completions", key: "deepseek-chat" },
-        // Bedrock and Vertex speak Anthropic's API, but neither is measured yet.
+        // A plugin kind must register its native loading profile before it acquires it.
         { kind: "bedrock", api: "anthropic-messages", key: "us.anthropic.claude-sonnet-4-5-v1:0" },
         { kind: "vertex", api: "anthropic-messages", key: "claude-sonnet-4-5" },
         { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-0" },
-        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.2" },
-        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4" }
+        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.2" }
       ]) {
         const offer = split(registry, tools, "workshop", target)
         assert.strictEqual(offer.deferred.size, 0, target.key)
@@ -190,7 +188,7 @@ describe("the split", () => {
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
-  it.effect("defers on OpenRouter only for the measured models and upstreams", () =>
+  it.effect("defers on OpenRouter Claude across pins and routing preferences", () =>
     Effect.gen(function* () {
       const { registry, tools } = yield* workshopTools
       const route = (only: Array<string>) => ({ routing: { only, allow_fallbacks: false } })
@@ -198,15 +196,14 @@ describe("the split", () => {
         ["anthropic/claude-sonnet-4.5", route(["anthropic"]), true],
         ["anthropic/claude-haiku-4.5", route(["google-vertex"]), true],
         ["anthropic/claude-opus-5.5", route(["google-vertex/us-east5"]), true],
-        ["anthropic/claude-sonnet-4.5", undefined, false],
-        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"] } }, false],
-        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"], allow_fallbacks: true } }, false],
+        ["anthropic/claude-sonnet-4.5", undefined, true],
+        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"] } }, true],
+        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"], allow_fallbacks: true } }, true],
         ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"], allow_fallbacks: false } }, true],
         ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], allow_fallbacks: true } }, true],
-        ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], ignore: ["anthropic"] } }, false],
-        ["anthropic/claude-sonnet-4.5", route(["anthropic", "amazon-bedrock"]), false],
-        // Bedrock rewrites the whole cache at the first call of each loaded tool (measured).
-        ["anthropic/claude-sonnet-4.5", route(["amazon-bedrock"]), false],
+        ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], ignore: ["anthropic"] } }, true],
+        ["anthropic/claude-sonnet-4.5", route(["anthropic", "amazon-bedrock"]), true],
+        ["anthropic/claude-sonnet-4.5", route(["amazon-bedrock"]), true],
         ["anthropic/claude-sonnet-4", route(["anthropic"]), false],
         ["openai/gpt-5.4-mini", undefined, false],
         // OpenRouter defers it itself, and each newly called loaded tool rewrote the cache (measured).

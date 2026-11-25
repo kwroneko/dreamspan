@@ -1,6 +1,8 @@
 // Dated provider contracts, not pi-ai's promptCache guesses. Unknown is null, never
 // a retention ceiling. See spec/PROVIDER-CACHE-TTLS.md (2026-10-13) for qualifications.
 import { Predicate } from "effect"
+import { pinnedRoute } from "@dreamspan/shared/providers.ts"
+import { routerCacheFamily } from "./breakpoints.ts"
 
 export interface CachePolicy {
   readonly ttlS: number
@@ -87,7 +89,8 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
     return payload.prompt_cache_retention === "24h" || /^gpt-5\.5(?:-|$)/.test(family) ? null : policy(300, azureSource)
   }
   if (provider === "openrouter") {
-    const pinned = object(payload.provider).only
+    const routing = object(payload.provider)
+    const pinned = routing.only
     // Claude through OpenRouter caches only at markers (or a top-level control).
     if (model.startsWith("anthropic/claude"))
       return explicit
@@ -96,6 +99,18 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
     if (model.startsWith("google/gemini")) return policy(explicit ? 300 : 180, routerSource, explicit)
     // OpenAI's models through OpenRouter cache automatically, with OpenAI's lifetimes (routerSource).
     if (model.startsWith("openai/") && knownOpenAI(model)) return openaiPolicy(model, payload, routerSource)
+    if (
+      target.api === "openai-completions" &&
+      pinnedRoute(routing) === "alibaba" &&
+      routerCacheFamily(model, routing) === "alibaba" &&
+      array(payload.messages).some((m) =>
+        array(object(m).content).some((block) => {
+          const marker = object(object(block).cache_control)
+          return marker.type === "ephemeral" && (marker.ttl === undefined || marker.ttl === "5m")
+        })
+      )
+    )
+      return policy(300, routerSource)
     // Other upstreams (DeepSeek, xAI, Moonshot...) state no lifetime through OpenRouter.
     return null
   }

@@ -72,6 +72,7 @@ const scriptedSends = (queue: Array<Sent>) => {
 }
 
 type Body = {
+  readonly prompt_cache_key?: string
   readonly tools?: ReadonlyArray<{
     readonly function: {
       readonly name: string
@@ -256,7 +257,9 @@ describe("send_message says who is present", () => {
             const t = yield* scene(dataDir, mode, [{ message: "Mira shrugs." }])
             assert.strictEqual(t.made.version.content, "Mira shrugs.")
             assert.isNull(t.stored(t.made.version.id).presence)
-            return t.bodies()[0]!
+            const { prompt_cache_key, ...body } = t.bodies()[0]!
+            assert.strictEqual(prompt_cache_key, t.chatId)
+            return body
           })
         )
       const never = yield* first(null)

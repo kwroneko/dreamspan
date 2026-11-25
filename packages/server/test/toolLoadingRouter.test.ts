@@ -168,9 +168,8 @@ it.live("keeps its explicit route through mid-run edits and step Resume, then re
     yield* complete(next.entry.version.id)
     const fresh = mock.requests()[nextFrom]!.body as unknown as Body
     assert.isUndefined(fresh.provider)
-    assert.isFalse(fresh.tools!.some((t) => t.function.defer_loading))
-    // Unpinned, so no native wire: the dispatcher carries the loading.
-    assert.isTrue(fresh.tools!.some((t) => t.function.name === "call_tool"))
+    assert.isTrue(fresh.tools!.some((t) => t.function.defer_loading))
+    assert.isFalse(fresh.tools!.some((t) => t.function.name === "call_tool"))
     assert.notInclude(JSON.stringify(fresh.messages), LOADED_DEFINITIONS)
 
     const vertex = { only: ["google-vertex"], allow_fallbacks: false }

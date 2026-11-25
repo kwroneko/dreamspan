@@ -20,6 +20,13 @@ import type { AssembledRequest, ModelInput, InspectionInputs } from "../assemble
 import { defaultCacheRelease, makeCacheStagger } from "./cacheStagger.ts"
 import { cacheIdentity, routeCacheIdentity } from "./cacheIdentity.ts"
 import { mappingCapabilities } from "./mapping.ts"
+import {
+  modernClaudeTools,
+  openAIExplicitCacheMode,
+  openAIGpt5OrLater,
+  openAIResponseToolSearch,
+  openAIStructuredTools
+} from "@dreamspan/shared/modelFamilies.ts"
 import type {
   Api,
   AssistantMessage,
@@ -829,7 +836,8 @@ const buildPiModel = async (
   model: Model,
   effective: EffectiveModel,
   bindings: ReadonlyArray<ThinkingBinding>,
-  hasEffort: boolean
+  hasEffort: boolean,
+  hasPriorEffort = false
 ): Promise<PiModel<Api>> => {
   const found = await catalogEntry(prepared.kind, model.key)
   const base = found?.sameApi ? found.entry : null
@@ -844,6 +852,46 @@ const buildPiModel = async (
           .find((binding) => binding.appliesTo({ kind: prepared.kind.id, api: prepared.api, model: model.key }))
           ?.modelDefaults?.(model.key)
   const levels = { ...family?.thinkingLevelMap, ...effective.thinkingLevels.value }
+  const openai = prepared.provider === "openai" || prepared.provider === "openai-bedrock"
+  const responses = prepared.api === "openai-responses"
+  const openaiStrict = openai && openAIStructuredTools.test(model.key)
+  const openaiCacheMode = openai && responses && openAIExplicitCacheMode.test(model.key)
+  const anthropicStrict =
+    prepared.provider === "anthropic" && prepared.api === "anthropic-messages" && modernClaudeTools.test(model.key)
+  const responsesToolChanges =
+    prepared.provider === "openai" &&
+    responses &&
+    openAIResponseToolSearch.test(model.key) &&
+    !/(?:^|[./])gpt-5\.4-nano(?:-|$)/.test(model.key)
+  const claudeSystemUpdates =
+    prepared.provider === "anthropic" &&
+    prepared.api === "anthropic-messages" &&
+    /(?:^|[./])claude-(?:(?:fable|mythos|opus)-5(?:[.-]\d+)?|(?:sonnet|haiku)-5[.-]5|opus-4[.-]8)(?:$|[-@:])/.test(
+      model.key
+    )
+  // For inferred models the ordinary effort stays at the top level on a fresh transcript.
+  // Use the SDK's inline effort controls when there is a prior provider effort to preserve.
+  const claudeManagedEffort =
+    hasEffort &&
+    hasPriorEffort &&
+    claudeSystemUpdates &&
+    /(?:^|[./])claude-(?:(?:fable|mythos)-5[.-][12]|opus-5(?:[.-]5)?|(?:sonnet|haiku)-5[.-]5)(?:$|[-@:])/.test(
+      model.key
+    )
+  const compatDefaults = {
+    ...(claudeManagedEffort ? { supportsMidConvoEffort: true } : {}),
+    ...(responsesToolChanges
+      ? { supportsAdditionalTools: true, supportsToolSearch: true, supportsMidConvoSystemMessages: true }
+      : {}),
+    ...(claudeSystemUpdates ? { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } : {}),
+    ...(openaiStrict ? { supportsStrictMode: true } : {}),
+    ...(prepared.provider === "openai" && openAIGpt5OrLater.test(model.key)
+      ? { supportsOpenAIGrammarTools: true }
+      : {}),
+    ...(openaiCacheMode ? { supportsExplicitPromptCacheMode: true } : {}),
+    ...(anthropicStrict ? { supportsStrictTools: true } : {})
+  }
+
   return {
     ...base,
     id: model.key,
@@ -867,7 +915,7 @@ const buildPiModel = async (
     contextWindow: effective.context.value,
     maxTokens: effective.maxOutput.value,
     ...(effective.cacheTtlS.value !== null ? { promptCache: { short: effective.cacheTtlS.value } } : {}),
-    compat: { ...family?.compat, ...effective.compat } as never,
+    compat: { ...compatDefaults, ...family?.compat, ...effective.compat } as never,
     ...(Object.keys(effective.sampling).length > 0 ? { samplingParams: { ...effective.sampling } as never } : {})
   } as PiModel<Api>
 }
@@ -2530,7 +2578,8 @@ export const layer = (options: ProvidersOptions = {}) =>
               model.upstream,
               model.overrides,
               prepared.connection.compat,
-              prepared.settings
+              prepared.settings,
+              { ...prepared.connection, provider: prepared.provider }
             )
             const piModel = yield* Effect.tryPromise({
               try: () =>
@@ -2539,7 +2588,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                   model,
                   effective,
                   registry.thinkingBindings.list(),
-                  request.options?.reasoning !== undefined
+                  request.options?.reasoning !== undefined,
+                  request.context.messages.some(
+                    (message) => message.role === "assistant" && message.providerThinkingLevel !== undefined
+                  )
                 ),
               catch: (error) =>
                 scrubbed(prepared, providerError("unknown", `could not prepare the model: ${String(error)}`))
@@ -2820,7 +2872,10 @@ export const layer = (options: ProvidersOptions = {}) =>
             missingSince: null,
             rowVersion: 0
           })
-          const effective = resolveModel(key, model.upstream, {}, prepared.connection.compat, prepared.settings)
+          const effective = resolveModel(key, model.upstream, {}, prepared.connection.compat, prepared.settings, {
+            ...prepared.connection,
+            provider: prepared.provider
+          })
           const built = yield* Effect.tryPromise({
             try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list(), false),
             catch: (error) => providerError("unknown", `could not prepare the model: ${String(error)}`)

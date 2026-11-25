@@ -233,7 +233,7 @@ describe("workshop", () => {
         const api = yield* client()
         // Existing fixture provisions a model; the workshop itself is created by its RPC.
         const setup = yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
           model: {}
         })
         const chat = yield* api.CreateWorkshop({})
@@ -451,7 +451,7 @@ describe("workshop", () => {
       })
       const api = yield* client()
       const rp = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
         model: {},
         state: [{ key: "agent.enabled", value: { on: true } }]
       })
@@ -544,7 +544,10 @@ describe("workshop", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+        model: {}
+      })
       const user = yield* api.Whoami()
       const chat = yield* api.CreateWorkshop({})
       yield* api.ChangeCast({
