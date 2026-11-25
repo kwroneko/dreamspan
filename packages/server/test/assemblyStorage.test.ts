@@ -262,7 +262,12 @@ describe("context assembly from the database", () => {
         // A caller's inherited headers cannot impersonate the private worker snapshot.
         const snapshot = yield* assemble().pipe(RpcClient.withHeaders({ "rp-provider-definitions": "[]" }))
         assert.strictEqual(snapshot.inputs.model?.cacheBreakpoints, "explicit")
-        assert.deepStrictEqual(snapshot.inputs.model?.cacheLayout, { lookback: false, maxMarkers: 2, minTokens: 16 })
+        assert.deepStrictEqual(snapshot.inputs.model?.cacheLayout, {
+          lookback: false,
+          maxMarkers: 2,
+          minTokens: 16,
+          summarySplit: true
+        })
         assert.deepStrictEqual(yield* reader.GetConnection({ userId, connectionId: connection.id }), connection)
       }).pipe(Effect.scoped)
       assert.strictEqual((yield* assemble()).inputs.model?.cacheBreakpoints, "auto")
