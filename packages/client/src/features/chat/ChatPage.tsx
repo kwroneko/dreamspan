@@ -94,12 +94,12 @@ export interface Flashes {
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
-/** Distance for correcting an incidental scroll or saving an end-held position. */
-const END_PX = 48
 /** Allow for rounding when comparing the native scroll offset with the end. */
 const NATIVE_END_PX = 2
+/** Wheel, key and touch scrolling settle once their events go quiet. */
+const SCROLL_IDLE_MS = 120
 
-const distanceFromEnd = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight
+const atNativeEnd = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight <= NATIVE_END_PX
 
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
@@ -145,8 +145,14 @@ export function MessageList({
   /** Paging waits until a new window is positioned: before that, the list renders from its top. */
   const settled = useRef(false)
   /** Whether the list stays at the end as messages grow or arrive (below). */
-  const [follow] = useState({ stuck: true })
-  const scrollbarDrag = useRef<{ pointerId: number; offset: number; endHeight: number | null } | null>(null)
+  const [follow] = useState(() => ({
+    stuck: true,
+    menus: 0,
+    get pinned(): boolean {
+      return this.stuck && this.menus === 0
+    }
+  }))
+  const saveReading = useRef<(() => void) | null>(null)
   const { entries } = view
   const { prefs } = useViewPrefs()
   // The spacing shown follows the account's choice one commit later, once what's being read
@@ -239,17 +245,6 @@ export function MessageList({
     [rows, metrics.estimate]
   )
   const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
-  /** Holds the list at the end, or lets go of it, for us and TanStack Virtual alike. */
-  const setFollow = useCallback(
-    (instance: Virtualizer<HTMLDivElement, Element>, on: boolean) => {
-      follow.stuck = on
-      instance.options.scrollEndThreshold = on ? NATIVE_END_PX : -1
-      // The threshold governs future follow. TanStack Virtual has no cancellation API
-      // for an end scroll already reconciling by row index.
-      if (!on && instance["scrollState"]?.align === "end") instance["scrollState"] = null
-    },
-    [follow]
-  )
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
     (instance: Virtualizer<HTMLDivElement, Element>, changed: (offset: number, isScrolling: boolean) => void) => {
@@ -276,7 +271,7 @@ export function MessageList({
   const repaintQueued = useRef(false)
   const onVirtualChange = useCallback(
     (_instance: Virtualizer<HTMLDivElement, Element>, sync: boolean) => {
-      if (sync || follow.stuck || repaintQueued.current) return
+      if (sync || follow.pinned || repaintQueued.current) return
       repaintQueued.current = true
       queueMicrotask(() => {
         repaintQueued.current = false
@@ -312,9 +307,35 @@ export function MessageList({
     gap: metrics.gap,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
-    scrollEndThreshold: follow.stuck ? NATIVE_END_PX : -1
+    scrollEndThreshold: follow.pinned ? NATIVE_END_PX : -1
   })
-  const hold = useCallback((on: boolean) => setFollow(virtualizer, on), [setFollow, virtualizer])
+  const hold = useCallback(
+    (on: boolean) => {
+      follow.stuck = on
+      virtualizer.options.scrollEndThreshold = follow.pinned ? NATIVE_END_PX : -1
+      // TanStack Virtual has no cancellation API for an end scroll already reconciling by row index.
+      if (!follow.pinned && virtualizer["scrollState"]?.align === "end") virtualizer["scrollState"] = null
+    },
+    [follow, virtualizer]
+  )
+  const finishScrollInput = useCallback(
+    (atEnd: boolean) => {
+      const atBottom = atEnd && session.snapshot().newer === null
+      hold(atBottom)
+      if (atBottom) {
+        session.followAtBottom()
+        if (follow.pinned) virtualizer.scrollToEnd()
+      }
+      // A stationary release can change follow without emitting another scroll event.
+      saveReading.current?.()
+    },
+    [follow, hold, session, virtualizer]
+  )
+  const keepEnd = useCallback(() => {
+    const list = parent.current
+    if (list !== null && follow.pinned && virtualizer.options.followOnAppend && !atNativeEnd(list))
+      virtualizer.scrollToEnd()
+  }, [follow, virtualizer])
 
   // The virtualizer learns the list's offset through its scroll observer. When the browser clamps
   // an offset it set to where the list already is (the estimated start in a history too short
@@ -367,7 +388,7 @@ export function MessageList({
   useLayoutEffect(() => {
     if (prefs.chatDensity === spacing) return
     const list = parent.current
-    const anchor = list === null || (follow.stuck && view.follow) ? null : readingAnchor(list)
+    const anchor = list === null || (follow.pinned && view.follow) ? null : readingAnchor(list)
     const row = anchor === null ? undefined : rows[anchor.row]
     reading.current = anchor !== null && row !== undefined ? { key: row.key, anchor } : list === null ? null : "end"
     // Heights measured at the other spacing are wrong for rows that aren't shown: those go back
@@ -467,7 +488,7 @@ export function MessageList({
     const row = entryIndex >= 0 ? rowOf(entryIndex) : rows.findIndex((row) => row.lastSlotId === requested)
     if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.lastSlotId !== undefined ? "start" : "center" })
     else virtualizer.scrollToEnd()
-    hold(row < 0)
+    hold(row < 0 && view.newer === null)
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         settled.current = true
@@ -525,11 +546,9 @@ export function MessageList({
   // the uncovered original can render first, before the selected layer replaces it.
   // Until the user takes over, the list mustn't hold at the end either: a collapsed
   // summary can fit the viewport, and holding there would follow its expansion down.
-  const revealing = useRef(false)
   useEffect(() => {
     const list = parent.current
     if (anchor === null || list === null) return
-    revealing.current = true
     let frame = 0
     let shown: Element | null = null
     // Keep the linked message in place while asynchronous row contributions arrive.
@@ -561,11 +580,9 @@ export function MessageList({
         frame = requestAnimationFrame(() => {
           // Replace the pending summary-row scroll with an offset inside that row.
           // Otherwise its measurement pass can scroll back to the summary's edge.
-          const offset =
-            list.scrollTop +
-            article.getBoundingClientRect().top -
-            list.getBoundingClientRect().top -
-            (list.clientHeight - article.getBoundingClientRect().height) / 2
+          const inset =
+            restore?.slot === anchor ? restore.offset : (list.clientHeight - article.getBoundingClientRect().height) / 2
+          const offset = list.scrollTop + article.getBoundingClientRect().top - list.getBoundingClientRect().top - inset
           virtualizer.scrollToOffset(Math.max(0, offset))
         })
       })
@@ -575,11 +592,10 @@ export function MessageList({
         event?.target instanceof Node &&
         !list.contains(event.target) &&
         virtualizer.options.followOnAppend &&
-        virtualizer.isAtEnd(NATIVE_END_PX)
-      revealing.current = false
+        atNativeEnd(list)
       cancelAnimationFrame(frame)
       virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
-      if (sendingAtEnd) hold(true)
+      if (sendingAtEnd) finishScrollInput(true)
       observer.disconnect()
       for (const event of inputs) inputSurface.removeEventListener(event, stop)
     }
@@ -594,118 +610,130 @@ export function MessageList({
       stop()
       cancelAnimationFrame(frame)
     }
-  }, [anchor, summaries, view.opened, virtualizer, hold])
+  }, [anchor, restore, summaries, view.opened, virtualizer, finishScrollInput])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
   // index. Retarget before the next frame so reconciliation scrolls to the new last row.
   const lastSlot = entries.at(-1)?.slotId
   useLayoutEffect(() => {
-    if (view.follow && follow.stuck && rowCount > 0) virtualizer.scrollToEnd()
+    if (view.follow && follow.pinned && rowCount > 0) virtualizer.scrollToEnd()
   }, [divider, lastSlot, rowCount, view.follow, follow, virtualizer])
 
-  // At the bottom, the list stays there while the last messages grow or arrive, until the
-  // user scrolls away. TanStack Virtual follows on its own only while the scroll position
-  // is exactly at the end when a row grows, which a send that reopens the window, or a
-  // reply growing while that settles, can miss. Widening its threshold instead made it
-  // write the scroll position as the user started scrolling up, which stops a smooth
-  // scroll in its first few pixels: the list then never let go.
-  //
-  // The user scrolling up lets go at once, before the first scroll event: a smooth scroll
-  // starts with steps small enough to still look like the end. So does grabbing the
-  // scrollbar or a middle-button autoscroll. A change in scroll position can be a browser
-  // layout clamp, even after the list's previous height has returned, so it cannot let go.
-  // Reaching the end again holds on after a pause, or on release of the thumb there.
-  //
-  // A menu open on a message pauses the hold until it closes (anchorScroll.ts): following a
-  // streaming reply carried the menu up with its row, then closed it as the row left the view.
-  // It holds on again after, unless the user scrolled away meanwhile.
-  const intent = useRef(0)
-  const menus = useRef({ open: 0, resume: false, since: 0 })
   useEffect(() => {
     const list = parent.current
     if (list === null) return
-    const letGo = () => {
-      intent.current = performance.now()
-      hold(false)
+    let input: { offset: number; atEnd: boolean } | null = null
+    let pointer: { id: number; rangeAtPress: number; movedAt: number } | null = null
+    const rawPointer = window.isSecureContext && "onpointerrawupdate" in window
+    let touching = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const startInput = (movingUp: boolean, atEnd = atNativeEnd(list)) => {
+      input ??= { offset: list.scrollTop, atEnd }
+      // Give the first pixels of a smooth scroll room before the virtualizer can pin them back.
+      if (movingUp) hold(false)
     }
+    const sampleInput = () => {
+      if (input === null) return false
+      const offset = list.scrollTop
+      const atEnd = atNativeEnd(list)
+      if (offset === input.offset) {
+        input.atEnd ||= atEnd
+        return false
+      }
+      // Chromium can reposition a stationary thumb after a resize. Its raw pointer
+      // event arrives before the resulting scroll, even when dragging consumes pointermove.
+      if (pointer !== null && rawPointer) {
+        const resized = list.scrollHeight - list.clientHeight !== pointer.rangeAtPress
+        if (!atEnd && resized && performance.now() - pointer.movedAt > SCROLL_IDLE_MS) return false
+        pointer.movedAt = -Infinity
+      }
+      if (!atEnd) hold(false)
+      input = { offset, atEnd }
+      return true
+    }
+    const finishInput = () => {
+      if (input === null) return
+      clearTimeout(timer)
+      sampleInput()
+      const atEnd = input.atEnd
+      input = null
+      finishScrollInput(atEnd)
+    }
+    const waitForScrollEnd = () => {
+      clearTimeout(timer)
+      if (pointer === null && !touching) timer = setTimeout(finishInput, SCROLL_IDLE_MS)
+    }
+
+    // An anchored menu pauses automatic scrolling while preserving the reader's last choice.
     const onMenu = (event: Event) => {
       if (!(event instanceof AnchoredPopupEvent)) return
-      const state = menus.current
-      if (state.open === 0) {
-        state.resume = follow.stuck
-        state.since = performance.now()
-        hold(false)
-      }
-      state.open++
+      follow.menus++
+      hold(follow.stuck)
       event.detail(() => {
-        state.open--
-        if (state.open > 0 || !state.resume) return
-        state.resume = false
-        if (parent.current !== list || intent.current >= state.since) return
-        hold(true)
-        virtualizer.scrollToEnd()
+        follow.menus--
+        hold(follow.stuck)
+        if (parent.current === list) keepEnd()
       })
     }
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) letGo()
+      if (event.deltaY === 0 || event.ctrlKey) return
+      startInput(event.deltaY < 0)
+      waitForScrollEnd()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.shiftKey && [" ", "Tab"].includes(event.key)))
-        letGo()
+      if (event.defaultPrevented) return
+      const up =
+        ["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.shiftKey && [" ", "Tab"].includes(event.key))
+      if (!up && !["ArrowDown", "PageDown", "End", " ", "Tab"].includes(event.key)) return
+      startInput(up)
+      waitForScrollEnd()
+    }
+    const onTouchMove = () => {
+      touching = true
+      startInput(true)
+      waitForScrollEnd()
+    }
+    const onTouchEnd = () => {
+      if (!touching) return
+      touching = false
+      waitForScrollEnd()
+    }
+    const onPointerMove = (event: Event) => {
+      if (event instanceof PointerEvent && pointer?.id === event.pointerId) pointer.movedAt = performance.now()
     }
     const onPointerDown = (event: PointerEvent) => {
       const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
-      if (onScrollbar && event.button === 0)
-        scrollbarDrag.current = { pointerId: event.pointerId, offset: list.scrollTop, endHeight: null }
-      if (onScrollbar || event.button === 1) letGo()
+      if (!(event.button === 0 && onScrollbar) && event.button !== 1) return
+      // With the original scroll range, a track press can scroll without pointer motion.
+      pointer = { id: event.pointerId, rangeAtPress: list.scrollHeight - list.clientHeight, movedAt: -Infinity }
+      startInput(event.button === 1, follow.stuck || atNativeEnd(list))
+      waitForScrollEnd()
+      if (rawPointer) window.addEventListener("pointerrawupdate", onPointerMove, { capture: true, passive: true })
     }
     const onPointerEnd = (event: PointerEvent) => {
-      const drag = scrollbarDrag.current
-      if (drag?.pointerId !== event.pointerId) return
-      scrollbarDrag.current = null
-      intent.current = performance.now()
-      // Content can grow under a stationary thumb after the drag reached the end.
-      const grewAtEnd = drag.endHeight !== null && list.scrollTop === drag.offset && list.scrollHeight > drag.endHeight
-      if (
-        event.type === "pointerup" &&
-        (distanceFromEnd(list) <= NATIVE_END_PX || grewAtEnd) &&
-        !revealing.current &&
-        menus.current.open === 0 &&
-        session.snapshot().newer === null
-      ) {
-        hold(true)
-        virtualizer.scrollToEnd()
-        session.followAtBottom()
-      }
+      if (pointer?.id !== event.pointerId) return
+      finishInput()
+      pointer = null
+      window.removeEventListener("pointerrawupdate", onPointerMove, true)
     }
-    // Capture runs before the virtualizer's own listener, whose render may follow at once.
+    const letGo = () => {
+      clearTimeout(timer)
+      input = null
+      hold(false)
+      saveReading.current?.()
+    }
+    // Capture the result of the reader's movement before the virtualizer measures mounted rows.
     const onScroll = () => {
-      const fromEnd = distanceFromEnd(list)
-      const drag = scrollbarDrag.current
-      if (drag !== null) {
-        if (list.scrollTop !== drag.offset) {
-          drag.offset = list.scrollTop
-          drag.endHeight = fromEnd <= NATIVE_END_PX ? list.scrollHeight : null
-        }
-        // The thumb can pass through the end before the same drag takes it away again.
-        return
-      }
-      if (fromEnd > END_PX && follow.stuck && virtualizer.options.followOnAppend) virtualizer.scrollToEnd()
-      // Capture reaching the end before the virtualizer measures its newly mounted rows.
-      // Their corrected estimates can grow the list beyond the threshold in that same commit.
-      if (
-        fromEnd <= NATIVE_END_PX &&
-        spacing === "compact" &&
-        !revealing.current &&
-        menus.current.open === 0 &&
-        performance.now() - intent.current > 300
-      )
-        hold(true)
+      if (sampleInput()) waitForScrollEnd()
+      keepEnd()
     }
     list.addEventListener(ANCHORED_POPUP, onMenu)
     list.addEventListener("wheel", onWheel, { passive: true })
-    list.addEventListener("touchmove", letGo, { passive: true })
+    list.addEventListener("touchmove", onTouchMove, { passive: true })
+    list.addEventListener("touchend", onTouchEnd, { passive: true })
+    list.addEventListener("touchcancel", onTouchEnd, { passive: true })
     // A control inside asks, before its action changes the length of what's above it (composition.ts).
     list.addEventListener(LET_GO, letGo)
     list.addEventListener("keydown", onKey)
@@ -714,24 +742,25 @@ export function MessageList({
     window.addEventListener("pointercancel", onPointerEnd, true)
     list.addEventListener("scroll", onScroll, { passive: true, capture: true })
     return () => {
+      clearTimeout(timer)
       list.removeEventListener(ANCHORED_POPUP, onMenu)
       list.removeEventListener("wheel", onWheel)
-      list.removeEventListener("touchmove", letGo)
+      list.removeEventListener("touchmove", onTouchMove)
+      list.removeEventListener("touchend", onTouchEnd)
+      list.removeEventListener("touchcancel", onTouchEnd)
       list.removeEventListener(LET_GO, letGo)
       list.removeEventListener("keydown", onKey)
       list.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("pointerrawupdate", onPointerMove, true)
       window.removeEventListener("pointerup", onPointerEnd, true)
       window.removeEventListener("pointercancel", onPointerEnd, true)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold, spacing, follow, virtualizer, session])
+  }, [finishScrollInput, follow, hold, keepEnd])
+
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
   // left the last message behind the list's edge until something else rendered the list.
-  const following = useRef(view.follow)
-  useEffect(() => {
-    following.current = view.follow
-  })
   useEffect(() => {
     const list = parent.current
     if (list === null || typeof ResizeObserver === "undefined") return
@@ -739,7 +768,7 @@ export function MessageList({
     const observer = new ResizeObserver(() => {
       const shorter = list.clientHeight < height
       height = list.clientHeight
-      if (!shorter || !follow.stuck || !following.current) return
+      if (!shorter || !follow.pinned || !virtualizer.options.followOnAppend) return
       // Before this frame paints (the virtualizer's own scroll lands a frame later), then theirs.
       elementScroll(list.scrollHeight - height, {}, virtualizer)
       virtualizer.scrollToEnd()
@@ -747,21 +776,8 @@ export function MessageList({
     observer.observe(list)
     return () => observer.disconnect()
   }, [follow, virtualizer])
-  useEffect(() => {
-    const list = parent.current
-    if (list === null || entries.length === 0 || !view.follow) return
-    const fromEnd = distanceFromEnd(list)
-    if (
-      !follow.stuck &&
-      !revealing.current &&
-      menus.current.open === 0 &&
-      scrollbarDrag.current === null &&
-      fromEnd <= NATIVE_END_PX &&
-      performance.now() - intent.current > 300
-    )
-      hold(true)
-    if (follow.stuck && fromEnd > NATIVE_END_PX) virtualizer.scrollToEnd()
-  })
+  // Corrections and layout clamps cannot change the reader's follow choice.
+  useEffect(() => keepEnd())
 
   useEffect(() => {
     const list = parent.current
@@ -802,17 +818,25 @@ export function MessageList({
     let timer: ReturnType<typeof setTimeout> | undefined
     const save = () => {
       if (!settled.current || !view.forkId) return
-      const bounds = list.getBoundingClientRect()
-      const bottom = follow.stuck && view.newer === null && distanceFromEnd(list) <= END_PX
-      const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find(
-        (el) => el.getBoundingClientRect().bottom > bounds.top
-      )
-      if (!bottom && !article) return
+      const location = router.latestLocation
+      if (location.pathname !== `/chats/${session.id}`) return
+      if (location.search.fork != null && location.search.fork !== view.forkId) return
       const reading: ReadingPosition = {
         key: `${userId}/${session.id}/${view.forkId}`,
-        slot: bottom ? null : (article!.dataset.slot as SlotId),
-        offset: bottom ? 0 : article!.getBoundingClientRect().top - bounds.top
+        slot: null,
+        offset: 0
       }
+      if (!follow.stuck || view.newer !== null) {
+        const bounds = list.getBoundingClientRect()
+        const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find(
+          (el) => el.getBoundingClientRect().bottom > bounds.top
+        )
+        if (!article) return
+        reading.slot = article.dataset.slot as SlotId
+        reading.offset = article.getBoundingClientRect().top - bounds.top
+      }
+      const previous = location.state.chatReading
+      if (previous?.key === reading.key && previous.slot === reading.slot && previous.offset === reading.offset) return
       void navigate({
         to: ".",
         search: (prev: Record<string, unknown>) => prev,
@@ -821,6 +845,7 @@ export function MessageList({
         resetScroll: false
       })
     }
+    saveReading.current = save
     const scroll = () => {
       clearTimeout(timer)
       timer = setTimeout(save, 200)
@@ -828,11 +853,12 @@ export function MessageList({
     list.addEventListener("scroll", scroll, { passive: true })
     window.addEventListener("pagehide", save)
     return () => {
+      saveReading.current = null
       clearTimeout(timer)
       list.removeEventListener("scroll", scroll)
       window.removeEventListener("pagehide", save)
     }
-  }, [navigate, session, userId, view.forkId, view.newer, embedded, follow])
+  }, [navigate, router, session, userId, view.forkId, view.newer, embedded, follow])
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
@@ -842,8 +868,6 @@ export function MessageList({
     if (first < EDGE && (!summaries || lcm === null || (entries[0] ? positionOf(entries[0]) : 0) > lcmCursor(lcm) + 1))
       void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
-    if (view.newer === null && scrollbarDrag.current === null && virtualizer.isAtEnd(NATIVE_END_PX))
-      session.followAtBottom()
   })
 
   // What the summaries cover, for the marks on the messages and the rail.
