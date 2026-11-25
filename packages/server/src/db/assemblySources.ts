@@ -1097,7 +1097,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             ...(effective.cacheBreakpoints.value === "explicit" &&
             effective.cacheLayout.value.summarySplit === undefined &&
             (c.api === "anthropic-messages" ||
-              (c.api === "openai-responses" && effective.cacheLayout.value.marker === "prompt_cache_breakpoint") ||
+              ((c.api === "openai-responses" ||
+                (c.api === "openai-completions" && (provider?.id ?? c.provider) !== "openai-bedrock")) &&
+                effective.cacheLayout.value.marker === "prompt_cache_breakpoint") ||
               (c.kind === "openrouter" && m.key.startsWith("anthropic/claude")))
               ? { summarySplit: true }
               : {})

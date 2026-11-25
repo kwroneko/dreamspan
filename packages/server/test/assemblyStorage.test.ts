@@ -230,6 +230,41 @@ for (const workers of ["source", "bundle"] as const) {
 }
 
 describe("context assembly from the database", () => {
+  for (const [kind, split, expected] of [
+    ["openai-chat", undefined, true],
+    ["openai-chat", false, false],
+    ["openai-chat-bedrock", undefined, undefined]
+  ] as const)
+    it.live(`infers a summary split for ${kind}, override ${split}`, () =>
+      Effect.gen(function* () {
+        const { writer, userId, state, assemble } = yield* setup()
+        const connection = yield* writer.CreateConnection({
+          userId,
+          connectionId: uuidv7() as ConnectionId,
+          provider: kind === "openai-chat" ? "openai-compatible" : "openai-bedrock",
+          kind,
+          api: "openai-completions",
+          settings: {
+            name: "Synthetic block marker",
+            baseUrl: "https://synthetic.invalid/v1",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null,
+            providerSettings: { cacheBreakpoints: "explicit", cacheMarker: "prompt_cache_breakpoint" }
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({
+          userId,
+          connectionId: connection.id,
+          key: "global.openai.gpt-5.6-sol",
+          overrides: split === undefined ? {} : { cacheLayout: { summarySplit: split } }
+        })
+        yield* state({ key: "model.binding", value: { connection: connection.id, model: model.id } })
+        assert.strictEqual((yield* assemble()).inputs.model?.cacheLayout?.summarySplit, expected)
+      }).pipe(Effect.scoped, Effect.provide(database().pipe(Layer.provideMerge(ProviderBuiltins.layer))))
+    )
   it.live("resolves scoped provider defaults in readers without rewriting connections", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, state, assemble } = yield* setup()

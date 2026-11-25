@@ -14,6 +14,8 @@
 
 **Built finish1-alibaba (2026-11-25), obsolete as a proposal.** The Alibaba cache-family lookup normalizes routing tags before marker and TTL decisions. The measurement record in §17.3 row 5 is retained. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
 
+**Built finish1-summary (2026-11-25), obsolete as a proposal.** The older-summary split defaults on for an explicit compatible Chat block-marker encoder, with explicit Off and the built-in Bedrock Chat strip exception retained. The former Responses-only qualification in §17.3 row 7 is historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
+
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
 This replaces WORKSHOP §1.2's "Skills … Not taken" row and AGENTIC §1.2's "dynamic tool loading" exclusion, for workshops only.

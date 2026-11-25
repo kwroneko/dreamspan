@@ -2944,6 +2944,8 @@ Side-panel History access (cardhistory, 2026-11-04): card and persona panels, co
 
 ## 15. Context assembly
 
+**Summary tier markers on compatible Chat (finish1 review).** An explicit Chat Completions layout with the `prompt_cache_breakpoint` encoder now defaults to separate older/newer summary tiers, as the corresponding Responses encoder does. Explicit split Off remains authoritative. The built-in OpenAI Bedrock Chat route retains its automatic-cache exception because its shim removes those blocks. Reader integration regressions in `assemblyStorage.test.ts` cover all three cases; the cache simulator and wire layout tests retain marker-placement coverage.
+
 `packages/server/src/assembler/` (DESIGN §5, DATA-MODEL §7.1). It turns a version being generated into a provider-neutral request (Chat Completions' messages, with names, plus ST's sampler values) and a record of where every piece of it came from, for the run inspector (DESIGN §7.4).
 
 **The pipeline** (`pipeline.ts`, PLUGINS §8). Stages are registered by id in a stage registry (§6's generic registry) and run in registration order over one `Assembly`; a plugin overrides a stage by its id, wraps one by `get`ting it first, or disables one. The built-ins (`stages.ts`) register the same way:
