@@ -134,6 +134,15 @@ const openChat = async (page: Page, chatId: ChatId) => {
   })
 }
 
+/** The cache chip's text takes exactly its minimum width: the text fit in it, so the chip is the size it always is. */
+const expectCacheChipAtMinWidth = async (page: Page) =>
+  expect(
+    await cacheChip(page)
+      .locator("span")
+      .first()
+      .evaluate((el) => Math.abs(el.getBoundingClientRect().width - parseFloat(getComputedStyle(el).minWidth)) < 0.5)
+  ).toBe(true)
+
 const contextChip = (page: Page) => nextReply(page).getByRole("button", { name: /^Context: about / })
 /** The chip's tokens, from its name: "Context: about 2,345 of 131,072 tokens in your next request. Details". */
 const chipTokens = async (page: Page) =>
@@ -173,6 +182,7 @@ test("a workshop's first Cache chip leaves the capabilities and working folder i
   await expect(folder).toBeVisible()
   await expect(contextChip(page)).toBeVisible()
   await expect(cacheChip(page)).toHaveText("No cache yet")
+  await expectCacheChipAtMinWidth(page)
   // Measure from the context chip's right edge, since its token count can change its width.
   const offsets = async () => {
     const context = (await contextChip(page).boundingBox())!
@@ -187,7 +197,15 @@ test("a workshop's first Cache chip leaves the capabilities and working folder i
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\//)
   await expect(cacheChip(page)).toHaveText(/^Cache warm \d+:\d\d$/)
+  await expectCacheChipAtMinWidth(page)
   expect(await offsets()).toEqual(before)
+  await page.clock.install()
+  await page.clock.fastForward(301_000)
+  await expect(cacheChip(page)).toHaveText(/^↻ [\d.]+k? uncached$/)
+  await expectCacheChipAtMinWidth(page)
+  expect(await offsets()).toEqual(before)
+  await cacheChip(page).click()
+  await expect(page.getByRole("dialog", { name: "Not cached", exact: true })).toContainText(/of its [\d,]+ tokens/)
 })
 
 test.describe("a model added by hand gets a working cache chip, or none", () => {
@@ -553,6 +571,9 @@ test("every place that shows the next request's size shows the same number", asy
   const tokens = await chipTokens(page)
   expect(tokens.toLocaleString("en-US")).toBe(boundary)
   await expect(cacheChip(page)).toHaveAttribute("aria-label", new RegExp(` of ${boundary} tokens uncached`))
+  // The uncached state is as wide as the neutral one, so it moves nothing after it.
+  await expect(cacheChip(page)).toHaveText(/^↻ [\d.]+k? uncached$/)
+  await expectCacheChipAtMinWidth(page)
   await contextChip(page).click()
   await page.getByRole("link", { name: "View request", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Your next request", exact: true })).toBeVisible()

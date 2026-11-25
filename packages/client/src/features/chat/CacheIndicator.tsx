@@ -118,11 +118,8 @@ export const uncachedTotal = (tokens: number, warmth: CacheWarmth | null) => {
   return total === undefined || total < tokens ? undefined : total
 }
 
-/** The chip's uncached count, out of the next request's total when it's known. */
-export const uncachedText = (tokens: number, total: number | undefined) =>
-  total === undefined
-    ? `↻ ${compactTokens(tokens)} uncached`
-    : `↻ ${compactTokens(tokens)} of ${compactTokens(total)} uncached`
+/** The chip's uncached count; the request's total is in its name and popover, so the chip stays within its width. */
+export const uncachedText = (tokens: number) => `↻ ${compactTokens(tokens)} uncached`
 
 /** How long the chip waits after a reply for the estimate that follows it (one that fails never comes). */
 const AFTER_REPLY_MS = 30_000
@@ -231,7 +228,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
   const ofTotal = total === undefined ? "" : ` of ${total.toLocaleString()}`
   const text =
     shown?.kind === "uncached"
-      ? uncachedText(shown.tokens, total)
+      ? uncachedText(shown.tokens)
       : warm
         ? `Cache warm${left ? ` ${left}` : ""}`
         : `↻ ${notes[0]!.short}`

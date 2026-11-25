@@ -121,7 +121,8 @@ describe("provider capability defaults", () => {
     const resolve = (key: string, upstream = {}, overrides = {}) =>
       resolveModel(key, upstream, overrides, {}, {}, connection).vision
     expect(resolve("upstream.deepseek-v4-flash")).toEqual({ value: true, source: "provider" })
-    expect(resolve("opaque-alias").value).toBe(false)
+    // Unknown vision stays on (owner, 2026-11-25): no family match leaves it unknown, not off.
+    expect(resolve("opaque-alias")).toEqual({ value: true, source: "unknown" })
     expect(resolve("deepseek-flash", { vision: false }).value).toBe(false)
     expect(resolve("deepseek-flash", {}, { vision: false }).source).toBe("user")
   })

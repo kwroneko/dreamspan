@@ -40,7 +40,9 @@ test.describe("workshop notes tools", () => {
             compat: {},
             cacheTtlS: null,
             maxConcurrent: null,
-            presetOverrideRefId: null
+            presetOverrideRefId: null,
+            // Each scripted step calls its tool directly, including the one that waits for approval.
+            providerSettings: { toolLoading: "every" as const }
           }
         })
         const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })

@@ -91,27 +91,23 @@ describe("the cache chip", () => {
     })
   })
 
-  it("shows the uncached count out of the next request's total when it's known", () => {
-    expect(uncachedText(7_046, 7_046)).toBe("↻ 7.0k of 7.0k uncached")
-    expect(uncachedText(2_926, 96_906)).toBe("↻ 2.9k of 97k uncached")
-    expect(uncachedText(2_926, undefined)).toBe("↻ 2.9k uncached")
+  it("shows the uncached count alone, short enough that the chip never grows", () => {
+    expect(uncachedText(7_046)).toBe("↻ 7.0k uncached")
+    expect(uncachedText(2_926)).toBe("↻ 2.9k uncached")
+    expect(uncachedText(130_000).length).toBeLessThanOrEqual(17)
   })
 
   it("takes the total from the estimate itself, and shows none rather than one below the uncached part", () => {
     const changed = { reason: "Message 2 was edited, or another of its swipes chosen.", tokens: 2_926 }
     // The normal case: the estimate's own total, counted as its uncached part is.
     expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 96_906 }))).toBe(96_906)
-    expect(uncachedText(2_926, uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 })))).toBe(
-      "↻ 2.9k of 2.9k uncached"
-    )
+    expect(uncachedTotal(2_926, warmth({ changed, requestTokens: 2_926 }))).toBe(2_926)
     // A total below the uncached part (an expired cache counted on the last request) isn't raised to it.
     const lower = uncachedTotal(7_046, warmth({ prefixTokens: 7_046, requestTokens: 5_000 }))
     expect(lower).toBeUndefined()
-    expect(uncachedText(7_046, lower)).toBe("↻ 7.0k uncached")
-    // No total in the estimate: the chip reads as it did without one.
+    // No total in the estimate.
     const missing = uncachedTotal(2_926, warmth({ changed }))
     expect(missing).toBeUndefined()
-    expect(uncachedText(2_926, missing)).toBe("↻ 2.9k uncached")
     expect(uncachedTotal(2_926, null)).toBeUndefined()
   })
 
