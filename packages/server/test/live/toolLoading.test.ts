@@ -1,8 +1,7 @@
 // Live: dynamic tool loading (spec/TOOL-LOADING.md §8) against each provider's own API, through the
 // app's workshop. One reply runs six requests: two before any load, the load, then two after it.
 // The check that matters: the request after the load reads the earlier prefix from the cache.
-// Providers without a measured loading wire send every tool from the start; for them the same run
-// shows the tool loop caches with the full tool list.
+// Select Automatic, or choose a transport explicitly for a control.
 import { describe } from "@effect/vitest"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { VersionId } from "@dreamspan/shared/chat.ts"
@@ -12,6 +11,7 @@ import { join } from "node:path"
 import { posted } from "../support/config.ts"
 import { findings, LIVE, liveEnabled, liveKey, lore, wireUsage } from "./support/live.ts"
 import { type CacheDialect, liveTest, wireCounts } from "./support/scenarios.ts"
+import { DISPATCH_DEFINITIONS } from "../../src/agent/dispatcher.ts"
 import { LOADED_DEFINITIONS } from "../../src/providers/toolLoading.ts"
 
 const f = findings("toolLoading")
@@ -25,6 +25,7 @@ interface Target {
   readonly dialect: CacheDialect
   /** Whether the app defers tools for this target (a registered, matching wire). */
   readonly loads: boolean
+  readonly mode?: "every" | "dispatcher"
   readonly loreTokens: number
   /** A router's upstream, pinned with no fallbacks, as the model page's routing setting sets it. */
   readonly pin?: string
@@ -59,6 +60,19 @@ const targets: ReadonlyArray<Target> = [
   claude("sonnet-5.5", "claude-sonnet-5-5"),
   claude("opus-5.5", "claude-opus-5-5"),
   claude("haiku-5.5", "claude-haiku-5-5"),
+  claude("sonnet-4.6", "claude-sonnet-4-6"),
+  router("anthropic/claude-sonnet-4.6", "azure", true),
+  router("anthropic/claude-sonnet-4.6", "amazon-bedrock", true),
+  {
+    id: "openai responses newer",
+    kind: "openai-responses",
+    route: "openai/v1",
+    provider: "openai",
+    model: process.env.RP_LIVE_RESPONSES_MODEL ?? "gpt-5.6-sol",
+    dialect: "responses",
+    loads: true,
+    loreTokens: 6000
+  },
   {
     id: "anthropic haiku-4.5",
     kind: "anthropic",
@@ -86,7 +100,7 @@ const targets: ReadonlyArray<Target> = [
     provider: "openai",
     model: "gpt-5.4-mini",
     dialect: "responses",
-    loads: false,
+    loads: true,
     loreTokens: 3000
   },
   {
@@ -96,7 +110,7 @@ const targets: ReadonlyArray<Target> = [
     provider: "openrouter",
     model: "anthropic/claude-haiku-4.5",
     dialect: "openrouter",
-    loads: false,
+    loads: true,
     loreTokens: 6000
   },
   router("anthropic/claude-haiku-4.5", "anthropic", true),
@@ -104,10 +118,7 @@ const targets: ReadonlyArray<Target> = [
   router("anthropic/claude-sonnet-5.5", "anthropic", true),
   router("anthropic/claude-haiku-4.5", "google-vertex", true),
   router("anthropic/claude-sonnet-4.5", "google-vertex", true),
-  // Bedrock rewrites its cache at the first call of each loaded tool, so it gets every tool.
-  router("anthropic/claude-sonnet-4.5", "amazon-bedrock", false),
-  // OpenRouter defers DeepSeek itself, and each newly called loaded tool rewrote the cache after
-  // the system prompt, so it gets every tool too.
+  router("anthropic/claude-sonnet-4.5", "amazon-bedrock", true),
   {
     id: "openrouter deepseek-v4-flash",
     kind: "openrouter",
@@ -115,7 +126,8 @@ const targets: ReadonlyArray<Target> = [
     provider: "openrouter",
     model: "deepseek/deepseek-v4-flash",
     dialect: "openrouter",
-    loads: false,
+    loads: true,
+    mode: "dispatcher",
     loreTokens: 6000,
     pin: "deepseek"
   },
@@ -126,7 +138,8 @@ const targets: ReadonlyArray<Target> = [
     provider: "openrouter",
     model: "openai/gpt-5.4-nano",
     dialect: "openrouter",
-    loads: false,
+    loads: true,
+    mode: "dispatcher",
     loreTokens: 3000
   },
   {
@@ -134,24 +147,29 @@ const targets: ReadonlyArray<Target> = [
     kind: "deepseek",
     route: "deepseek/v1",
     provider: "deepseek",
-    model: "deepseek-flash",
+    model: process.env.RP_LIVE_DEEPSEEK_MODEL ?? "deepseek-flash",
     dialect: "deepseek",
-    loads: false,
+    loads: true,
+    mode: "dispatcher",
     loreTokens: 3000
   }
 ]
 const only = process.env.RP_LIVE_TOOL_LOADING?.split(",")
 
-const steps = (loads: boolean) =>
+const steps = (loads: boolean, dispatcher: boolean) =>
   [
     "Work through these steps one tool call at a time, in this order, writing no text between them:",
-    "1. Call list_library.",
-    "2. Call list_library again.",
+    '1. Call list_library with kind "card".',
+    '2. Call list_library with kind "card" again.',
     ...(loads
       ? [
           '3. Call load_skill with the name "cards".',
-          '4. Call read_card for the card "Assistant".',
-          '5. Call read_card for "Assistant" again.'
+          dispatcher
+            ? '4. Call the loaded read_card through call_tool for the card "Assistant".'
+            : '4. Call read_card for the card "Assistant".',
+          dispatcher
+            ? '5. Call the loaded read_card through call_tool for "Assistant" again.'
+            : '5. Call read_card for "Assistant" again.'
         ]
       : ['3. Call read_card for the card "Assistant".', '4. Call read_card for "Assistant" again.']),
     "Then reply with the one word: done."
@@ -169,6 +187,7 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
             name: `Live ${t.id}`,
             baseUrl: `${recorder.url}/${t.route}`,
             compat: {},
+            ...(t.mode ? { providerSettings: { toolLoading: t.mode } } : {}),
             cacheTtlS: null,
             maxConcurrent: null,
             presetOverrideRefId: null
@@ -182,6 +201,7 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
         })
         yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
         const chat = yield* api.CreateWorkshop({})
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "allow" })
         const events: Array<ChatEvent> = []
         yield* api.SubscribeChat({ chatId: chat.id }).pipe(
           Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
@@ -193,7 +213,7 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
             chatId: chat.id,
             parentSlotId: chat.activeLeafSlotId,
             branch: false,
-            content: `Background notes for later; don't summarize them.\n${lore(nonce, t.loreTokens)}\n\n${steps(t.loads)}`
+            content: `Background notes for later; don't summarize them.\n${lore(nonce, t.loreTokens)}\n\n${steps(t.loads, t.mode === "dispatcher")}`
           })
         )
         const from = recorder.exchanges.length
@@ -222,10 +242,13 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
           const read = counts?.read ?? 0
           const write = counts?.write ?? 0
           const uncached = counts?.uncached ?? 0
+          const input = counts?.overlap
+            ? uncached + Math.max(read, write)
+            : uncached + read + (t.dialect === "anthropic" || t.dialect === "openrouter" ? write : 0)
           return {
             request: i + 1,
             status: e.status,
-            input: uncached + read + (t.dialect === "anthropic" ? write : 0),
+            input,
             read,
             write,
             // The first request whose history carries a load: Anthropic's reference, Responses' output
@@ -234,6 +257,7 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
               body.includes('"tool_reference"') ||
               body.includes('"tool_search_output"') ||
               body.includes(LOADED_DEFINITIONS) ||
+              body.includes(DISPATCH_DEFINITIONS) ||
               flagged(e) < firstFlagged,
             flagged: flagged(e),
             tools: Array.isArray(e.request?.tools) ? (e.request.tools as Array<unknown>).length : 0,
@@ -262,6 +286,15 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
         f.check(t.id, "the reply finished", version?.status === "complete", {
           actual: { status: version?.status, error: version?.error }
         })
+        const toolSteps = (yield* api.GetRolloutSteps({ versionId })).filter((step) => step.kind === "tool")
+        f.check(
+          t.id,
+          "the loaded card tool completed",
+          toolSteps.some((step) => step.tool === "read_card" && step.status === "done"),
+          {
+            actual: toolSteps.map((step) => ({ tool: step.tool, status: step.status }))
+          }
+        )
         f.check(
           t.id,
           "every request succeeded",

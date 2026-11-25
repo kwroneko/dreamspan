@@ -142,7 +142,10 @@ const workshop = (handler: (request: Recorded, res: ServerResponse) => void) =>
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: {}
+    })
     const chat = yield* api.CreateWorkshop({ grants: OPEN_LIBRARY })
     const events = yield* watch(api, chat)
     return { mock, api, chat, events }
@@ -814,7 +817,10 @@ describe("workshop approvals", () => {
       )
       const parked = yield* Effect.gen(function* () {
         const api = yield* client()
-        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+          model: {}
+        })
         const chat = yield* api.CreateWorkshop({})
         const events = yield* watch(api, chat)
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })

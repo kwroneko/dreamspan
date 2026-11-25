@@ -94,6 +94,7 @@ it.live(
         kind: "openai-chat",
         settings: {
           name: "Synthetic",
+          providerSettings: { toolLoading: "every" },
           baseUrl: `${mock.url}/v1`,
           compat: {},
           cacheTtlS: null,
@@ -379,6 +380,7 @@ it.live("does not inherit an unrelated later Undo through an identical call id a
       kind: "openai-chat",
       settings: {
         name: "Synthetic receipt collision",
+        providerSettings: { toolLoading: "every" },
         baseUrl: mock.url + "/v1",
         compat: {},
         cacheTtlS: null,

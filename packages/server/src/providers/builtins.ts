@@ -190,19 +190,24 @@ export const layer = Layer.effectDiscard(
         return payload
       }
     })
-    // OpenRouter Claude and Gemini markers, which the assembler's messages replaced (liveapi F4, F5).
+    // Restore content-block markers after the assembled messages replace the SDK's messages.
     yield* registry.transforms.register({
       id: "openrouter-cache-control",
-      appliesTo: (target) =>
-        target.kind === "openrouter" && target.api === "openai-completions" && routerCacheFamily(target.model) !== null,
+      appliesTo: (target) => target.kind === "openrouter" && target.api === "openai-completions",
       transform: (payload, request) => {
-        const family = routerCacheFamily(request.target.model)
+        const routing = payload.provider
+        const family = routerCacheFamily(
+          request.target.model,
+          routing && typeof routing === "object" && !Array.isArray(routing)
+            ? (routing as Record<string, unknown>)
+            : undefined
+        )
         if (family) applyRouterCacheControl(payload, family, request)
         return payload
       }
     })
     // OpenAI routes caches by this key; pi-ai sets it only for api.openai.com (liveapi F8). The
-    // provider's setting says whether it's sent: on for OpenAI, off for a compatible server.
+    // provider's setting can turn it off, including for an OpenAI-compatible server.
     yield* registry.transforms.register({
       id: "openai-prompt-cache-key",
       appliesTo: (target) => target.api === "openai-completions" || target.api === "openai-responses",

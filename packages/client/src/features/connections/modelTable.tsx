@@ -143,7 +143,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
             ) : (
               <ModelTable
                 key={connection.id}
-                connectionId={connection.id}
+                connection={connection}
                 models={models}
                 compat={connection.compat}
                 priceEndpoint={connection.providerSettings?.priceEndpoint === true}
@@ -166,18 +166,19 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
 }
 
 function ModelTable({
-  connectionId,
+  connection,
   models,
   compat,
   priceEndpoint,
   onEdit
 }: {
-  connectionId: string
+  connection: ConnectionSectionProps["connection"]
   models: ReadonlyArray<Model>
   compat: ConnectionSectionProps["connection"]["compat"]
   priceEndpoint: boolean
   onEdit: (id: ModelId) => void
 }) {
+  const connectionId = connection.id
   const [tab, setTab] = usePlaceParam<Tab>(
     "models",
     "all",
@@ -190,10 +191,10 @@ function ModelTable({
   const rows = useMemo(
     () =>
       models.map((model): Row => {
-        const resolved = resolveModel(model.key, model.upstream, model.overrides, compat)
+        const resolved = resolveModel(model.key, model.upstream, model.overrides, compat, {}, connection)
         return { model, resolved, haystack: `${resolved.name.value}\n${model.key}`.toLowerCase() }
       }),
-    [models, compat]
+    [models, compat, connection]
   )
   const matching = useMemo(
     () => (needle === "" ? rows : rows.filter((row) => row.haystack.includes(needle))),

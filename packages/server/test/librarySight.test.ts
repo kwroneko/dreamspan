@@ -100,7 +100,10 @@ const setup = (tasks: Record<string, ReadonlyArray<Step>>) =>
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: {}
+    })
     const user = yield* api.Whoami()
     // Someone else in the library: outside every workshop's view.
     yield* (yield* Writer).CreateEntity({
