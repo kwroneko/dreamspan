@@ -121,6 +121,7 @@ export function MessageList({
   onBranch,
   onOpenSummaries,
   restore,
+  beforeComposerSubmit,
   embedded = false
 }: {
   session: ChatSession
@@ -135,6 +136,7 @@ export function MessageList({
   rail: boolean
   onBranch: (entry: PathEntry, index: number) => void
   onOpenSummaries: (focus: string | null) => void
+  beforeComposerSubmit?: RefObject<(() => void) | null>
 }) {
   // TanStack Virtual's instance is mutable, which React Compiler's memoization can't see.
   "use no memo"
@@ -146,6 +148,7 @@ export function MessageList({
   const settled = useRef(false)
   const saveReading = useRef<(() => void) | null>(null)
   const flushInput = useRef<(() => void) | null>(null)
+  const stopLinkReveal = useRef<(() => void) | null>(null)
   const tab = useWorkbenchTab()
   const { entries } = view
   const { prefs } = useViewPrefs()
@@ -341,6 +344,19 @@ export function MessageList({
     },
     [follow, keepEnd, session, syncPinning]
   )
+  useLayoutEffect(() => {
+    if (!beforeComposerSubmit) return
+    beforeComposerSubmit.current = () => {
+      const list = parent.current
+      if (list === null || !settled.current || session.snapshot().newer !== null || !atNativeEnd(list)) return
+      stopLinkReveal.current?.()
+      flushInput.current?.()
+      finishScrollInput(true, true)
+    }
+    return () => {
+      beforeComposerSubmit.current = null
+    }
+  }, [beforeComposerSubmit, finishScrollInput, session])
 
   // The virtualizer learns the list's offset through its scroll observer. When the browser clamps
   // an offset it set to where the list already is (the estimated start in a history too short
@@ -592,20 +608,20 @@ export function MessageList({
       })
     }
     const stop = () => {
+      if (stopLinkReveal.current !== stop) return
+      stopLinkReveal.current = null
       cancelAnimationFrame(frame)
       virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
       observer.disconnect()
       for (const event of inputs) list.removeEventListener(event, stop)
     }
     const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    stopLinkReveal.current = stop
     for (const event of inputs) list.addEventListener(event, stop, { passive: true })
     const observer = new MutationObserver(reveal)
     observer.observe(list, { childList: true, subtree: true })
     reveal()
-    return () => {
-      stop()
-      cancelAnimationFrame(frame)
-    }
+    return stop
   }, [anchor, restore, summaries, view.opened, virtualizer])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
@@ -773,7 +789,7 @@ export function MessageList({
           ref={parent}
           data-testid={embedded ? "side-chat-messages" : "messages"}
           data-chat-density={spacing}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] [&::-webkit-scrollbar-thumb]:h-4"
         >
           <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
             {showRail && (
@@ -911,6 +927,8 @@ function ChatSurface({
   draft: DraftHost | null
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const beforeComposerSubmit = useRef<(() => void) | null>(null)
+  const onBeforeSubmit = useCallback(() => beforeComposerSubmit.current?.(), [])
   // A new chat's page hands over to the chat's own once its first turn started it.
   const started = view.chat !== null && view.chat.status !== "pending"
   useEffect(() => {
@@ -1167,13 +1185,14 @@ function ChatSurface({
                 jump={reading ? null : slot}
                 flashes={flashes}
                 restore={reading}
+                beforeComposerSubmit={beforeComposerSubmit}
                 rail={rail}
                 onBranch={switchBranch}
                 onOpenSummaries={openSummaries}
               />
             )}
             <SlotOutlet slot={chatComposerNotes} props={{ view, session }} />
-            <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show }} />
+            <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show, onBeforeSubmit }} />
             <SlotOutlet slot={chatOverlays} props={{ session, view }} />
           </div>
           {/* Mounted only while open: the surface re-renders with every page of history. */}

@@ -158,6 +158,8 @@ scrollbarTest.describe("native scrollbar", () => {
       `releasing the scrollbar short of the end keeps the reading position at ${width}px`,
       async ({ page }) => {
         const { list, fromEnd } = await openHistory(page, width, true, 14)
+        // The fixture has no model. Its asynchronous composer notice shortens the scrollport.
+        await expect(page.getByText("No model chosen", { exact: true })).toBeVisible()
         await page.evaluate(async () => {
           await document.fonts.ready
         })

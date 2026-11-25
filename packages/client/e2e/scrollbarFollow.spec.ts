@@ -67,9 +67,10 @@ const test = base.extend<{
 })
 
 test.skip(({ browserName }) => browserName !== "chromium", "Uses Chromium's native scrollbar thumb")
-test.use({ viewport: { width: Number(process.env.FOLLOW_TEST_WIDTH ?? 1440), height: 850 } })
+const viewportWidth = Number(process.env.FOLLOW_TEST_WIDTH ?? 1440)
+test.use({ viewport: { width: viewportWidth, height: 850 } })
 
-const openStream = async (page: Page, baseUrl: string, initialParagraphs = 40) => {
+const openStream = async (page: Page, baseUrl: string, initialParagraphs = 40, fromHome = false) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const { chatId, lastSlot, otherId } = await asPage(page, server(), (api) =>
     Effect.gen(function* () {
@@ -101,7 +102,14 @@ const openStream = async (page: Page, baseUrl: string, initialParagraphs = 40) =
       return { chatId: chat.id, lastSlot: sent.entry.slotId, otherId: other.id }
     })
   )
-  await page.goto(`${server().url}/chats/${chatId}`)
+  if (fromHome) {
+    await page.goto(server().url)
+    if (page.viewportSize()?.width === 390)
+      await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+    await page.locator(`a[data-chat-id="${chatId}"]:visible`).click()
+  } else {
+    await page.goto(`${server().url}/chats/${chatId}`)
+  }
   const list = page.getByTestId("messages")
   await expect(list.getByText("Keep watch.")).toBeVisible()
   await asPage(page, server(), (api) => api.Generate({ chatId, parentSlotId: lastSlot, branch: false }))
@@ -214,7 +222,7 @@ test("releasing the thumb at the fractional native end follows at 80% zoom and d
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
     ignoreDefaultArgs: ["--hide-scrollbars"],
-    viewport: { width: Number(process.env.FOLLOW_TEST_WIDTH ?? 1440), height: 850 },
+    viewport: { width: viewportWidth, height: 850 },
     deviceScaleFactor: 2
   })
   try {
@@ -286,6 +294,108 @@ test("Back restores a short scrollbar release while the reply grows in another c
 })
 
 const endMarker = (page: Page) => page.evaluate(() => history.state?.chatReading?.slot)
+
+test("fp6 #1: a native scrollbar track click keeps its place when a reply grows on press", async ({
+  page,
+  provider
+}) => {
+  const { list, reply, fromEnd } = await openStream(page, provider.baseUrl)
+  await expect.poll(() => endMarker(page)).toBeNull()
+  const track = await list.evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    node.addEventListener(
+      "pointerdown",
+      () => {
+        // Deliver reply growth between the app's pointerdown and the native page scroll.
+        const before = node.scrollHeight
+        const content = node.firstElementChild as HTMLElement
+        content.style.height = `${content.offsetHeight + 16}px`
+        node.dataset.growthOnPress = String(node.scrollHeight - before)
+      },
+      { once: true }
+    )
+    return { x: box.right - 4, y: box.top + box.height / 5, gutter: box.width - node.clientWidth }
+  })
+  expect(track.gutter).toBeGreaterThan(4)
+  await page.mouse.click(track.x, track.y)
+  await expect(list).toHaveAttribute("data-growth-on-press", "16")
+  await expect.poll(fromEnd).toBeGreaterThan(200)
+  await expect.poll(() => endMarker(page)).toBe(await reply.getAttribute("data-slot"))
+  const offset = await list.evaluate((node) => node.scrollTop)
+
+  provider.append(41, 70)
+  await expect(reply).toContainText(paragraph(70))
+  await expect.poll(() => list.evaluate((node) => node.scrollTop)).toBeCloseTo(offset, 0)
+  expect(await fromEnd()).toBeGreaterThan(200)
+})
+
+test("fp6 #2: browser Forward restores a wheel movement immediately followed by Back to Home", async ({
+  page,
+  provider
+}) => {
+  const { chatId, list, reply, fromEnd } = await openStream(page, provider.baseUrl, 40, true)
+  await expect.poll(() => endMarker(page)).toBeNull()
+  await list.hover()
+  const outgoing = await list.evaluateHandle((node) => ({
+    captured: new Promise<{ offset: number; slot: string | null }>((resolve) => {
+      const back = () => {
+        if (node.scrollHeight - node.clientHeight - node.scrollTop < 200) return
+        node.removeEventListener("scroll", back)
+        const reply = node.querySelector('article[aria-label="Reply"]')!
+        resolve({
+          offset: reply.getBoundingClientRect().top - node.getBoundingClientRect().top,
+          slot: history.state?.chatReading?.slot
+        })
+        // Start the browser traversal on the wheel's own scroll, before the reading save.
+        history.back()
+      }
+      node.addEventListener("scroll", back)
+    })
+  }))
+  await page.mouse.wheel(0, -320)
+  await expect(page).toHaveURL((url) => url.pathname === "/")
+  const before = await outgoing.evaluate((reading) => reading.captured)
+  expect(before.slot).toBeNull()
+
+  provider.append(41, 100)
+  provider.finish()
+  await page.goForward()
+  await expect(page).toHaveURL(new RegExp(`/chats/${chatId}`))
+  await expect(reply).toContainText(paragraph(100))
+  await expect.poll(fromEnd).toBeGreaterThan(200)
+  await expect
+    .poll(() =>
+      reply.evaluate(
+        (node) =>
+          node.getBoundingClientRect().top - node.closest('[data-testid="messages"]')!.getBoundingClientRect().top
+      )
+    )
+    .toBeCloseTo(before.offset, 0)
+})
+
+test.describe("latest message link", () => {
+  const initialParagraphs = 12
+  // Keep the end visible even after the composer and its footer finish laying out.
+  test.use({ initialParagraphs, viewport: { width: viewportWidth, height: 1000 } })
+
+  test("fp6 #3: Send follows a new reply from a message link with the end visible", async ({ page, provider }) => {
+    const { chatId, list, reply, fromEnd } = await openStream(page, provider.baseUrl, initialParagraphs)
+    provider.finish()
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+    const slot = await reply.getAttribute("data-slot")
+    await page.goto(`${server().url}/chats/${chatId}?slot=${slot}`)
+    await expect(reply.getByText(paragraph(initialParagraphs), { exact: true })).toBeInViewport()
+    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill("Check the next light.")
+    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+
+    const next = list.getByRole("article", { name: "Reply" }).last()
+    await expect(next).toContainText(paragraph(60))
+    await expect.poll(fromEnd).toBeLessThanOrEqual(2)
+    await expect(next.getByText(paragraph(60), { exact: true })).toBeInViewport()
+  })
+})
 
 test("fp5 #1: a wheel toward the end ignores a transient layout clamp", async ({ page, provider }) => {
   const { list, reply, fromEnd } = await openStream(page, provider.baseUrl)

@@ -367,16 +367,19 @@ export class WorkbenchStore {
     }
   }
 
-  private flushEntry(tabId: string) {
+  private flushEntry(tabId: string, mirror = true) {
     const save = this.entrySaves.get(tabId)
     if (!save) return
     const shellChange = this.shellChange
+    const applying = this.applying
     this.shellChange = null
+    this.applying ||= !mirror
     try {
       save()
       // A push in the same task would otherwise coalesce this replacement into the new entry.
-      if (focusedTab(this.layout)?.id === tabId) this.browser.flush()
+      if (mirror && focusedTab(this.layout)?.id === tabId) this.browser.flush()
     } finally {
+      this.applying = applying
       this.shellChange = shellChange
     }
   }
@@ -583,6 +586,8 @@ export class WorkbenchStore {
   private fromBrowser(browserHref: string, state: HistoryState, action: Action, traversal: number) {
     const href = withoutLayoutParams(browserHref)
     const focused = focusedTab(this.layout)
+    // The browser has already moved. Only the outgoing tab history still shows the entry to save.
+    if (traversal && focused) this.flushEntry(focused.id, false)
     if (focused && itemKey(focused.href) === itemKey(href)) {
       // The tab first, so the browser's URL (Back's place) isn't copied back over it.
       if (!traversal || !this.traverse(focused.id, href, traversal)) this.apply(focused.id, href, state, action)

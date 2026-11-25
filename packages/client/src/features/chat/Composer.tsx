@@ -267,11 +267,13 @@ export function Composer({
   session,
   view,
   onSettings,
+  onBeforeSubmit,
   attachmentInput
 }: {
   session: ChatSession
   view: ChatView
   onSettings: (tab: "model" | "preset" | "cast") => void
+  onBeforeSubmit?: () => void
   attachmentInput?: AttachmentInput
 }) {
   const { compact: phone, ref: composerRef } = useCompactComposer()
@@ -524,6 +526,7 @@ export function Composer({
    */
   const submit = async (run: (from: ComposerSource) => Promise<Sent>) => {
     if (busy || !ready) return
+    onBeforeSubmit?.()
     setBusy(true)
     await draft.submit((from) => {
       if (from.fork !== session.snapshot().forkId) {
@@ -599,6 +602,7 @@ export function Composer({
   // With nothing typed, Send asks for the reply alone, as an empty send does in ST.
   const replyNow = async () => {
     if (busy || !ready || replier === null || choice.draftId === null) return
+    onBeforeSubmit?.()
     setBusy(true)
     const outcome = await session.generate(
       session.snapshot().leafSlotId,
@@ -634,6 +638,7 @@ export function Composer({
       if (outcome === undefined) return
       report(outcome)
     } else {
+      onBeforeSubmit?.()
       setBusy(true)
       outcome = await session.generate(session.snapshot().leafSlotId, speaker)
       report(outcome)

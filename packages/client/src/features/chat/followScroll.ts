@@ -7,6 +7,19 @@ export const atNativeEnd = (list: HTMLElement) => scrollRange(list) - list.scrol
 
 type Direction = -1 | 0 | 1
 
+const trackDirection = (list: HTMLElement, event: PointerEvent, range: number): Direction => {
+  if (range <= NATIVE_END_PX) return 0
+  // The chat scrollbar has no buttons and sets a minimum thumb length. The native thumb
+  // occupies the visible fraction of the track, subject to that minimum.
+  const minimum = Number.parseFloat(getComputedStyle(list, "::-webkit-scrollbar-thumb").height)
+  if (!Number.isFinite(minimum)) return 0
+  const height = list.clientHeight
+  const length = Math.min(height, Math.max(minimum, Math.round((height * height) / list.scrollHeight)))
+  const progress = Math.min(1, Math.max(0, list.scrollTop / range))
+  const top = Math.floor((height - length) * progress)
+  return event.offsetY < top ? -1 : event.offsetY >= top + length ? 1 : 0
+}
+
 interface ScrollInput {
   offset: number
   atEnd: boolean
@@ -29,7 +42,10 @@ export function trackScrollInput(
   }
 ) {
   let input: ScrollInput | null = null
-  let thumb: { id: number; y: number; rangeAtPress: number; rangeAtMove: number; movedAt: number } | null = null
+  let scrollbar: {
+    id: number
+    thumb: { y: number; rangeAtPress: number; rangeAtMove: number; movedAt: number } | null
+  } | null = null
   let selection: { id: number; y: number } | null = null
   let middle: { id: number; y: number; released: boolean; dragged: boolean } | null = null
   let touchY: number | null = null
@@ -53,7 +69,8 @@ export function trackScrollInput(
     const delta = offset - Math.min(input.offset, range)
     // Chromium can move a stationary thumb after a resize. Raw pointer motion still
     // arrives when the native drag consumes pointermove.
-    if (thumb !== null && rawPointer) {
+    const thumb = scrollbar?.thumb
+    if (thumb && rawPointer) {
       const moved = performance.now() - thumb.movedAt <= SCROLL_IDLE_MS
       if (range !== thumb.rangeAtPress && !moved) return false
       // A stream may extend the range between the thumb's movement and its scroll event.
@@ -79,7 +96,7 @@ export function trackScrollInput(
   }
   const waitForScroll = () => {
     clearTimeout(timer)
-    if (thumb === null && selection === null && middle === null && touchY === null) {
+    if (scrollbar === null && selection === null && middle === null && touchY === null) {
       timer = setTimeout(finish, SCROLL_IDLE_MS)
     }
   }
@@ -125,15 +142,22 @@ export function trackScrollInput(
       start(0, following() || atNativeEnd(list))
     } else if (event.button === 0 && event.target === list && event.offsetX >= list.clientWidth) {
       const range = scrollRange(list)
-      thumb = { id: event.pointerId, y: event.clientY, rangeAtPress: range, rangeAtMove: range, movedAt: -Infinity }
-      start(0, following() || atNativeEnd(list))
+      const direction = rawPointer ? trackDirection(list, event, range) : 0
+      scrollbar = {
+        id: event.pointerId,
+        thumb:
+          direction === 0 ? { y: event.clientY, rangeAtPress: range, rangeAtMove: range, movedAt: -Infinity } : null
+      }
+      start(direction, following() || atNativeEnd(list))
+      waitForScroll()
     } else if (event.button === 0) {
       selection = { id: event.pointerId, y: event.clientY }
     }
   }
   const onPointerMove = (event: Event) => {
     if (!(event instanceof PointerEvent)) return
-    if (thumb?.id === event.pointerId && thumb.y !== event.clientY) {
+    const thumb = scrollbar?.id === event.pointerId ? scrollbar.thumb : null
+    if (thumb && thumb.y !== event.clientY) {
       if (input !== null) input.direction = event.clientY < thumb.y ? -1 : 1
       thumb.y = event.clientY
       thumb.rangeAtMove = scrollRange(list)
@@ -161,9 +185,11 @@ export function trackScrollInput(
       if (middle.released || middle.dragged || event.type === "pointercancel") endMiddle()
       else if (event.button === 1) middle.released = true
     }
-    if (thumb?.id === event.pointerId) {
-      finish()
-      thumb = null
+    if (scrollbar?.id === event.pointerId) {
+      if (scrollbar.thumb !== null) finish()
+      scrollbar = null
+      // Native page scrolling from a track press can still be in flight on release.
+      if (input !== null) waitForScroll()
     }
     if (selection?.id === event.pointerId) {
       selection = null
