@@ -103,6 +103,8 @@ const ImageTokenBasis = Schema.Literals(["counted", "formula", "calibrated", "un
 
 /** One sent image's token estimate, as the context view shows it. */
 export const ContextImage = Schema.Struct({
+  /** The stored image the request used, for showing it where it was sent. */
+  mediaId: Schema.String,
   /** Null when unknown; the budget then counts `bound`, or a reserve. */
   tokens: Schema.NullOr(Schema.Int),
   basis: ImageTokenBasis,

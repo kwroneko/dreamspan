@@ -158,6 +158,7 @@ const uncountedImages = (request: Pick<AssembledRequest, "messages">) => {
 export const contextImage = (image: RequestImage): ContextImage => {
   const estimate = image.estimate ?? { tokens: null, basis: "unknown" as const }
   return {
+    mediaId: image.mediaId,
     tokens: estimate.tokens,
     basis: estimate.basis,
     budgeted: budgetTokens(estimate),
