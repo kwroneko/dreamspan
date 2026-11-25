@@ -9,13 +9,14 @@
 // `reasoningPanels` slot. While a reply is being written, everything after a complete opening
 // tag streams into that panel, and its header reads "Thinking…" (pulsing) until the closing
 // tag has come and the body starts (owner, 2026-11-02); open or folded as the user prefers.
+// It opens on its own only after streaming a while and folds a while after the reply (autoOpen.ts).
 // The thinking's own editor (editThinking.tsx) opens in place of the panel's text.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
 import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
 import { sectionsDisplay, sectionUnclosed } from "@dreamspan/shared/replySections.ts"
-import { useId, useState, useSyncExternalStore } from "react"
+import { useId, useRef, useState, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { MessageBody } from "../../ui/messageCopy.tsx"
@@ -25,6 +26,7 @@ import { collapseCount, subscribeCollapses } from "./reasoningActions.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { liveReasoning, liveSections, liveText, type ChatSession } from "./session.ts"
 import { ThinkingEditor, thinkingPanel, useThinkingEditor } from "./editThinking.tsx"
+import { useAutoOpen } from "./autoOpen.ts"
 import type { MessageDraft } from "./messageDraft.ts"
 import { useDisplayed } from "./useDisplayed.ts"
 
@@ -67,6 +69,7 @@ function Reasoning({ version, session, hiddenThinking, parentSlotId, depth }: Pa
       first
       label={text === "" ? "Thinking" : "Reasoning"}
       thinking={body === ""}
+      body={body}
       editor={editing ? editor : undefined}
     />
   )
@@ -100,6 +103,7 @@ function ReplySections({ version, session, hiddenThinking, parentSlotId, depth }
       label="Thinking in the reply"
       streamingLabel={thinking ? "Thinking…" : "Thinking in the reply"}
       thinking={thinking}
+      body={body}
       editor={editing ? editor : undefined}
       notice={
         !streaming && sectionUnclosed(version.replySections)
@@ -134,8 +138,11 @@ function ReasoningBlock({
   streamingLabel = `${label}…`,
   thinking = streaming,
   notice = null,
+  body,
   editor
 }: PanelProps & {
+  /** The reply's text beside this panel: when it starts after the thinking, the thinking is over. */
+  body: string
   /** The thinking's editor (editThinking.tsx), open: shown in place of the text. */
   editor?: MessageDraft | undefined
   text: string
@@ -167,9 +174,15 @@ function ReasoningBlock({
     setSeen(collapsed)
     setChosen({ open: false, streaming })
   }
-  const open =
-    editor !== undefined ||
-    (chosen !== null && chosen.streaming === streaming ? chosen.open : streaming && preferred === "expanded")
+  // Without a choice, it opens on its own only once the thinking has streamed a while, and folds a
+  // while after the reply is done, so short thinking never flashes (autoOpen.ts).
+  // Thinking is live while it is the last thing written: the reply's text has not started after it.
+  const order = useRef({ seq: 0, text, textAt: 0, body, bodyAt: 0 })
+  const written = order.current
+  if (written.text !== text) [written.text, written.textAt] = [text, ++written.seq]
+  if (written.body !== body) [written.body, written.bodyAt] = [body, ++written.seq]
+  const auto = useAutoOpen(streaming, written.bodyAt <= written.textAt, preferred === "expanded")
+  const open = editor !== undefined || (chosen !== null && chosen.streaming === streaming ? chosen.open : auto)
 
   // What a click does, on hover and focus (DESIGN: every action explains itself).
   const hint = editor
