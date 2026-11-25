@@ -22,6 +22,9 @@ import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
 import type { Reader, Writer } from "../../db/Database.ts"
 import { isMediaPath } from "../../db/media.ts"
 import { storeMedia } from "../../importer/mediaFiles.ts"
+import { describeImage } from "../../importer/images.ts"
+import { prepareAvatarThumbnails } from "../../importer/prepareThumbnails.ts"
+import type { PortraitSource } from "../portraits.ts"
 import {
   FilePathRefused,
   listFolder,
@@ -234,6 +237,9 @@ const VERSION_MAX_BYTES = 16 * 2 ** 20
 const VERSIONS_PER_COMMAND = 256 * 2 ** 20
 /** What one bash_output call gives of a background command's new output. */
 const SINCE_BYTES = 64 * 1024
+/** What a portrait may be, as the editor's Replace picture takes it. */
+const PORTRAIT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+const PORTRAIT_MAX_BYTES = 16 * 2 ** 20
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -1173,6 +1179,62 @@ export const makeFileTools = (deps: FileToolDeps) => {
         return { full, effects: done.effects }
       })
   })
+
+  // --- a card's portrait from an image (create_card / edit_card `portrait`, agent/portraits.ts)
+  const portraits: PortraitSource = {
+    id: "files",
+    apply: (ctx, path, commit) =>
+      Effect.gen(function* () {
+        // Only the Files switch is checked: the call itself is what the user approved.
+        const grants = yield* ctx.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })
+        if (grants.some((grant) => grant.capability === "files" && grant.mode === "off"))
+          return yield* Effect.fail(
+            new FilePathRefused("Files are off in this workshop, so the picture can't be read.")
+          )
+        const env = accountEnv(deps, ctx.userId)
+        yield* attempt(() => prepareAccount(env))
+        const place = yield* readPlace(ctx, env, path)
+        const read = yield* attempt(() => readRegularFile(place.hostRoot, place.segments, PORTRAIT_MAX_BYTES))
+        if (read.truncated)
+          return yield* Effect.fail(
+            new FilePathRefused(
+              `${place.full} is larger than ${PORTRAIT_MAX_BYTES / 2 ** 20} MiB, too big for a portrait.`
+            )
+          )
+        const bytes = read.bytes
+        const image = describeImage(bytes)
+        if (!PORTRAIT_TYPES.has(image.mime))
+          return yield* Effect.fail(
+            new FilePathRefused(
+              `${place.full} isn't a PNG, JPEG, GIF or WebP image, so it can't be a portrait. Read the path with read_file to check what it is.`
+            )
+          )
+        if (deps.formats && !(yield* deps.formats.validateImage(bytes)))
+          return yield* Effect.fail(
+            new FilePathRefused(`${place.full} couldn't be decoded as an image (it may be damaged or too large).`)
+          )
+        const media = { sha256: sha256(bytes), byteSize: bytes.byteLength, ...image }
+        const done = yield* deps.holding(
+          [media.sha256],
+          Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit(media))
+        )
+        // The thumbnails of the default cutout, as the editor's Replace picture makes them.
+        if (deps.formats)
+          yield* prepareAvatarThumbnails(deps.formats, deps.dataDir, [{ role: "avatar", sha256: media.sha256 }])
+        return done
+      }).pipe(
+        Effect.catchCause((cause) => {
+          const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
+          const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
+          // The card write's own refusals keep their shape; file problems become plain text.
+          return Effect.fail(
+            (value as { _tag?: string } | undefined)?._tag !== undefined || value instanceof FilePathRefused
+              ? (value as Error)
+              : new FilePathRefused(refusedText(value))
+          )
+        })
+      ) as never
+  }
 
   // --- export_to_file
   const exportTool = makeLibraryExportTool({
@@ -2723,6 +2785,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
       outputTool,
       stopTool
     ] as unknown as ReadonlyArray<RolloutTool<never>>,
+    portraits,
     undoEffect,
     reverseCardFile,
     commandsUnavailable,

@@ -19,6 +19,7 @@ import { findRevision } from "./versions.ts"
 import { changedUnits, pickedUnits, planReversal, unitName, unitPath } from "@dreamspan/shared/changeReversal.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
 import { classOfKind } from "../capabilities.ts"
+import type { PortraitMedia } from "../portraits.ts"
 
 const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
   ...tool,
@@ -138,6 +139,28 @@ const message = Type.Optional(
   Type.String({ maxLength: 200, description: "The revision's message: what this change is, in a short line." })
 )
 const given = (value: string | undefined) => (value === undefined ? {} : { message: value })
+/**
+ * A card's portrait, from an image the agent can read (a message attachment's /attachments/<id>,
+ * or a path in the files): set as the card editor's Replace picture sets it.
+ */
+const portrait = Type.Optional(
+  Type.String({
+    minLength: 1,
+    maxLength: 4096,
+    description:
+      "A picture for the card's portrait (avatar): a path you can read with read_file, such as a message attachment's /attachments/<id> or a /files path. PNG, JPEG, GIF or WebP. Replaces the portrait, with the default cutout."
+  })
+)
+/** Sets the portrait while `save` writes the card, or refuses before anything is written. */
+const withPortrait = <A, E>(
+  ctx: ToolContext,
+  path: string | undefined,
+  save: (media?: PortraitMedia) => Effect.Effect<A, E>
+): Effect.Effect<A, E | { readonly message: string } | Error> => {
+  if (path === undefined) return save()
+  if (!ctx.portraits) return Effect.fail({ message: "A portrait can't be set from an image here." })
+  return ctx.portraits.apply(ctx, path, (media) => save(media))
+}
 const cardFields = {
   nickname: Type.Optional(shortText),
   description: Type.Optional(text),
@@ -163,6 +186,7 @@ interface CreateArgs {
   readonly tags?: ReadonlyArray<string>
   readonly persona?: boolean
   readonly message?: string
+  readonly portrait?: string
 }
 const createCard: RolloutTool<CreateArgs> = {
   source: import.meta.url,
@@ -174,8 +198,8 @@ const createCard: RolloutTool<CreateArgs> = {
   effect: "library",
   capability: "library.write",
   description:
-    "Creates a card in the library, with one agent revision. Use first_message for her greeting. Returns its library and entity ids. Undo moves it to the bin if untouched.",
-  parameters: Type.Object({ name, ...cardFields, message }, strict),
+    "Creates a card in the library, with one agent revision. Use first_message for her greeting. portrait sets the card's picture from an image you can read (an attachment's /attachments/<id> or a /files path; PNG, JPEG, GIF or WebP). Returns its library and entity ids. Undo moves it to the bin if untouched.",
+  parameters: Type.Object({ name, ...cardFields, portrait, message }, strict),
   summarize: ({ name }) => name,
   describe: (_ctx, args) =>
     Effect.succeed({ title: `Create the card “${args.name}”`, rows: rowsOf(args, ["name", "message"]) }),
@@ -186,27 +210,30 @@ const createCard: RolloutTool<CreateArgs> = {
           isError: true
         })
       : safely(
-          ctx.writer
-            .AgentCreateEntity({
-              ...key(ctx),
-              kind: "card",
-              label: args.name,
-              doc: {
-                ...newCardDoc(args.name),
-                nickname: args.nickname ?? "",
-                description: args.description ?? "",
-                personality: args.personality ?? "",
-                scenario: args.scenario ?? "",
-                first_mes: args.first_message ?? "",
-                alternate_greetings: args.alternate_greetings ?? [],
-                mes_example: args.example_messages ?? "",
-                system_prompt: args.system_prompt ?? "",
-                tags: args.tags ?? []
-              },
-              tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])],
-              ...given(args.message)
-            })
-            .pipe(Effect.map((text) => ({ text })))
+          withPortrait(ctx, args.portrait, (media) =>
+            ctx.writer
+              .AgentCreateEntity({
+                ...key(ctx),
+                ...(media ? { portrait: media } : {}),
+                kind: "card",
+                label: args.name,
+                doc: {
+                  ...newCardDoc(args.name),
+                  nickname: args.nickname ?? "",
+                  description: args.description ?? "",
+                  personality: args.personality ?? "",
+                  scenario: args.scenario ?? "",
+                  first_mes: args.first_message ?? "",
+                  alternate_greetings: args.alternate_greetings ?? [],
+                  mes_example: args.example_messages ?? "",
+                  system_prompt: args.system_prompt ?? "",
+                  tags: args.tags ?? []
+                },
+                tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])],
+                ...given(args.message)
+              })
+              .pipe(Effect.map((text) => ({ text })))
+          )
         )
 }
 const fields = [
@@ -268,12 +295,20 @@ const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
 }
 const editCard: RolloutTool<{
   readonly card: string
-  readonly changes: CardChanges
+  readonly changes?: CardChanges
+  readonly portrait?: string
   readonly message?: string
 }> = {
   source: import.meta.url,
   id: "edit_card",
-  validateArguments: validateCardSkillArguments,
+  validateArguments: (args) =>
+    validateCardSkillArguments(args) ??
+    (typeof args === "object" &&
+    args !== null &&
+    !("changes" in args && args.changes !== undefined) &&
+    !("portrait" in args && args.portrait !== undefined)
+      ? "Give changes, a portrait, or both."
+      : undefined),
   storyRead: "library",
   label: "Edited the card",
   titleField: "card",
@@ -281,25 +316,28 @@ const editCard: RolloutTool<{
   effect: "library",
   capability: "library.write",
   description:
-    'Edits a library card by name or id. Set a field with text, replace one exact find with replace, or set alternate_greetings with items. For field "skills", add takes skill, edit takes name and replacement skill, and remove takes name. A skill is {name, description, instructions, tools?} or {use} for an installed skill reference. Saves all changes together on the head read. Card-authored skill loads require approval for their exact content.',
+    'Edits a library card by name or id. Set a field with text, replace one exact find with replace, or set alternate_greetings with items. For field "skills", add takes skill, edit takes name and replacement skill, and remove takes name. A skill is {name, description, instructions, tools?} or {use} for an installed skill reference. portrait replaces the picture of the card from an image you can read (an attachment path /attachments/<id> or a /files path; PNG, JPEG, GIF or WebP), with the default cutout. Saves all changes together on the head read. Card-authored skill loads require approval for their exact content.',
   parameters: Type.Object(
     {
       card: name,
-      changes: Type.Array(
-        Type.Union([
-          Type.Object({ field: name, text }, strict),
-          Type.Object(
-            { field: name, find: Type.String({ minLength: 1, maxLength: limits.textChars }), replace: text },
-            strict
-          ),
-          Type.Object(
-            { field: Type.Literal("alternate_greetings"), items: Type.Array(text, { maxItems: limits.listItems }) },
-            strict
-          ),
-          cardSkillChange
-        ]),
-        { minItems: 1, maxItems: limits.listItems }
+      changes: Type.Optional(
+        Type.Array(
+          Type.Union([
+            Type.Object({ field: name, text }, strict),
+            Type.Object(
+              { field: name, find: Type.String({ minLength: 1, maxLength: limits.textChars }), replace: text },
+              strict
+            ),
+            Type.Object(
+              { field: Type.Literal("alternate_greetings"), items: Type.Array(text, { maxItems: limits.listItems }) },
+              strict
+            ),
+            cardSkillChange
+          ]),
+          { minItems: 1, maxItems: limits.listItems }
+        )
       ),
+      portrait,
       message
     },
     strict
@@ -313,7 +351,7 @@ const editCard: RolloutTool<{
       remember(ctx, "card", args.card, found.ref)
       const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: found.ref.id })
       ctx.cache.set(`approval:edit:${ctx.toolCallId}`, saved)
-      const result = changed(saved.doc, args.changes)
+      const result = changed(saved.doc, args.changes ?? [])
       const title = `Edit the card “${found.ref.label}”`
       if ("error" in result) return { title, rows: [{ label: "changes", value: result.error }] }
       const changes = Object.keys(result.doc)
@@ -322,6 +360,12 @@ const editCard: RolloutTool<{
       const greetings = [greetingsShown(saved.doc.alternate_greetings), greetingsShown(result.doc.alternate_greetings)]
       if (greetings[0] !== greetings[1])
         changes.push({ field: "alternate_greetings", before: greetings[0]!, after: greetings[1]! })
+      if (args.portrait !== undefined)
+        changes.push({
+          field: "portrait",
+          before: saved.doc.avatar_media_id ? "the current picture" : "no picture",
+          after: args.portrait
+        })
       return { title, rows: [], changes: [...changes, ...result.skillPreviews] }
     }),
   execute: (ctx, args) =>
@@ -333,16 +377,19 @@ const editCard: RolloutTool<{
           (ctx.cache.get(`approval:edit:${ctx.toolCallId}`) as
             Effect.Success<ReturnType<ToolContext["reader"]["OpenEditor"]>> | undefined) ??
           (yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id }))
-        const result = changed(saved.doc, args.changes)
+        const result = changed(saved.doc, args.changes ?? [])
         if ("error" in result) return { text: result.error, isError: true }
         const doc = result.doc
-        const text = yield* ctx.writer.AgentReviseEntity({
-          ...writing,
-          refId: ref.id,
-          expectedRowVersion: saved.ref.rowVersion,
-          doc,
-          ...given(args.message)
-        })
+        const text = yield* withPortrait(ctx, args.portrait, (media) =>
+          ctx.writer.AgentReviseEntity({
+            ...writing,
+            refId: ref.id,
+            expectedRowVersion: saved.ref.rowVersion,
+            doc,
+            ...(media ? { portrait: media } : {}),
+            ...given(args.message)
+          })
+        )
         return { text }
       })
     )

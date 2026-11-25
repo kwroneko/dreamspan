@@ -31,6 +31,7 @@ import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import type { TurnNote } from "./agent/turnNotes.ts"
 import type { PluginWorkingCopy } from "./agent/pluginWorkingCopies.ts"
+import type { PortraitSource } from "./agent/portraits.ts"
 import {
   builtinToolLoadingProfiles,
   builtinToolLoadingWires,
@@ -101,6 +102,8 @@ export class ExecutionRegistry extends Context.Service<
     readonly subagentWorkspaces: Registry<SubagentWorkspaces>
     /** Where plugin repositories get a working copy the agent's commands can change (agent/pluginWorkingCopies.ts); the first is used. */
     readonly pluginWorkingCopies: Registry<PluginWorkingCopy>
+    /** Where a card portrait is read from, for create_card and edit_card (agent/portraits.ts): the files host's. */
+    readonly portraitSources: Registry<PortraitSource>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -239,7 +242,8 @@ export class ExecutionRegistry extends Context.Service<
         turnNotes: makeRegistry<TurnNote>(),
         subagentTypes,
         subagentWorkspaces: makeRegistry<SubagentWorkspaces>(),
-        pluginWorkingCopies: makeRegistry<PluginWorkingCopy>()
+        pluginWorkingCopies: makeRegistry<PluginWorkingCopy>(),
+        portraitSources: makeRegistry<PortraitSource>()
       }
     })
   )
