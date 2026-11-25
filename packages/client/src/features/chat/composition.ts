@@ -37,12 +37,6 @@ const visible = (element: HTMLElement) =>
 export const compositionTarget = (): OwnVersionTarget | null =>
   used.find((item) => visible(item.element))?.target ?? null
 
-/**
- * Asks the chat's list to stop holding its end in view (ChatPage.tsx), as the user scrolling up
- * does: dispatched, bubbling, from inside the list, before a change that keeps a control in place.
- */
-export const LET_GO = "rp-chat-let-go"
-
 /** Text added to the end of a composition: a blank line after what's there, as Send text to snippet does. */
 export const appended = (current: string, text: string) => {
   const kept = current.replace(/\n*$/, "")

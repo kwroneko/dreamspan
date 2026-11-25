@@ -9,7 +9,7 @@ import type { PathEntry } from "@dreamspan/shared/chat.ts"
 import { EditorTextActions, type OwnVersionTarget } from "../../textActions.tsx"
 import { selectedSourceText } from "../../ui/messageCopy.tsx"
 import { keepInPlace } from "../../ui/reveal.ts"
-import { LET_GO, registerComposition } from "./composition.ts"
+import { registerComposition } from "./composition.ts"
 import type { MessageDraft } from "./messageDraft.ts"
 import { positionOf } from "./position.ts"
 
@@ -85,7 +85,6 @@ export function Composition({
   const keep = () => {
     const node = bar.current
     if (!node) return
-    node.dispatchEvent(new CustomEvent(LET_GO, { bubbles: true }))
     keepInPlace(node)
   }
   return (

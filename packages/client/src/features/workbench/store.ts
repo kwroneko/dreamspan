@@ -179,6 +179,7 @@ export class WorkbenchStore {
   private readonly tabHistories = new Map<string, TabHistory>()
   /** The place a tab's view names for the entry it shows (Home's search), for the hovers. */
   private readonly places = new Map<string, string>()
+  private readonly entrySaves = new Map<string, () => void>()
   private readonly historyListeners = new Set<() => void>()
   /** Tabs whose history changed since it was last written. */
   private readonly unwritten = new Set<string>()
@@ -237,6 +238,17 @@ export class WorkbenchStore {
 
   /** Follows the browser's history; the returned function stops. */
   start() {
+    // Sidebar actions can navigate through the browser router before the workbench sees the new URL.
+    const unblock = this.browser.block({
+      blockerFn: ({ currentLocation, nextLocation, action }) => {
+        if (action === "PUSH" && nextLocation.href !== currentLocation.href) {
+          const outgoing = focusedTab(this.layout)
+          if (outgoing) this.flushEntry(outgoing.id)
+        }
+        return false
+      },
+      enableBeforeUnload: false
+    })
     this.unsubscribe = this.browser.subscribe(({ location, action }) => {
       if (this.mirroring) return
       const traversal =
@@ -258,6 +270,7 @@ export class WorkbenchStore {
     window.addEventListener("pagehide", leave)
     return () => {
       window.removeEventListener("pagehide", leave)
+      unblock()
       this.unsubscribe?.()
       if (this.saveTimer) {
         clearTimeout(this.saveTimer)
@@ -345,6 +358,28 @@ export class WorkbenchStore {
   }
 
   // --- Each tab's history.
+
+  /** A view can save its own history state while the outgoing entry still exists. */
+  saveEntryOnLeave(tabId: string, save: () => void) {
+    this.entrySaves.set(tabId, save)
+    return () => {
+      if (this.entrySaves.get(tabId) === save) this.entrySaves.delete(tabId)
+    }
+  }
+
+  private flushEntry(tabId: string) {
+    const save = this.entrySaves.get(tabId)
+    if (!save) return
+    const shellChange = this.shellChange
+    this.shellChange = null
+    try {
+      save()
+      // A push in the same task would otherwise coalesce this replacement into the new entry.
+      if (focusedTab(this.layout)?.id === tabId) this.browser.flush()
+    } finally {
+      this.shellChange = shellChange
+    }
+  }
 
   /** A tab's router mounted with this history; the returned function forgets it. */
   attach(tabId: string, history: RouterHistory) {
@@ -453,6 +488,7 @@ export class WorkbenchStore {
     if (focusedTab(this.layout)?.id !== tabId) this.focusTab(tabId)
     // The tab's own subscriber takes it from here (fromTab): the tab's URL, and the browser's
     // replaced rather than pushed, so the browser's Back is as it was.
+    this.flushEntry(tabId)
     router.go(delta)
   }
 
@@ -478,7 +514,9 @@ export class WorkbenchStore {
   leaves(tabId: string, href: string, state: unknown, action: string) {
     if (this.applying) return false
     const tab = findTab(this.layout, tabId)
-    if (!tab || action !== "PUSH" || itemKey(href) === itemKey(tab.href)) return false
+    if (!tab || action !== "PUSH") return false
+    if (href !== tab.href) this.flushEntry(tabId)
+    if (itemKey(href) === itemKey(tab.href)) return false
     // A link in a tab opens in that tab's frame, never in another (VS Code opens in the group
     // clicked in): another frame showing the item keeps its place and scroll.
     const frame = frameOfTab(this.layout, tabId)
@@ -621,6 +659,8 @@ export class WorkbenchStore {
   ) {
     const href = withoutLayoutParams(link)
     const { state, mirror = "PUSH", affinity = true, near, traversal = 0, ...rest } = options
+    const outgoing = focusedTab(this.layout)
+    if (mirror === "PUSH" && outgoing && outgoing.href !== href) this.flushEntry(outgoing.id)
     const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, {
       ...rest,
       ...(affinity && this.wide() ? { affinity: affinityOf } : {}),

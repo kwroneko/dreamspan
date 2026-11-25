@@ -5,17 +5,17 @@
 // focused from the keyboard, its list scrolling to show it, smoothly or not). Scrolling inside
 // the menu itself never closes it.
 //
-// An open menu also says so on its trigger, bubbling (ANCHORED_POPUP): a list that scrolls by
+// An open menu also says so on its trigger, bubbling (ANCHORED_SCROLL): a list that scrolls by
 // itself, as a chat following a reply as it streams, holds still until the menu closes, so the
 // menu neither rides along with its row nor closes as the row leaves the view.
 import { type RefObject, useEffect, useRef } from "react"
 
-/** Dispatched on a menu's trigger when it opens so ancestors can listen for its close. */
-export const ANCHORED_POPUP = "rp-anchored-popup"
+/** Dispatched while a control holds its position in a scrolling ancestor. */
+export const ANCHORED_SCROLL = "rp-anchored-scroll"
 
-export class AnchoredPopupEvent extends CustomEvent<(listener: () => void) => void> {
-  constructor(onClose: (listener: () => void) => void) {
-    super(ANCHORED_POPUP, { bubbles: true, detail: onClose })
+export class AnchoredScrollEvent extends CustomEvent<(listener: () => void) => void> {
+  constructor(onRelease: (listener: () => void) => void) {
+    super(ANCHORED_SCROLL, { bubbles: true, detail: onRelease })
   }
 }
 
@@ -40,7 +40,7 @@ export function useCloseOnAnchorScroll(open: boolean, trigger: RefObject<HTMLEle
     const anchor = trigger.current
     if (!open || anchor === null) return
     const closeListeners: Array<() => void> = []
-    anchor.dispatchEvent(new AnchoredPopupEvent((listener) => closeListeners.push(listener)))
+    anchor.dispatchEvent(new AnchoredScrollEvent((listener) => closeListeners.push(listener)))
     // The least clipping seen in each scroller since the menu opened.
     const hidden = new Map<Element, number>()
     const row = anchor.getBoundingClientRect()

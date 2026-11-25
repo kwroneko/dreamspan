@@ -22,7 +22,7 @@ import { FinishMeantTitle, meantTitle } from "./meantTitle.tsx"
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, ForkId, PathEntry, SlotId } from "@dreamspan/shared/chat.ts"
-import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { type RouterHistory, useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { elementScroll, observeElementOffset, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import {
   type RefObject,
@@ -43,7 +43,7 @@ import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { useLookingAt } from "../notices.tsx"
-import { useSidePanelPlace, useTabFocused, useTabMeta } from "../workbench/tab.tsx"
+import { useSidePanelPlace, useTabFocused, useTabMeta, useWorkbenchTab } from "../workbench/tab.tsx"
 import { tabPortrait } from "./tabPortrait.tsx"
 import { useChatPicture } from "./splitChats.ts"
 import { useSession } from "../../session.ts"
@@ -63,14 +63,14 @@ import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { ANCHORED_POPUP, AnchoredPopupEvent } from "../../ui/anchorScroll.ts"
+import { ANCHORED_SCROLL, AnchoredScrollEvent } from "../../ui/anchorScroll.ts"
 import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
 import { historyLines } from "./historyLines.ts"
-import { LET_GO } from "./composition.ts"
+import { atNativeEnd, NATIVE_END_PX, trackScrollInput } from "./followScroll.ts"
 import { flashWhenShown } from "./jumpFlash.ts"
 import { kindRootProps, summarizes, useChatKindLook } from "./kindLooks.ts"
 import { composerChoice } from "./speaker.ts"
@@ -80,6 +80,14 @@ interface ReadingPosition {
   slot: SlotId | null
   offset: number
 }
+const readingAt = (reading: ReadingPosition | undefined, userId: string, chatId: ChatId, fork: ForkId | null) =>
+  fork !== null &&
+  reading?.key === `${userId}/${chatId}/${fork}` &&
+  (reading.slot === null || (typeof reading.slot === "string" && reading.slot.length > 0)) &&
+  Number.isFinite(reading.offset)
+    ? reading
+    : null
+
 declare module "@tanstack/react-router" {
   interface HistoryState {
     chatReading?: ReadingPosition | undefined
@@ -94,13 +102,6 @@ export interface Flashes {
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
-/** Allow for rounding when comparing the native scroll offset with the end. */
-const NATIVE_END_PX = 2
-/** Wheel, key and touch scrolling settle once their events go quiet. */
-const SCROLL_IDLE_MS = 120
-
-const atNativeEnd = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight <= NATIVE_END_PX
-
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
   reason: "Summarized: a summary stands in for this message in the context."
@@ -140,19 +141,12 @@ export function MessageList({
   const parent = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const userId = useSession().user.id
-  const restored = useRef(false)
   const positioned = useRef(0)
   /** Paging waits until a new window is positioned: before that, the list renders from its top. */
   const settled = useRef(false)
-  /** Whether the list stays at the end as messages grow or arrive (below). */
-  const [follow] = useState(() => ({
-    stuck: true,
-    menus: 0,
-    get pinned(): boolean {
-      return this.stuck && this.menus === 0
-    }
-  }))
   const saveReading = useRef<(() => void) | null>(null)
+  const flushInput = useRef<(() => void) | null>(null)
+  const tab = useWorkbenchTab()
   const { entries } = view
   const { prefs } = useViewPrefs()
   // The spacing shown follows the account's choice one commit later, once what's being read
@@ -240,6 +234,27 @@ export function MessageList({
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
     rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
+  const requested =
+    restore !== null ? restore.slot : (anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null))
+  const requestedEntry = requested === null ? -1 : entries.findIndex((entry) => entry.slotId === requested)
+  const requestedRow =
+    requested === null
+      ? -1
+      : requestedEntry >= 0
+        ? rowOf(requestedEntry)
+        : rows.findIndex((row) => row.key === requested || row.lastSlotId === requested)
+  // A newly opened window starts at its destination. Only input completion updates that window's choice.
+  const newFollow = () => ({
+    opened: view.opened,
+    on: requestedRow < 0 && view.newer === null,
+    moving: false,
+    anchors: 0,
+    get pinned(): boolean {
+      return this.on && !this.moving && this.anchors === 0
+    }
+  })
+  const [follow, setFollow] = useState(newFollow)
+  if (follow.opened !== view.opened) setFollow(newFollow())
   const estimateSize = useCallback(
     (row: number) => Math.round(rows[row]!.estimate * metrics.estimate),
     [rows, metrics.estimate]
@@ -291,17 +306,13 @@ export function MessageList({
     // Start near the destination. Mounting the first window's first rows only to replace
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
-      const target = restore?.slot ?? anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
-      // The row the positioning below scrolls to: the one showing the entry, a summary's too.
-      const entry = entries.findIndex((e) => e.slotId === target)
-      const index = entry >= 0 ? rowOf(entry) : rows.findIndex((row) => row.key === target || row.lastSlotId === target)
       let offset = 16
-      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += estimateSize(i) + metrics.gap
+      for (let i = 0; i < (requestedRow < 0 ? rows.length : requestedRow); i++) offset += estimateSize(i) + metrics.gap
       return offset
     },
     overscan: 2,
     anchorTo: "end",
-    followOnAppend: view.follow,
+    followOnAppend: follow.pinned,
     paddingStart: 16,
     paddingEnd: 16,
     gap: metrics.gap,
@@ -309,33 +320,27 @@ export function MessageList({
     // it mustn't (below).
     scrollEndThreshold: follow.pinned ? NATIVE_END_PX : -1
   })
-  const hold = useCallback(
-    (on: boolean) => {
-      follow.stuck = on
-      virtualizer.options.scrollEndThreshold = follow.pinned ? NATIVE_END_PX : -1
-      // TanStack Virtual has no cancellation API for an end scroll already reconciling by row index.
-      if (!follow.pinned && virtualizer["scrollState"]?.align === "end") virtualizer["scrollState"] = null
-    },
-    [follow, virtualizer]
-  )
-  const finishScrollInput = useCallback(
-    (atEnd: boolean) => {
-      const atBottom = atEnd && session.snapshot().newer === null
-      hold(atBottom)
-      if (atBottom) {
-        session.followAtBottom()
-        if (follow.pinned) virtualizer.scrollToEnd()
-      }
-      // A stationary release can change follow without emitting another scroll event.
-      saveReading.current?.()
-    },
-    [follow, hold, session, virtualizer]
-  )
+  const syncPinning = useCallback(() => {
+    virtualizer.options.followOnAppend = follow.pinned
+    virtualizer.options.scrollEndThreshold = follow.pinned ? NATIVE_END_PX : -1
+    // TanStack Virtual has no cancellation API for an end scroll already reconciling by row index.
+    if (!follow.pinned && virtualizer["scrollState"]?.align === "end") virtualizer["scrollState"] = null
+  }, [follow, virtualizer])
   const keepEnd = useCallback(() => {
     const list = parent.current
-    if (list !== null && follow.pinned && virtualizer.options.followOnAppend && !atNativeEnd(list))
-      virtualizer.scrollToEnd()
+    if (list !== null && follow.pinned && !atNativeEnd(list)) virtualizer.scrollToEnd()
   }, [follow, virtualizer])
+  const finishScrollInput = useCallback(
+    (atEnd: boolean, save: boolean) => {
+      follow.on = atEnd && session.snapshot().newer === null
+      follow.moving = false
+      syncPinning()
+      keepEnd()
+      // A stationary release can change follow without emitting another scroll event.
+      if (save) saveReading.current?.()
+    },
+    [follow, keepEnd, session, syncPinning]
+  )
 
   // The virtualizer learns the list's offset through its scroll observer. When the browser clamps
   // an offset it set to where the list already is (the estimated start in a history too short
@@ -388,13 +393,13 @@ export function MessageList({
   useLayoutEffect(() => {
     if (prefs.chatDensity === spacing) return
     const list = parent.current
-    const anchor = list === null || (follow.pinned && view.follow) ? null : readingAnchor(list)
+    const anchor = list === null || follow.pinned ? null : readingAnchor(list)
     const row = anchor === null ? undefined : rows[anchor.row]
     reading.current = anchor !== null && row !== undefined ? { key: row.key, anchor } : list === null ? null : "end"
     // Heights measured at the other spacing are wrong for rows that aren't shown: those go back
     // to estimates, so each is measured afresh, and the list corrected for it, when it's reached.
     setSpacing(prefs.chatDensity)
-  }, [prefs.chatDensity, spacing, follow, view.follow, rows, virtualizer])
+  }, [prefs.chatDensity, spacing, follow, rows, virtualizer])
   useLayoutEffect(() => {
     const list = parent.current
     const kept = reading.current
@@ -479,16 +484,15 @@ export function MessageList({
     return () => clearTimeout(timer)
   }, [layerPending, view.opened])
   useLayoutEffect(() => {
-    if (view.opened === positioned.current || entries.length === 0) return
+    if (view.opened === positioned.current) return
     if (layerPending && waitedFor !== view.opened) return
     positioned.current = view.opened
     settled.current = false
-    const requested = anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
-    const entryIndex = entries.findIndex((entry) => entry.slotId === requested)
-    const row = entryIndex >= 0 ? rowOf(entryIndex) : rows.findIndex((row) => row.lastSlotId === requested)
-    if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.lastSlotId !== undefined ? "start" : "center" })
+    if (requestedRow >= 0)
+      virtualizer.scrollToIndex(requestedRow, {
+        align: rows[requestedRow]?.lastSlotId !== undefined ? "start" : "center"
+      })
     else virtualizer.scrollToEnd()
-    hold(row < 0 && view.newer === null)
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         settled.current = true
@@ -587,22 +591,14 @@ export function MessageList({
         })
       })
     }
-    const stop = (event?: Event) => {
-      const sendingAtEnd =
-        event?.target instanceof Node &&
-        !list.contains(event.target) &&
-        virtualizer.options.followOnAppend &&
-        atNativeEnd(list)
+    const stop = () => {
       cancelAnimationFrame(frame)
       virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
-      if (sendingAtEnd) finishScrollInput(true)
       observer.disconnect()
-      for (const event of inputs) inputSurface.removeEventListener(event, stop)
+      for (const event of inputs) list.removeEventListener(event, stop)
     }
     const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
-    // Writing/sending in the composer takes over too; it is a sibling of the list.
-    const inputSurface = list.parentElement ?? list
-    for (const event of inputs) inputSurface.addEventListener(event, stop, { passive: true })
+    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
     const observer = new MutationObserver(reveal)
     observer.observe(list, { childList: true, subtree: true })
     reveal()
@@ -610,153 +606,48 @@ export function MessageList({
       stop()
       cancelAnimationFrame(frame)
     }
-  }, [anchor, restore, summaries, view.opened, virtualizer, finishScrollInput])
+  }, [anchor, restore, summaries, view.opened, virtualizer])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
   // index. Retarget before the next frame so reconciliation scrolls to the new last row.
   const lastSlot = entries.at(-1)?.slotId
   useLayoutEffect(() => {
-    if (view.follow && follow.pinned && rowCount > 0) virtualizer.scrollToEnd()
-  }, [divider, lastSlot, rowCount, view.follow, follow, virtualizer])
+    if (follow.pinned && rowCount > 0) virtualizer.scrollToEnd()
+  }, [divider, lastSlot, rowCount, follow, virtualizer])
 
   useEffect(() => {
     const list = parent.current
     if (list === null) return
-    let input: { offset: number; atEnd: boolean } | null = null
-    let pointer: { id: number; rangeAtPress: number; movedAt: number } | null = null
-    const rawPointer = window.isSecureContext && "onpointerrawupdate" in window
-    let touching = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    const startInput = (movingUp: boolean, atEnd = atNativeEnd(list)) => {
-      input ??= { offset: list.scrollTop, atEnd }
-      // Give the first pixels of a smooth scroll room before the virtualizer can pin them back.
-      if (movingUp) hold(false)
-    }
-    const sampleInput = () => {
-      if (input === null) return false
-      const offset = list.scrollTop
-      const atEnd = atNativeEnd(list)
-      if (offset === input.offset) {
-        input.atEnd ||= atEnd
-        return false
-      }
-      // Chromium can reposition a stationary thumb after a resize. Its raw pointer
-      // event arrives before the resulting scroll, even when dragging consumes pointermove.
-      if (pointer !== null && rawPointer) {
-        const resized = list.scrollHeight - list.clientHeight !== pointer.rangeAtPress
-        if (!atEnd && resized && performance.now() - pointer.movedAt > SCROLL_IDLE_MS) return false
-        pointer.movedAt = -Infinity
-      }
-      if (!atEnd) hold(false)
-      input = { offset, atEnd }
-      return true
-    }
-    const finishInput = () => {
-      if (input === null) return
-      clearTimeout(timer)
-      sampleInput()
-      const atEnd = input.atEnd
-      input = null
-      finishScrollInput(atEnd)
-    }
-    const waitForScrollEnd = () => {
-      clearTimeout(timer)
-      if (pointer === null && !touching) timer = setTimeout(finishInput, SCROLL_IDLE_MS)
-    }
-
-    // An anchored menu pauses automatic scrolling while preserving the reader's last choice.
-    const onMenu = (event: Event) => {
-      if (!(event instanceof AnchoredPopupEvent)) return
-      follow.menus++
-      hold(follow.stuck)
+    const track = trackScrollInput(list, {
+      following: () => follow.on,
+      suspend: () => {
+        if (follow.moving) return
+        follow.moving = true
+        syncPinning()
+      },
+      keepEnd,
+      settle: finishScrollInput
+    })
+    flushInput.current = track.flush
+    const anchorScroll = (event: Event) => {
+      if (!(event instanceof AnchoredScrollEvent)) return
+      follow.anchors++
+      syncPinning()
       event.detail(() => {
-        follow.menus--
-        hold(follow.stuck)
-        if (parent.current === list) keepEnd()
+        follow.anchors--
+        if (flushInput.current !== track.flush) return
+        syncPinning()
+        keepEnd()
       })
     }
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY === 0 || event.ctrlKey) return
-      startInput(event.deltaY < 0)
-      waitForScrollEnd()
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      const up =
-        ["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.shiftKey && [" ", "Tab"].includes(event.key))
-      if (!up && !["ArrowDown", "PageDown", "End", " ", "Tab"].includes(event.key)) return
-      startInput(up)
-      waitForScrollEnd()
-    }
-    const onTouchMove = () => {
-      touching = true
-      startInput(true)
-      waitForScrollEnd()
-    }
-    const onTouchEnd = () => {
-      if (!touching) return
-      touching = false
-      waitForScrollEnd()
-    }
-    const onPointerMove = (event: Event) => {
-      if (event instanceof PointerEvent && pointer?.id === event.pointerId) pointer.movedAt = performance.now()
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      const onScrollbar = event.target === list && event.offsetX >= list.clientWidth
-      if (!(event.button === 0 && onScrollbar) && event.button !== 1) return
-      // With the original scroll range, a track press can scroll without pointer motion.
-      pointer = { id: event.pointerId, rangeAtPress: list.scrollHeight - list.clientHeight, movedAt: -Infinity }
-      startInput(event.button === 1, follow.stuck || atNativeEnd(list))
-      waitForScrollEnd()
-      if (rawPointer) window.addEventListener("pointerrawupdate", onPointerMove, { capture: true, passive: true })
-    }
-    const onPointerEnd = (event: PointerEvent) => {
-      if (pointer?.id !== event.pointerId) return
-      finishInput()
-      pointer = null
-      window.removeEventListener("pointerrawupdate", onPointerMove, true)
-    }
-    const letGo = () => {
-      clearTimeout(timer)
-      input = null
-      hold(false)
-      saveReading.current?.()
-    }
-    // Capture the result of the reader's movement before the virtualizer measures mounted rows.
-    const onScroll = () => {
-      if (sampleInput()) waitForScrollEnd()
-      keepEnd()
-    }
-    list.addEventListener(ANCHORED_POPUP, onMenu)
-    list.addEventListener("wheel", onWheel, { passive: true })
-    list.addEventListener("touchmove", onTouchMove, { passive: true })
-    list.addEventListener("touchend", onTouchEnd, { passive: true })
-    list.addEventListener("touchcancel", onTouchEnd, { passive: true })
-    // A control inside asks, before its action changes the length of what's above it (composition.ts).
-    list.addEventListener(LET_GO, letGo)
-    list.addEventListener("keydown", onKey)
-    list.addEventListener("pointerdown", onPointerDown)
-    window.addEventListener("pointerup", onPointerEnd, true)
-    window.addEventListener("pointercancel", onPointerEnd, true)
-    list.addEventListener("scroll", onScroll, { passive: true, capture: true })
+    list.addEventListener(ANCHORED_SCROLL, anchorScroll)
     return () => {
-      clearTimeout(timer)
-      list.removeEventListener(ANCHORED_POPUP, onMenu)
-      list.removeEventListener("wheel", onWheel)
-      list.removeEventListener("touchmove", onTouchMove)
-      list.removeEventListener("touchend", onTouchEnd)
-      list.removeEventListener("touchcancel", onTouchEnd)
-      list.removeEventListener(LET_GO, letGo)
-      list.removeEventListener("keydown", onKey)
-      list.removeEventListener("pointerdown", onPointerDown)
-      window.removeEventListener("pointerrawupdate", onPointerMove, true)
-      window.removeEventListener("pointerup", onPointerEnd, true)
-      window.removeEventListener("pointercancel", onPointerEnd, true)
-      list.removeEventListener("scroll", onScroll, { capture: true })
+      flushInput.current = null
+      track.dispose()
+      list.removeEventListener(ANCHORED_SCROLL, anchorScroll)
     }
-  }, [finishScrollInput, follow, hold, keepEnd])
+  }, [finishScrollInput, follow, keepEnd, syncPinning])
 
   // The list held at the end stays there when it gets shorter: the composer below growing with
   // a line of text, or a note above it appearing. The browser keeps the scroll position, which
@@ -768,7 +659,7 @@ export function MessageList({
     const observer = new ResizeObserver(() => {
       const shorter = list.clientHeight < height
       height = list.clientHeight
-      if (!shorter || !follow.pinned || !virtualizer.options.followOnAppend) return
+      if (!shorter || !follow.pinned) return
       // Before this frame paints (the virtualizer's own scroll lands a frame later), then theirs.
       elementScroll(list.scrollHeight - height, {}, virtualizer)
       virtualizer.scrollToEnd()
@@ -779,86 +670,55 @@ export function MessageList({
   // Corrections and layout clamps cannot change the reader's follow choice.
   useEffect(() => keepEnd())
 
-  useEffect(() => {
-    const list = parent.current
-    if (!list || !restore || restore.slot === null || restored.current || view.opened === 0) return
-    let frame = 0
-    const place = () => {
-      const article = list.querySelector<HTMLElement>(`article[data-slot="${CSS.escape(restore.slot!)}"]`)
-      if (!article) return
-      restored.current = true
-      hold(false)
-      virtualizer.scrollToOffset(
-        Math.max(
-          0,
-          list.scrollTop + article.getBoundingClientRect().top - list.getBoundingClientRect().top - restore.offset
-        )
-      )
-    }
-    frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(place)
-    })
-    const observer = new MutationObserver(() => {
-      if (!restored.current) place()
-    })
-    observer.observe(list, { childList: true, subtree: true })
-    const timer = setTimeout(() => {
-      place()
-      observer.disconnect()
-    }, 150)
-    return () => {
-      cancelAnimationFrame(frame)
-      clearTimeout(timer)
-      observer.disconnect()
-    }
-  }, [restore, view.opened, hold, virtualizer])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const list = parent.current
     if (!list || embedded) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const save = () => {
       if (!settled.current || !view.forkId) return
-      const location = router.latestLocation
+      const location = router.history.location
       if (location.pathname !== `/chats/${session.id}`) return
-      if (location.search.fork != null && location.search.fork !== view.forkId) return
+      const fork = new URLSearchParams(location.search).get("fork")
+      if (fork !== null && fork !== view.forkId) return
       const reading: ReadingPosition = {
         key: `${userId}/${session.id}/${view.forkId}`,
         slot: null,
         offset: 0
       }
-      if (!follow.stuck || view.newer !== null) {
+      if (!follow.on) {
         const bounds = list.getBoundingClientRect()
-        const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find(
-          (el) => el.getBoundingClientRect().bottom > bounds.top
-        )
+        const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find((element) => {
+          const box = element.getBoundingClientRect()
+          return box.bottom > bounds.top && box.top < bounds.bottom
+        })
         if (!article) return
         reading.slot = article.dataset.slot as SlotId
         reading.offset = article.getBoundingClientRect().top - bounds.top
       }
       const previous = location.state.chatReading
       if (previous?.key === reading.key && previous.slot === reading.slot && previous.offset === reading.offset) return
-      void navigate({
-        to: ".",
-        search: (prev: Record<string, unknown>) => prev,
-        state: (prev) => ({ ...prev, chatReading: reading }),
-        replace: true,
-        resetScroll: false
-      })
+      router.history.replace(location.href, { ...location.state, chatReading: reading }, { ignoreBlocker: true })
+    }
+    const flush = () => {
+      flushInput.current?.()
+      save()
     }
     saveReading.current = save
     const scroll = () => {
       clearTimeout(timer)
       timer = setTimeout(save, 200)
     }
+    const unregister = tab?.store.saveEntryOnLeave(tab.tabId, flush)
     list.addEventListener("scroll", scroll, { passive: true })
-    window.addEventListener("pagehide", save)
+    window.addEventListener("pagehide", flush)
     return () => {
+      unregister?.()
       saveReading.current = null
       clearTimeout(timer)
       list.removeEventListener("scroll", scroll)
-      window.removeEventListener("pagehide", save)
+      window.removeEventListener("pagehide", flush)
     }
-  }, [navigate, router, session, userId, view.forkId, view.newer, embedded, follow])
+  }, [router, session, userId, view.forkId, embedded, follow, tab])
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
@@ -990,7 +850,7 @@ export function OpenChat({
   // publish it before paint so that handover keeps its existing no-skeleton behaviour.
   useLayoutEffect(() => {
     const session = new ChatSession(target.chatId, target.fork, registry, userId, (title) => showToast({ title }))
-    const restore = target.reading?.key === `${userId}/${target.chatId}/${target.fork}` ? target.reading : null
+    const restore = readingAt(target.reading, userId, target.chatId, target.fork)
     let accepted = false
     const ready = () => {
       if (accepted || session.snapshot().loading) return
@@ -1076,14 +936,19 @@ function ChatSurface({
   const { panel, show, close, chatMain, withPanel, wide, userId } = usePanel(urlPanel, view)
   const entry = useLocation({ select: (location) => location.state })
   const shown = useRef({ fork, slot, index: entry.__TSR_index })
-  const [originalTarget] = useState({ fork, slot })
-  const [restoring, setRestoring] = useState(true)
-  const reading = restoring && originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
+  const [reading, setReading] = useState(restore)
+  const traversal = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const history: RouterHistory = router.history
+    return history.subscribe(({ action, location }) => {
+      if (action.type !== "REPLACE") traversal.current = action.type === "PUSH" ? undefined : location.state.__TSR_key
+    })
+  }, [router])
   const flashes = useRef<Flashes>({ opened: 0, repeat: null })
   // An explicit jump replaces a restored reading position, even at the URL's existing slot.
   const reopen = useCallback(
     (target: SlotId) => {
-      setRestoring(false)
+      setReading(null)
       flashes.current.repeat = { index: router.state.location.state.__TSR_index, fork, slot: target }
       void navigate({
         to: ".",
@@ -1103,24 +968,24 @@ function ChatSurface({
   useEffect(() => {
     if (pending) return
     const before = shown.current
+    const changedEntry = entry.__TSR_index !== before.index
+    const wasTraversal = traversal.current !== undefined && traversal.current === entry.__TSR_key
+    if (wasTraversal) traversal.current = undefined
     shown.current = { fork, slot, index: entry.__TSR_index }
-    if (fork !== before.fork || slot !== before.slot || entry.__TSR_index !== before.index)
-      flashes.current.repeat = null
+    if (fork !== before.fork || slot !== before.slot || changedEntry) flashes.current.repeat = null
     const current = view.forkId
-    const already = fork === null ? current !== null && current === view.chat?.currentForkId : fork === current
-    const fresh =
-      slot !== null &&
-      entry.__TSR_index !== before.index &&
-      entry.chatReading === undefined &&
-      entry.chatFlashed !== `${session.id}/${slot}`
+    const destinationFork = fork ?? view.chat?.currentForkId ?? null
+    const already = destinationFork !== null && current === destinationFork
+    const destinationReading = readingAt(entry.chatReading, userId, session.id, destinationFork)
+    const fresh = slot !== null && changedEntry && !destinationReading && entry.chatFlashed !== `${session.id}/${slot}`
     if (fork !== before.fork && !already) {
-      setRestoring(false)
-      session.showFork(fork, slot)
-    } else if (slot !== before.slot || fresh) {
-      setRestoring(false)
-      void session.open(slot)
+      setReading(destinationReading)
+      session.showFork(fork, destinationReading ? destinationReading.slot : slot)
+    } else if (slot !== before.slot || fresh || (wasTraversal && destinationReading)) {
+      setReading(destinationReading)
+      void session.open(destinationReading ? destinationReading.slot : slot)
     }
-  }, [session, fork, slot, view.forkId, view.chat, entry, pending])
+  }, [session, fork, slot, view.forkId, view.chat, entry, pending, userId])
   // Deleted while open, here or elsewhere: there's nothing left to show. A new chat's page
   // opens another for the same entry instead, quietly (its typing is in recovered texts).
   useEffect(() => {
