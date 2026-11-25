@@ -1,10 +1,9 @@
 // The run inspector's agent part (spec/AGENTIC.md §5.3; DESIGN §7.4): for a reply written by a
-// tool-using loop, after the request's context, the tools it was offered exactly as frozen into
-// its snapshot, then every request the loop made after the first, each with what was added to
+// tool-using loop, every request with its tool definitions, what was added to
 // the context since the one before (the tools' results, the app's own messages) and the model's
 // turn, all verbatim. Request N's context is the request above plus everything listed before it.
 // A plain reply's run has no transcript, and this shows nothing.
-// An MCP server's tools are grouped under their server, its calls say where and when they were
+// An MCP server's calls say where and when they were
 // sent from the call ledger, and their results show what the model was sent of them (spec/MCP.md §10).
 //
 // Each step (thinking or text before a tool call, a call's arguments, its result) has Edit and
@@ -24,7 +23,7 @@ import type {
   TurnPart
 } from "@dreamspan/shared/agent.ts"
 import type { ForkId, VersionId } from "@dreamspan/shared/chat.ts"
-import type { InspectorUsage, RunContext } from "@dreamspan/shared/inspectorApi.ts"
+import type { InspectorUsage, RequestTools as Declarations, RunContext } from "@dreamspan/shared/inspectorApi.ts"
 import { totalInputTokens } from "@dreamspan/shared/usage.ts"
 import { displayToolData } from "@dreamspan/shared/toolData.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -39,11 +38,12 @@ import { AppClient } from "../../../rpc.ts"
 import { Button } from "../../../ui/Button.tsx"
 import { CodeEditor } from "../../../ui/CodeEditor.tsx"
 import { Card, CardHeader, Disclosure } from "../../../ui/Surface.tsx"
+import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { requestStatusText } from "../requestWords.ts"
 import { editableText, stepEdit, type StepTarget } from "./resume.ts"
 import { turnsOf } from "./steps.ts"
 import { guardReply } from "../replyGuards.ts"
-import { formatWhen } from "../chatTitle.ts"
+import { legacyRequestTools, RequestTools, toolsForRequest } from "./RequestTools.tsx"
 import { bytesLabel, callStatusLabels } from "../../mcp/data.ts"
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
@@ -84,92 +84,6 @@ function Verbatim({ text }: { text: string }) {
       {text === "" ? <span className="font-sans text-muted italic">(empty)</span> : text}
     </pre>
   )
-}
-
-const tokens = (n: number) => `${n.toLocaleString()} ${n === 1 ? "token" : "tokens"}`
-
-function ToolBox({ tool, note }: { tool: OfferedTool; note: string }) {
-  return (
-    <Box title={tool.name} note={note}>
-      <div className="flex flex-col gap-1">
-        <Verbatim text={tool.description} />
-        <Disclosure title="Parameters" hint={`Click to show or hide the parameters of ${tool.name}`}>
-          <Verbatim text={json(tool.parameters)} />
-        </Disclosure>
-      </div>
-    </Box>
-  )
-}
-
-/** One group of the offer, with its total size. */
-function ToolGroup({
-  title,
-  about,
-  tools,
-  note
-}: {
-  title: string
-  about: string
-  tools: ReadonlyArray<OfferedTool>
-  note: (tool: OfferedTool) => string
-}) {
-  if (tools.length === 0) return null
-  const total = tools.reduce((n, t) => n + (t.tokens ?? 0), 0)
-  const counted = tools.every((t) => t.tokens !== undefined)
-  return (
-    <section aria-label={title} className="flex flex-col gap-2">
-      <h3 className="text-sm font-semibold">
-        {title}{" "}
-        <span className="font-normal text-muted">
-          · {tools.length === 1 ? "1 tool" : `${tools.length} tools`}
-          {counted ? `, ${tokens(total)}` : ""}
-        </span>
-      </h3>
-      <p className="text-sm text-muted">{about}</p>
-      {tools
-        .filter((tool) => tool.mcp === undefined)
-        .map((tool) => (
-          <ToolBox key={tool.name} tool={tool} note={note(tool)} />
-        ))}
-      {serversOf(tools).map(({ connection, name, listedAt, tools: own }) => (
-        <section
-          key={connection}
-          aria-label={`From ${name}`}
-          className="flex flex-col gap-2"
-          data-mcp-tools={connection}
-        >
-          <h4 className="text-sm font-medium">
-            From {name}
-            {listedAt === null ? "" : <span className="font-normal text-muted">, listed {formatWhen(listedAt)}</span>}
-          </h4>
-          {own.map((tool) => (
-            <ToolBox key={tool.name} tool={tool} note={note(tool)} />
-          ))}
-        </section>
-      ))}
-    </section>
-  )
-}
-
-/** A group's MCP server tools under their server (spec/MCP.md §10), in the order offered. */
-const serversOf = (tools: ReadonlyArray<OfferedTool>) => {
-  const servers = new Map<
-    string,
-    { connection: string; name: string; listedAt: number | null; tools: Array<OfferedTool> }
-  >()
-  for (const tool of tools) {
-    if (tool.mcp === undefined) continue
-    const server = servers.get(tool.mcp.connection)
-    if (server) server.tools.push(tool)
-    else
-      servers.set(tool.mcp.connection, {
-        connection: tool.mcp.connection,
-        name: tool.mcp.connectionName,
-        listedAt: tool.mcp.listedAt,
-        tools: [tool]
-      })
-  }
-  return [...servers.values()]
 }
 
 /** What the run's MCP calls need in their steps: their tools' servers and the ledger's rows. */
@@ -219,56 +133,6 @@ function McpSentLines({
         </li>
       ))}
     </ul>
-  )
-}
-
-/**
- * The run's tools as frozen when it started (spec/TOOL-LOADING.md): those sent from the start,
- * then those the assistant loaded as it went (and the tool that loaded them), then those it
- * never needed. A run that loads nothing shows one list, as before.
- */
-export function Tools({
-  tools,
-  entries
-}: {
-  tools: ReadonlyArray<OfferedTool>
-  entries: ReadonlyArray<TranscriptEntry>
-}) {
-  const loaderOf = new Map(entries.flatMap((e) => (e.role === "toolResult" ? [[e.toolCallId, e.tool] as const] : [])))
-  const size = (tool: OfferedTool) => (tool.tokens === undefined ? "" : ` · ${tokens(tool.tokens)}`)
-  const immediate = tools.filter((t) => !t.deferred)
-  const loaded = tools.filter((t) => t.deferred && t.loadedBy !== undefined)
-  const unused = tools.filter((t) => t.deferred && t.loadedBy === undefined)
-  const deferring = loaded.length + unused.length > 0
-  return (
-    <section aria-label="Tools offered" className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold">Tools offered</h2>
-      <ToolGroup
-        title={deferring ? "Sent from the start" : "Available to this run"}
-        about={
-          deferring
-            ? "In every request of this run, as defined when it started."
-            : "Available to this run, as defined when it started."
-        }
-        tools={immediate}
-        note={(tool) => `${tool.label}${size(tool)}`}
-      />
-      <ToolGroup
-        title="Loaded during the run"
-        about="Their definitions were sent only after the assistant loaded them."
-        tools={loaded}
-        note={(tool) => {
-          const loader = loaderOf.get(tool.loadedBy!)
-          return `${tool.label}${size(tool)} · loaded ${loader === undefined ? "during the run" : `by ${loader}`}`
-        }}
-      />
-      <ToolGroup
-        title="Never loaded"
-        about="Available to load, but this run didn't need them, so their definitions were never sent."
-        tools={unused}
-        note={(tool) => `${tool.label}${size(tool)}`}
-      />
-    </section>
   )
 }
 
@@ -603,19 +467,48 @@ export function Steps({
   entries,
   cut,
   editing,
-  first = "Every request of this run after the first is the context above, then everything listed before it here."
+  tools,
+  declarations,
+  first = "Each request lists its tools and the messages added since the previous request."
 }: {
   requests: ReadonlyArray<InspectorUsage>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
   /** Null: shown without Edit or Resume from here (a subagent's own run). */
   editing: StepEditing | null
+  tools: ReadonlyArray<OfferedTool>
+  declarations?: Declarations | undefined
   first?: string
 }) {
   const turns = turnsOf(entries)
   // Each request's ledger row, when they line up one for one (a retry adds a row of its own).
   const answered = turns.filter((t) => t.answer !== null).length
   const usage = requests.length === answered ? requests : null
+  const usageById = new Map(requests.map((request) => [request.id as string, request]))
+  const sent = requests.flatMap((request, i) => {
+    const tools = toolsForRequest(declarations, request.id)
+    return tools === undefined ? [] : [{ request, tools, number: i + 1 }]
+  })
+  const sentAt = new Map(sent.map(({ request }, i) => [request.id as string, i]))
+  const precedingAttempts: Array<{ from: number; to: number }> = []
+  let shown = 0
+  for (const [i, turn] of turns.entries()) {
+    const id = turn.answer?.requestId ?? usage?.[i]?.id
+    const at = id === undefined ? undefined : sentAt.get(id)
+    precedingAttempts.push({ from: shown, to: at ?? shown })
+    if (at !== undefined) shown = at + 1
+  }
+  const withoutAnswer = (start: number, end: number) =>
+    sent.slice(start, end).map(({ request, tools, number }) => (
+      <Card key={request.id}>
+        <CardHeader title={`Attempt ${number}`} about="A provider request without a recorded answer in these steps." />
+        <div className="flex flex-col gap-2">
+          <RequestTools tools={tools} />
+          <UsageLine request={request} />
+        </div>
+      </Card>
+    ))
+  const loads = new Map<string, string>()
   // A cut span shows just before the entry it was cut at, or after the last.
   const cutsAt = (at: number) => cut.filter((span) => Math.min(span.at, entries.length) === at)
   const cuts = (at: number) => cutsAt(at).map((span, i) => <Cut key={`cut-${at}-${i}`} span={span} />)
@@ -626,54 +519,79 @@ export function Steps({
   )
   return (
     <section aria-label="Steps" id="run-steps" className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold">Steps</h2>
+      <Tooltip label="The requests in this run and what the model returned for each.">
+        <h2 className="w-fit text-base font-semibold">Steps</h2>
+      </Tooltip>
       <p className="text-sm text-muted">{first}</p>
       {turns.map((turn, i) => {
         const first = starts[i]!
         const answerAt = first + turn.added.length
+        for (const entry of turn.added) if (entry.role === "toolResult") loads.set(entry.toolCallId, entry.tool)
+        const requestId = turn.answer?.requestId
+        const attempt = requestId === undefined ? usage?.[i] : usageById.get(requestId)
+        const capturedId = requestId ?? usage?.[i]?.id
+        const captured = capturedId === undefined ? undefined : toolsForRequest(declarations, capturedId)
+        const sentTools = captured ?? (turn.answer?.toolsOffered ? legacyRequestTools(tools, loads) : [])
+        const { from, to } = precedingAttempts[i]!
         return (
-          <Card key={i}>
-            <CardHeader title={turn.answer === null ? "Not sent" : `Request ${i + 1}`} />
-            <div className="flex flex-col gap-2">
-              {i === 0 && turn.added.length === 0 && (
-                <p className="text-sm text-muted">The context above, as it was.</p>
-              )}
-              {turn.added.length > 0 && (
-                <>
-                  <h3 className="text-sm font-medium">
-                    {turn.answer === null ? "Added after the last answer" : "Added to the context"}
-                  </h3>
-                  {turn.added.map((entry, j) => (
-                    <Fragment key={j}>
-                      {cuts(first + j)}
-                      <Added entry={entry} editing={editing} id={`${first + j}`} />
-                    </Fragment>
-                  ))}
-                </>
-              )}
-              {turn.answer && (
-                <>
-                  {cuts(answerAt)}
-                  <p className="text-sm text-muted">
-                    {turn.answer.toolsOffered ? "The tools above were offered." : "No tools were offered."}
-                  </p>
-                  <h3 className="text-sm font-medium">The model's answer</h3>
-                  {turn.answer.parts.length === 0 && <p className="text-sm text-muted">Nothing came back.</p>}
-                  {turn.answer.parts.map((part, j) => (
-                    <Part key={j} part={part} editing={editing} id={`${answerAt}:${j}`} />
-                  ))}
-                  {turn.answer.error && (
-                    <p role="note" className="text-sm text-danger">
-                      {turn.answer.error}
-                    </p>
-                  )}
-                  {usage?.[i] && <UsageLine request={usage[i]} />}
-                </>
-              )}
-            </div>
-          </Card>
+          <Fragment key={i}>
+            {withoutAnswer(from, to)}
+            <Card>
+              <CardHeader
+                title={turn.answer === null ? "Not sent" : `Request ${i + 1}`}
+                about={
+                  turn.answer === null
+                    ? "Messages added before the run stopped."
+                    : "The tools and messages for this turn, followed by the model’s answer."
+                }
+              />
+              <div className="flex flex-col gap-2">
+                <RequestTools tools={sentTools} />
+                {turn.added.length > 0 && (
+                  <>
+                    <Tooltip
+                      label={
+                        turn.answer === null
+                          ? "Messages saved after the last provider request."
+                          : "Messages added since the previous provider request."
+                      }
+                    >
+                      <h3 className="w-fit text-sm font-medium">
+                        {turn.answer === null ? "Added after the last answer" : "Added to the context"}
+                      </h3>
+                    </Tooltip>
+                    {turn.added.map((entry, j) => (
+                      <Fragment key={j}>
+                        {cuts(first + j)}
+                        <Added entry={entry} editing={editing} id={`${first + j}`} />
+                      </Fragment>
+                    ))}
+                  </>
+                )}
+                {turn.answer && (
+                  <>
+                    {cuts(answerAt)}
+                    <Tooltip label="The text, reasoning and tool calls returned for this request.">
+                      <h3 className="w-fit text-sm font-medium">The model's answer</h3>
+                    </Tooltip>
+                    {turn.answer.parts.length === 0 && <p className="text-sm text-muted">Nothing came back.</p>}
+                    {turn.answer.parts.map((part, j) => (
+                      <Part key={j} part={part} editing={editing} id={`${answerAt}:${j}`} />
+                    ))}
+                    {turn.answer.error && (
+                      <p role="note" className="text-sm text-danger">
+                        {turn.answer.error}
+                      </p>
+                    )}
+                    {attempt && <UsageLine request={attempt} />}
+                  </>
+                )}
+              </div>
+            </Card>
+          </Fragment>
         )
       })}
+      {withoutAnswer(shown, sent.length)}
       {cuts(entries.length)}
     </section>
   )
@@ -787,14 +705,20 @@ function Transcript({
   const outside = editing.open === null && editing.error !== null
   return (
     <McpFactsContext.Provider value={facts}>
-      {tools.length > 0 && <Tools tools={tools} entries={entries} />}
       {outside && (
         <p role="alert" className="text-sm text-danger">
           {editing.error}
         </p>
       )}
       {(entries.length > 0 || cut.length > 0) && (
-        <Steps requests={run.requests} entries={entries} cut={cut} editing={editing} />
+        <Steps
+          requests={run.requests}
+          entries={entries}
+          cut={cut}
+          editing={editing}
+          tools={tools}
+          declarations={run.toolDeclarations}
+        />
       )}
     </McpFactsContext.Provider>
   )

@@ -16,14 +16,18 @@ export interface ToolLoadingRequest {
   /** Every deferred tool of the run, loaded or not, in offer order. */
   readonly deferred: ReadonlyArray<DeferredDefinition>
   /** Each successful loading call in this request's history, and the tools it loaded first. */
-  readonly loads: ReadonlyArray<{ readonly toolCallId: string; readonly names: ReadonlyArray<string> }>
+  readonly loads: ReadonlyArray<{
+    readonly toolCallId: string
+    readonly names: ReadonlyArray<string>
+    readonly loader?: string
+  }>
 }
 
 type Json = Record<string, unknown>
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** pi-ai's Anthropic tool call id normalization: a `tool_use_id` is the id as it sent it. */
-const anthropicId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
+export const anthropicId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
 
 /**
  * Anthropic Messages (tool search with a client-side loader, Anthropic's tool search guide):
@@ -133,7 +137,7 @@ export const applyRouterToolLoading = (payload: Json, loading: ToolLoadingReques
 }
 
 /** pi-ai's Responses call id normalization (`call_id` is the part before `|`). */
-const responsesId = (id: string) =>
+export const responsesId = (id: string) =>
   (id.split("|")[0] ?? id)
     .replace(/[^a-zA-Z0-9_-]/g, "_")
     .slice(0, 64)

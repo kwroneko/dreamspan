@@ -11,6 +11,7 @@ import { LlmRequestId, RequestStatus, TokenCounts, totalInputTokens, UsageSource
 import { RefId } from "./library.ts"
 import { ScriptRef } from "./regexScripts.ts"
 import { ThinkingSends } from "./thinkingSends.ts"
+import { OfferedTool } from "./agent.ts"
 
 /** Historical activation decisions; keyword text is scrubbed with the sent request. */
 export const SourceActivation = Schema.Union([
@@ -396,6 +397,25 @@ export const ContextDisplay = Schema.Struct({
 })
 export type ContextDisplay = typeof ContextDisplay.Type
 
+const RequestTool = Schema.Struct({
+  name: OfferedTool.fields.name,
+  label: OfferedTool.fields.label,
+  description: OfferedTool.fields.description,
+  parameters: OfferedTool.fields.parameters,
+  mcp: OfferedTool.fields.mcp,
+  tokens: Schema.Int,
+  loadedBy: Schema.optionalKey(Schema.String)
+})
+export type RequestTool = typeof RequestTool.Type
+
+/** Definitions shared across a rollout's provider requests, in each request's own order. */
+const RequestTools = Schema.Struct({
+  latest: Schema.String,
+  definitions: Schema.Record(Schema.String, RequestTool),
+  attempts: Schema.Record(Schema.String, Schema.Array(Schema.String))
+})
+export type RequestTools = typeof RequestTools.Type
+
 /**
  * Whose view a reply's context was written from (spec/CHARACTER-CONTEXT.md §9.2 unit CU5): in a
  * separate context, the speaker's name and the messages left out because it wasn't present for
@@ -449,6 +469,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   /** Absent: one shared context, or a reply from before separate contexts. */
   separateContext: Schema.optionalKey(SeparateContext),
   ...ContextDisplay.fields,
+  toolDeclarations: Schema.optionalKey(RequestTools),
+  messageTokens: Schema.optionalKey(Schema.Int),
   /** Every attempt, retries included, oldest first. */
   requests: Schema.Array(InspectorUsage)
 }) {}

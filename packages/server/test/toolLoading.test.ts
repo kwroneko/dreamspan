@@ -28,6 +28,60 @@ import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { planStepResume, StepNotResumable } from "../src/agent/resume.ts"
 import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
+import { captureRequestTools } from "../src/providers/requestTools.ts"
+
+describe("inspector tool capture", () => {
+  const immediate = { name: "load_skill", description: "Load a skill.", parameters: {} }
+  const read = {
+    name: "read_card",
+    description: "Inspect a test card.",
+    parameters: { default: null, title: "secret" }
+  }
+  const unused = { name: "unused", description: "", parameters: {} }
+  const toolsOf = (payload: Record<string, unknown>, loading?: Parameters<typeof captureRequestTools>[2]) => {
+    const { declarations } = captureRequestTools(payload, "test", loading, (text) =>
+      text.replaceAll("secret", "[redacted]")
+    )
+    return declarations.attempts.test!.map((key) => JSON.parse(declarations.definitions[key]!))
+  }
+
+  it("lists native Anthropic declarations only from the request that references them", () => {
+    const loading = { api: "anthropic-messages", deferred: [read, unused], loads: [] }
+    const tools = [immediate, read, unused].map(({ parameters, ...tool }) => ({ ...tool, input_schema: parameters }))
+    assert.deepStrictEqual(toolsOf(applyAnthropicToolLoading({ tools }, loading), loading), [immediate])
+    const loaded = { ...loading, loads: [{ toolCallId: "call", names: [read.name], loader: "load_skill" }] }
+    const payload = applyAnthropicToolLoading(
+      {
+        tools,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "call", content: "Loaded." }] }]
+      },
+      loaded
+    )
+    assert.deepStrictEqual(toolsOf(payload, loaded), [
+      immediate,
+      { ...read, parameters: { default: null, title: "[redacted]" }, loadedBy: "load_skill" }
+    ])
+  })
+
+  it("reads OpenAI Responses schemas from the tool search output at their load point", () => {
+    const loading = { api: "openai-responses", deferred: [read, unused], loads: [] }
+    const tools = [immediate, read, unused].map((tool) => ({ ...tool, type: "function" }))
+    assert.deepStrictEqual(toolsOf(applyResponsesToolLoading({ tools }, loading), loading), [immediate])
+    const loaded = { ...loading, loads: [{ toolCallId: "call|internal", names: [read.name], loader: "load_skill" }] }
+    const payload = applyResponsesToolLoading(
+      {
+        tools,
+        input: [{ type: "function_call_output", call_id: "call", output: "Loaded." }]
+      },
+      loaded
+    )
+    assert.deepStrictEqual(toolsOf(payload, loaded), [
+      immediate,
+      { ...read, parameters: { default: null, title: "[redacted]" }, loadedBy: "load_skill" }
+    ])
+    assert.deepStrictEqual(toolsOf({ input: [] }, loaded), [])
+  })
+})
 
 type AnyTool = RolloutTool<never>
 

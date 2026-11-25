@@ -3,6 +3,7 @@ import { AutoRequestGuard } from "../chat/Generator.ts"
 import { summaryResponse } from "./summaryResponse.ts"
 import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
+import { captureRequestTools } from "./requestTools.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
 import { imageSample, payloadImages } from "./imageSamples.ts"
@@ -2321,7 +2322,18 @@ export const layer = (options: ProvidersOptions = {}) =>
                   }
                   const rolloutId = request.attribution.rolloutId
                   if (sources && rolloutId) {
-                    const wire = { ...sentWire(final, sources, prepared.scrub), cache: state.cachePolicy }
+                    const { declarations, extraMessageText } = captureRequestTools(
+                      final,
+                      requestId,
+                      options.toolLoading,
+                      prepared.scrub
+                    )
+                    const wire = {
+                      ...sentWire(final, sources, prepared.scrub),
+                      cache: state.cachePolicy,
+                      toolDeclarations: declarations,
+                      ...(extraMessageText.length > 0 ? { extraMessageText } : {})
+                    }
                     recordSent = () =>
                       Effect.runPromise(
                         fromStorage(

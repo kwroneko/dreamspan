@@ -227,7 +227,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* ownedRollout(userId, rolloutId)
         if (wire !== undefined)
-          yield* sql`UPDATE rollout_payloads SET sent_context_json = ${wire} WHERE rollout_id = ${rolloutId}`
+          yield* sql`UPDATE rollout_payloads SET sent_context_json =
+            CASE WHEN json_type(${wire}, '$.toolDeclarations') = 'object' THEN json_set(
+              ${wire}, '$.toolDeclarations',
+              json_patch(coalesce(json_extract(sent_context_json, '$.toolDeclarations'), '{}'),
+                json_extract(${wire}, '$.toolDeclarations')))
+            ELSE ${wire} END
+            WHERE rollout_id = ${rolloutId}`
         // The provider layer's notes join the reply's, once each (thinkingBinding.ts).
         for (const issue of issues ?? []) {
           const json = JSON.stringify(issue)

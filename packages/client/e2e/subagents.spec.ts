@@ -26,6 +26,7 @@ const shots = process.env.SCREENSHOT_DIR
 let provider: Awaited<ReturnType<typeof startSubagentProvider>>
 const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
   asUser(server(), ADMIN.handle, ADMIN.password, use)
+const cardListing = [{ capability: "library.cards", mode: "allow" }] as const
 
 test.beforeAll(async () => {
   provider = await startSubagentProvider()
@@ -58,7 +59,7 @@ test.afterAll(async () => {
 for (const width of [1440, 390])
   test(`a research subagent's row, Inspect and Stop at ${width}`, async ({ page }, info) => {
     test.setTimeout(180_000)
-    const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents ${width}` }))
+    const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents ${width}`, grants: cardListing }))
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ reducedMotion: "reduce" })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -125,7 +126,9 @@ for (const width of [1440, 390])
     await expect(run).toContainText("Subagent instructions")
     await expect(run).toContainText("You are a subagent")
     await expect(run).toContainText(SUBAGENT_TASK)
-    await expect(run).toContainText("list_library")
+    const tools = run.getByRole("region", { name: "Tools", exact: true }).first()
+    await tools.locator("summary").click()
+    await expect(tools.getByRole("region", { name: "list_library", exact: true })).toBeVisible()
     await expect(run.getByRole("heading", { name: "Usage" })).toBeVisible()
     await shot("inspect")
     await expectLayout(page, info, `subagents-inspect-${width}`)
@@ -197,7 +200,9 @@ for (const width of [1440, 390])
     test(`a background subagent's wait, progress and report at ${width} ${theme}`, async ({ page }, info) => {
       test.setTimeout(180_000)
       provider.inBackground()
-      const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents background ${width} ${theme}` }))
+      const workshop = await admin((api) =>
+        api.CreateWorkshop({ title: `Subagents background ${width} ${theme}`, grants: cardListing })
+      )
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -240,7 +245,9 @@ for (const width of [1440, 390])
     test(`a fork's row says it started from this conversation at ${width} ${theme}`, async ({ page }, info) => {
       test.setTimeout(180_000)
       provider.forked()
-      const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents fork ${width} ${theme}` }))
+      const workshop = await admin((api) =>
+        api.CreateWorkshop({ title: `Subagents fork ${width} ${theme}`, grants: cardListing })
+      )
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

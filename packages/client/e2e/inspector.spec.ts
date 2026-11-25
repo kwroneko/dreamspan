@@ -405,7 +405,7 @@ test("a long context opens collapsed: 200 messages, about 100,000 tokens", async
   await page.goto(`${server().url}/chats/${long.id}/context/${long.reply}`)
   const messages = page.getByRole("region", { name: "Messages" })
   expect(await messages.getByRole("listitem").count()).toBeLessThan(30)
-  await expect(page.getByText(/about [\d,]+ tokens/)).toBeVisible()
+  await expect(page.getByText(/^\d[\d,]* tokens: \d[\d,]* messages, 0 tools$/)).toBeVisible()
   // Only visible rows and their previews are mounted.
   expect(await page.evaluate(() => document.body.textContent.length)).toBeLessThan(80_000)
   // A later row can be scrolled to and expanded.
@@ -542,6 +542,7 @@ const denseContext = async (page: Page, explanations = false) => {
             ],
             breakpoint: null
           }))
+          object.messageTokens = 100_000
           if (explanations) {
             ;(object.messages as Array<{ sources: unknown }>)[0]!.sources = [
               {
@@ -591,7 +592,7 @@ const denseContext = async (page: Page, explanations = false) => {
   })
   await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
   const messages = page.getByRole("region", { name: "Messages" })
-  await expect(page.getByText(/10,000 messages, about 100,000 tokens/)).toBeVisible()
+  await expect(page.getByText("100,000 tokens: 100,000 messages, 0 tools", { exact: true })).toBeVisible()
   expect(replaced).toBe(true)
   return messages
 }
@@ -687,7 +688,7 @@ test("the inspector in a workbench frame scrolls with its frame alone", async ({
   const at = new URL(page.url()).pathname
   const wb = JSON.stringify(["r", [0.5, 0.5], [0, `/chats/${chat.id}`], [0, "="]])
   await page.goto(`${server().url}${at}?wb=${encodeURIComponent(wb)}`)
-  await expect(page.getByText(/10,000 messages, about 100,000 tokens/)).toBeVisible()
+  await expect(page.getByText("100,000 tokens: 100,000 messages, 0 tools", { exact: true })).toBeVisible()
   await expectOneScroller(messages.getByRole("list"), "frame top")
   await scrollPane(messages.getByRole("list"), { to: "end" })
   await expect(messages.getByText("#10000", { exact: true })).toBeVisible()
