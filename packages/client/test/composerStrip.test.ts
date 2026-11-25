@@ -160,10 +160,10 @@ describe("strip and box placements", () => {
   const ids = (placement: Parameters<typeof availableComposerControls>[0], c: ComposerControlContext) =>
     availableComposerControls(placement, c).map((entry) => entry.id)
 
-  // What's chosen first (who replies, the model, the preset), then what the next request is: its
-  // size, then its cache.
-  const order = ["composer.next", "composer.model", "composer.preset", "composer.context", "composer.cache"]
-  it("puts the choices first and the next request's size and cache last, Next keeping its place without a choice", () => {
+  // The chips every chat kind has first, in the same places (model, preset, the next request's size,
+  // its cache), then a kind's own: a story's Next (owner, 2026-11-25).
+  const order = ["composer.model", "composer.preset", "composer.context", "composer.cache", "composer.next"]
+  it("puts the chips every chat kind has first and a story's Next after them, Next keeping its place without a choice", () => {
     expect(ids("strip", context(false, 1))).toEqual(order)
     expect(ids("strip", context(false, 3))).toEqual(order)
   })
@@ -184,12 +184,12 @@ describe("strip and box placements", () => {
       component: () => null
     })
     expect(ids("strip", context(false, 1))).toEqual([
-      "composer.next",
       "composer.model",
       "composer.preset",
       "synthetic.chip",
       "composer.context",
-      "composer.cache"
+      "composer.cache",
+      "composer.next"
     ])
     expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip", "composer.history"])
     close()

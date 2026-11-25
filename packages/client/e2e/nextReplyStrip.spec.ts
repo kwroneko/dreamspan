@@ -235,16 +235,18 @@ test.describe("the strip", () => {
     )
   })
 
-  test("reads who replies, the model, the preset, then the next request's size and cache", async ({ page }) => {
+  test("reads the model, the preset, the next request's size and cache, then who replies", async ({ page }) => {
     await openChat(page, chatId)
     await expect(cacheChip(page)).toBeVisible()
     const names = await nextReply(page)
       .getByRole("button")
       .evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent ?? ""))
     const at = (pattern: RegExp) => names.findIndex((name) => pattern.test(name))
-    const order = [/^Next: /, /^(Model: |Choose a model$)/, /^Prompt preset: /, /^Context: /, /^Cache/].map(at)
+    const order = [/^(Model: |Choose a model$)/, /^Prompt preset: /, /^Context: /, /^Cache/, /^Next: /].map(at)
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
+    // The subagents' models chip, where it shows, sits right after Model: another model selector.
+    if (at(/^Subagents/) >= 0) expect(at(/^Subagents/)).toBe(order[0]! + 1)
   })
 
   test("the context chip's size is the request view's, with its parts", async ({ page }) => {

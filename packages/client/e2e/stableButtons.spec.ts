@@ -226,8 +226,8 @@ for (const width of [1440, 390]) {
     await expect(strip.getByRole("button", { name: /^(Choose a model$|Model: )/ })).toBeVisible()
     // The chips have their values, not the "…" they show while loading.
     await expect(strip.getByRole("button", { name: /: loading$/ })).toHaveCount(0)
-    // The model and preset chips, after Next (whose label names who replies): their sizes hold.
-    const sizes = async () => (await boxes(strip)).slice(1, 3).map(({ width, height }) => ({ width, height }))
+    // The model and preset chips, first on the strip: their sizes hold.
+    const sizes = async () => (await boxes(strip)).slice(0, 2).map(({ width, height }) => ({ width, height }))
     const before = await sizes()
     await admin((api) =>
       Effect.gen(function* () {
