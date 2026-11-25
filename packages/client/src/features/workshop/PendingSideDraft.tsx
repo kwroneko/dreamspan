@@ -4,17 +4,16 @@
 // URL keeps its id (`side.draft`), so a reload reopens the same one; leaving the tab leaves it,
 // and the server sweeps it (its typing to recovered texts).
 import type { Chat, ChatId, ForkId } from "@dreamspan/shared/chat.ts"
-import type { DraftFor } from "@dreamspan/shared/draftChatApi.ts"
 import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { type ActionResult, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useCaller } from "../editor/caller.ts"
 import { chatPlaceKey } from "../chat/chatPlace.ts"
-import { rememberDraftFor, reopenSweptDraft } from "../chat/chatStarted.ts"
+import { forgetSideDraft, rememberDraftFor, reopenSweptDraft } from "../chat/chatStarted.ts"
 import { carryLeftover, fileLeftover } from "../chat/composerDraft.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
-import { SIDE_CHAT_SCOPE } from "./sideChat.ts"
+import { sideDraftFor, SIDE_CHAT_SCOPE } from "./sideChat.ts"
 
 /** What the side chat's surface tells its pending chat's host. */
 export interface SideDraftHost {
@@ -51,13 +50,13 @@ export function PendingSideDraft({
     onGone: () => void
   }>
 }) {
-  const draftFor = `side:${story}:${storyFork ?? ""}` as DraftFor
+  const draftFor = sideDraftFor(story, storyFork)
   const [named, setNamed] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "draft"), "")
   const action = useAction()
   const call = useCaller()
   const [chat, setChat] = useState<Chat | null>(null)
   const [attempt, setAttempt] = useState(0)
-  const [reopen, setReopen] = useState<ChatId | null>(named === "" ? null : (named as ChatId))
+  const [reopen, setReopen] = useState(() => reopenSweptDraft(draftFor, named === "" ? null : (named as ChatId)))
   const started = useRef(false)
   const replacing = useRef(false)
   const shownId = useRef<ChatId | null>(null)
@@ -84,12 +83,13 @@ export function PendingSideDraft({
       // Started meanwhile (in another browser tab): the tab shows it as any other.
       if (value.status !== "pending") {
         started.current = true
+        if (reopen !== null) forgetSideDraft(draftFor, reopen)
         onCreated(value)
         return
       }
       rememberDraftFor(value.id, draftFor)
       setChat(value)
-      if (value.id !== reopen) setNamed(value.id, true)
+      if (value.id !== named) setNamed(value.id, true)
     })
     return () => {
       live = false
@@ -110,6 +110,7 @@ export function PendingSideDraft({
       onStarted: (made) => {
         if (started.current) return
         started.current = true
+        forgetSideDraft(draftFor, made.id)
         onCreated(made)
       },
       onDeleted: () => {

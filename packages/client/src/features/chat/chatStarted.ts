@@ -16,15 +16,49 @@ export const notStarted = (chat: Pick<Chat, "status"> | null | undefined) => (is
 
 /** The entry each pending chat opened in this tab is for (DraftChatPage.tsx): a group's or not. */
 const draftEntries = new Map<string, DraftFor>()
-export const rememberDraftFor = (chatId: string, draftFor: DraftFor) => void draftEntries.set(chatId, draftFor)
+// A story branch switch can drop the URL's side.draft. Keep the last pending draft for each
+// story branch in this browser tab, including across a reload on a sibling branch.
+const sideDrafts = new Map<DraftFor, ChatId>()
+const sideDraftKey = (draftFor: DraftFor) => `dreamspan.pending.${draftFor}`
+
+export const rememberDraftFor = (chatId: ChatId, draftFor: DraftFor) => {
+  draftEntries.set(chatId, draftFor)
+  if (!draftFor.startsWith("side:")) return
+  sideDrafts.set(draftFor, chatId)
+  try {
+    sessionStorage.setItem(sideDraftKey(draftFor), chatId)
+  } catch {
+    // The in-memory entry still works when session storage is unavailable.
+  }
+}
 /** The entry a pending chat opened in this tab is for, if it was opened here. */
 export const draftEntryOf = (chatId: string) => draftEntries.get(chatId) ?? null
 /** A group's new chat: its persona pickers have no persona lock, which is a single chat's. */
 export const isGroupDraft = (chatId: string) => draftEntries.get(chatId)?.startsWith("group:") ?? false
 
-/** The predecessor to reopen when a pending chat is swept while shown. */
-export const reopenSweptDraft = (draftFor: DraftFor, shownId: ChatId | null) =>
-  draftFor.startsWith("workshop:") || draftFor.startsWith("side:") ? shownId : null
+/** The predecessor to reopen, either named by the caller or kept for this story branch. */
+export const reopenSweptDraft = (draftFor: DraftFor, shownId: ChatId | null): ChatId | null => {
+  if (!draftFor.startsWith("side:")) return draftFor.startsWith("workshop:") ? shownId : null
+  if (shownId !== null) return shownId
+  const kept = sideDrafts.get(draftFor)
+  if (kept !== undefined) return kept
+  try {
+    return sessionStorage.getItem(sideDraftKey(draftFor)) as ChatId | null
+  } catch {
+    return null
+  }
+}
+
+/** Starting the remembered side draft leaves the branch free to open a new one. */
+export const forgetSideDraft = (draftFor: DraftFor, chatId: ChatId) => {
+  if (reopenSweptDraft(draftFor, null) !== chatId) return
+  sideDrafts.delete(draftFor)
+  try {
+    sessionStorage.removeItem(sideDraftKey(draftFor))
+  } catch {
+    // The in-memory entry has already been cleared.
+  }
+}
 
 /**
  * The pending chat each one opened in this tab took the place of (DraftChatPage.tsx): the one
