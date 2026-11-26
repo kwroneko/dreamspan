@@ -73,7 +73,7 @@ describe("checking a connection", () => {
       const userId = yield* user
       const base = {
         userId,
-        role: "user" as const,
+        role: "admin" as const,
         kind: "openai-chat" as const,
         settings: settings(`${server.url}/v1`),
         apiKey: KEY
@@ -115,7 +115,7 @@ describe("checking a connection", () => {
       const userId = yield* user
       const result = yield* providers.testDraft({
         userId,
-        role: "user",
+        role: "admin",
         kind: "openai-chat",
         settings: settings(`${server.url}/v1`),
         apiKey: "sk-wrong-key-000000",
@@ -137,7 +137,7 @@ describe("checking a connection", () => {
       const userId = yield* user
       const down = yield* providers.testDraft({
         userId,
-        role: "user",
+        role: "admin",
         kind: "openai-chat",
         settings: settings("http://127.0.0.1:9/v1"),
         apiKey: KEY,
@@ -161,7 +161,7 @@ describe("checking a connection", () => {
       )
       const cut = yield* providers.testDraft({
         userId,
-        role: "user",
+        role: "admin",
         kind: "openai-chat",
         settings: settings(`${server.url}/v1`),
         apiKey: KEY,
@@ -201,7 +201,7 @@ describe("checking a connection", () => {
       // The owner's own saved key works, as the created connection would use it.
       const own = yield* providers.testDraft({
         userId: owner,
-        role: "user",
+        role: "admin",
         kind: "openai-chat",
         settings: settings(`${server.url}/v1`),
         credentialId: credential.id,
