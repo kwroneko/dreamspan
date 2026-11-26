@@ -1,4 +1,42 @@
-# Running the container with the command sandbox
+# Run Dreamspan in Docker
+
+Build the first release from its source checkout with Docker and Compose. From the repository root:
+
+```sh
+docker build -t dreamspan:0.1.0 .
+mkdir -p data
+```
+
+Use a local filesystem for `./data` and make it writable by the image's `node` user (UID 1000 for a standard Docker setup). Create `../dreamspan-secrets/admin-password` outside the checkout with a single strong password of at least eight characters. Give only the operator and the container user access to the file.
+
+Save this as `compose.yaml` beside the Dockerfile:
+
+```yaml
+services:
+  dreamspan:
+    image: ${DREAMSPAN_IMAGE:-dreamspan:0.1.0}
+    ports:
+      - "${DREAMSPAN_BIND_ADDRESS:?Set this to the host's IPv4 loopback address}:8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      ADMIN_USER: admin
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    secrets:
+      - admin_password
+
+secrets:
+  admin_password:
+    file: ../dreamspan-secrets/admin-password
+```
+
+Set `DREAMSPAN_BIND_ADDRESS` to your host's IPv4 loopback address in the Compose `.env` file. Run `docker compose up -d --wait` and open that address on port 8080 over HTTP. Sign in as `admin` with the password you chose. This file seeds the password when there is no enabled admin with a password. Change it in **Settings → Account** after signing in.
+
+For remote use, put the app behind an HTTPS reverse proxy that supports WebSockets. Set `PUBLIC_ORIGINS` to the exact browser-facing origin and keep the app's port private. If the proxy supplies the user identity, configure proxy authentication and trusted peers as described in the [architecture guide](../ARCHITECTURE.md#4-authentication).
+
+See the [user guide](../docs/GUIDE.md) for first-run setup, the [changelog](../CHANGELOG.md) for release changes, and the [upgrade and rollback runbook](../docs/ROLLBACK.md) before updating.
+
+## Running the container with the command sandbox
 
 The workshop's `bash` and `search_files` tools run each command in a bubblewrap sandbox
 (spec/FILES-AND-ENVIRONMENT.md §3, ARCHITECTURE.md "Files and commands"). Bubblewrap needs
@@ -6,12 +44,13 @@ unprivileged user namespaces, and Docker's defaults block them in two ways. With
 below the server still runs, the file tools still work, and the workshop's "Run commands" row
 says why commands are unavailable.
 
-## Settings
+### Settings
+
+To enable sandboxed commands, add the following settings to the service above. Keep its other settings, including data and authentication.
 
 ```yaml
 services:
-  rp:
-    image: dreamspan
+  dreamspan:
     user: "0:0"                                 # the entrypoint drops to node (uid 1000); see below
     cgroup: private                             # the container's own cgroup namespace (Docker's default on cgroup v2)
     mem_limit: 8g                               # the container's cap: the server and every command together
@@ -21,8 +60,7 @@ services:
       # Hosts with AppArmor (Ubuntu, Debian with AppArmor on), after loading the profile:
       # - apparmor=dreamspan
     environment:
-      # The server's public addresses behind NAT, which commands may not reach (see below).
-      # PUBLIC_ADDRESSES: "203.0.113.7"
+      # Set PUBLIC_ADDRESSES here if the server is behind NAT (see below).
       # Each account's Files quota by default (files, versions and home folder together).
       # FILES_QUOTA: "10G"
 ```
@@ -145,7 +183,7 @@ The kernel must allow unprivileged user namespaces (`/proc/sys/user/max_user_nam
 on Debian before 11, `kernel.unprivileged_userns_clone=1`), and use cgroup v2 for the memory cap.
 Checked on Linux 6.12 with Docker 29.7.2: with the seccomp and system-path settings, a command
 in the image runs as the sandbox's own user, sees only its files, runs git, python3, rg and
-node, reaches a public site, and is refused 127.0.0.1; with only the seccomp file it fails with
+node, reaches a public site, and is refused access to loopback. With only the seccomp file it fails with
 "Can't mount proc on /proc", and with neither with "No permissions to create a new namespace".
 
 ## What the image adds

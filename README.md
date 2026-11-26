@@ -1,32 +1,28 @@
 # Dreamspan
 
-A browser-based agentic roleplay harness meant to replace SillyTavern (ST) for people who want more than a chat UI. It runs on a server, is used remotely from any browser, and must eventually work well on phones.
+A self-hosted roleplay app for desktop and phone browsers. Bring your own model connection and start a story with one character or a whole cast.
 
-Its main feature is LCM-style hierarchical summarization: chats of unlimited length with a fixed, cache-friendly context budget, and nothing lost. Around that, it rebuilds what ST does badly:
+Dreamspan keeps the original chat as automatic summaries make room for new turns in the model's context. You can edit a message, try a different reply, branch the story, or follow a side thread. Chats, character cards, personas, lorebooks and prompt presets can come with you from SillyTavern.
 
-- Chats are first-class objects with any number of cards.
-- Personas are just cards.
-- Message versions can be swapped in place, branched, or run as parallel threads.
-- Edits never destroy anything.
-- The web app behaves like a web app: URLs, multiple tabs, concurrent generations.
+**0.1.0** is the first tester release. Start with the [user guide](docs/GUIDE.md), see what's included in the [changelog](CHANGELOG.md), or read the [Docker setup](docker/README.md) and [upgrade and rollback runbook](docs/ROLLBACK.md) to host a copy.
 
-It stays compatible with what users already have: ST cards, chat-completion presets, lorebooks, and whole ST data folders.
+## Quick start from source
 
-## Status
-
-Built through the Phase 3 LCM implementation (2026-10-30): ST imports, streaming roleplay chats, independent forks and message versions, library editors, protected drafts, image input and context estimates, and hierarchical summarization. Agentic RP and workshop features remain planned. [ARCHITECTURE.md](ARCHITECTURE.md) describes what's implemented.
+From the repository root, with Node.js 24.11 or later and npm:
 
 ```bash
-npm install
-npm run build        # the client and the database worker bundles
-npm start            # http://127.0.0.1:8080, data in ./data
-npm run check        # typecheck, lint, format, the fast tests
-npm run test:slow    # scale, model-based, timing and process-spawn tests
+npm ci
+npm run build
+NODE_ENV=production npm start
 ```
 
-For development, run `npm run dev:server` and `npm run dev:client` (Vite on :5173, proxying to the server).
+Open the local address on port 8080 over HTTP. By default Dreamspan listens only on loopback and stores its data in `./data`. Settings → Account lets you set a password for the local admin account.
 
-Design documents:
+## Development
+
+Run `npm run dev:server` and `npm run dev:client` in separate terminals. Vite runs on port 5173 and proxies to the server. Run `npm run check` for static checks and fast tests, and `npm run test:slow` for the slow suite.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the implemented system. Design documents:
 
 - [spec/OVERVIEW.md](spec/OVERVIEW.md): goals, non-goals, principles, stack.
 - [spec/DESIGN.md](spec/DESIGN.md): requirements and design decisions by area, each marked decided, proposed or open.
@@ -57,10 +53,10 @@ Natively, without Docker, against a model server on the same machine: LM Studio,
 **Start it:**
 
 ```bash
-NODE_ENV=production npm start    # http://127.0.0.1:8080, data in ./data
+NODE_ENV=production npm start
 ```
 
-`NODE_ENV=production` runs the bundled database workers (about half the memory); without it the server runs them from source, which also works. No other environment is needed: the server listens on `127.0.0.1` only, and while no account has a password, a browser on the same machine is the admin without logging in. If you set a password, you log in as usual. `DATA_DIR=/some/dir` keeps the data elsewhere. Keep it out of iCloud Drive, Dropbox and other synced folders: syncing a live SQLite database can corrupt it, and on macOS the server can't detect them as it does network filesystems on Linux.
+`NODE_ENV=production` runs the bundled database workers. While no account has a password, a browser on the same machine opens as admin. After setting a password, sign in with it. Set `DATA_DIR` to store the data elsewhere on a local disk. Syncing a live SQLite database through a cloud drive can corrupt it.
 
 `llama-server` and `mlx_lm.server` also default to port 8080. Start them on another port (below), or move this one with `PORT=8090`.
 
@@ -68,16 +64,16 @@ NODE_ENV=production npm start    # http://127.0.0.1:8080, data in ./data
 
 | Server | Command | Base URL |
 |---|---|---|
-| LM Studio | Developer tab → Start server (load the model with the context length you want) | `http://127.0.0.1:1234/v1` |
-| llama.cpp | `llama-server -m model.gguf -c 32768 --jinja --port 8081` | `http://127.0.0.1:8081/v1` |
-| MLX | `mlx_lm.server --model <path or Hugging Face id> --port 8081` | `http://127.0.0.1:8081/v1` |
+| LM Studio | Developer tab → Start server (load the model with the context length you want) | The model server's local HTTP address on port 1234, ending in `/v1` |
+| llama.cpp | `llama-server -m model.gguf -c 32768 --jinja --port 8081` | The model server's local HTTP address on port 8081, ending in `/v1` |
+| MLX | `mlx_lm.server --model <path or Hugging Face id> --port 8081` | The model server's local HTTP address on port 8081, ending in `/v1` |
 
 **Add the connection:**
 
 1. Settings → Connections → New connection.
-2. Provider: OpenAI Chat Completions. Base URL: the one above, with `/v1`. API key: No key (or the key you gave the server). Create connection.
-3. Check: it should say "It works" and list the model. Then Models → Refresh from provider. A model the server doesn't list can be added with Add a model.
-4. Settings → Chats → Default model: pick it. Or set a model per chat in the chat's side panel.
+2. Choose OpenAI Chat Completions and enter the model server's base URL ending in `/v1`. Leave the API key blank if the server doesn't require one.
+3. Run **Test**, choose the default model for new chats, then select **Create connection**. If the server doesn't list the model, type its model ID.
+4. To change the default later, go to **Settings → Chats → Default model**. Use the chat's model picker to choose a model for that chat.
 
 **Context size.** A model whose window isn't reported shows `128k context (assumed)` and its cost stays unknown. Set its actual context window with Edit on the connection's page to match what the server loaded (`-c` for llama-server, the context length in LM Studio). Requests use that model's window; its optional "Context to send" setting can lower the limit. Prompt presets don't set the context size. Token counts are estimates, so leave some room below a local server's loaded window.
 

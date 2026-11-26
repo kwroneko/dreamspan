@@ -61,7 +61,7 @@ The slow startup refusal tests preserve the shipped `packages/server` and siblin
 
 `packages/server/src/main.ts` reads configuration from the environment and launches `ServerLive` (`server.ts`). That's one HTTP server with these parts:
 - **`/rpc`:** the RPC endpoint (`AppApi` from `@dreamspan/shared/api.ts`) over a WebSocket, JSON-serialized. Every UI action is meant to become an RPC in this group (DESIGN §7.7). Today it has `Health`, `Whoami`, the account RPCs (§4), the provider-kind, connection, credential, model, network-settings and usage RPCs (§6), `ListLibrary` (§11), the chat RPCs (§12), the editor RPCs (§14), the recycle bin (§3.11), composer-draft and notice RPCs (§12), and the request inspector (§15). `AppApi` is `AppCoreApi` merged with the authenticated `ForkMergeApi` (§3.9), `SplitChatApi`, `GalleryApi`, `ChatEventsApi` (`SubscribeChat`, whose event union tipped `AppCoreApi` over), `AgentApi` (§16, "Agent rollouts"), `DecisionApi` (§16, "Decision models"), `ChatContextsApi` (§3.8, "Away rows in the timeline") and `DraftPreviewApi` (§12, "The first request of a chat not sent yet"), and `server.ts` builds one handler layer for each: a single `toLayer` over every RPC exceeds TypeScript's instantiation depth (TS2589). New RPCs that tip it over go in a group of their own the same way.
-- **`/healthz`:** a plain-text liveness route, used by the Docker health check.
+- **`/healthz`:** a plain-text liveness route, used by the Docker health check. It returns `ok` and sends the running server's release version in the `X-App-Version` response header.
 - **`/auth/login`, `/auth/logout`** (§4), **`/library/import`, `/library/export`** (§11.4) and **`/library/avatar`, `/library/media`** (§14.5): plain HTTP, for what a WebSocket message can't do well, a cookie and a file.
 - **Everything else:** the client build, served as a single-page app (unknown paths return `index.html`, so deep links work). Pages, the fallback, source maps and unhashed files are sent with `Cache-Control: no-cache`, so a browser revalidates them by ETag on every load and a deploy shows at once; the build's content-hashed files under `/assets/` with `public, max-age=31536000, immutable` (`StaticRoutes` in `server.ts`, `test/staticCache.test.ts`).
 
@@ -1517,6 +1517,8 @@ Tests cover prefix edits, signed and redacted blocks, intra-message edits, model
 ---
 
 ## 7. Deployment
+
+**App release version.** The server reads the root `package.json` version at startup and reports it in both the `X-App-Version` header on `/healthz` and the `Health.version` RPC field shown in Settings → Server status. The Docker image includes the root manifest. The plugin API has its own compatibility version.
 
 **Client build identity** (macrohighlight, 2026-11-02): Vite embeds a new UUID for each production build as `import.meta.env.VITE_BUILD_ID` and emits the same identity in `dist/build-id.json`. `/healthz` retains its `ok` body and adds `Cache-Control: no-store` and `X-Client-Build`, read from the configured client directory on each request so a replaced bundle is visible without restarting the server. A missing stamp leaves liveness usable without the header. Vite development uses `development` and proxies `/healthz`; its notice checks are disabled. This stamp identifies the client bundle independently of the database worker source hash (§3.6).
 

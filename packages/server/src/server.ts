@@ -159,8 +159,9 @@ import { makeMcpHandlers } from "./api/mcp.ts"
 import { makePersonaLockHandlers } from "./api/personaLock.ts"
 import { makeDraftChatHandlers } from "./api/draftChats.ts"
 import * as McpConnections from "./mcp/McpConnections.ts"
+import manifest from "../../../package.json" with { type: "json" }
 
-const VERSION = "0.0.0"
+const { version } = manifest
 const startedAt = Date.now()
 
 const CoreHandlers = AppCoreApi.toLayer(
@@ -202,7 +203,7 @@ const CoreHandlers = AppCoreApi.toLayer(
           Effect.map(
             (delay) =>
               new Health({
-                version: VERSION,
+                version,
                 uptimeMs: Date.now() - startedAt,
                 eventLoopP99Ms: delay.p99Ms,
                 eventLoopMaxMs: delay.maxMs,
@@ -573,6 +574,7 @@ const HealthRoute = HttpRouter.add(
     return HttpServerResponse.text("ok", {
       headers: {
         "cache-control": "no-store",
+        "x-app-version": version,
         "x-generator-kind": generatorKind,
         ...(buildId ? { "x-client-build": buildId } : {})
       }
