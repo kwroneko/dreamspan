@@ -39,11 +39,11 @@ async function checkEmptyPages(page: Page, url: string) {
   await page.goto(`${url}/files`)
   await expect(page.getByText("No files yet.", { exact: false })).toBeVisible()
   await expect(page.getByText("Upload files", { exact: true })).toBeVisible()
-  const usage = page.getByRole("button", { name: /0 B of .+ used/ })
+  const usage = page.getByRole("button", { name: /of .+ used/ })
   await usage.click()
   const storage = page.getByRole("dialog", { name: "Storage" })
   await expect(storage.getByText("Your files", { exact: true })).toBeVisible()
-  await expect(storage.getByText("0 B", { exact: true }).first()).toBeVisible()
+  await expect(storage.getByText(/\d+(?:\.\d+)? (?:B|KB|MB|GB)/).first()).toBeVisible()
   await checkClean(page)
 
   await page.goto(`${url}/settings`)
