@@ -9,6 +9,7 @@ import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import { pluginDocumentation } from "../../plugin-api/src/docs.ts"
 import { client, posted, serverLayer, testConfig, outcome, login } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider, type Recorded } from "./support/mockProvider.ts"
+import { startHttpProxy, testPublicAddress, withTestHost } from "./support/proxies.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -423,9 +424,16 @@ it.live(
         ),
         (m) => Effect.promise(() => m.close())
       )
+      const loopback = [127, 0, 0, 1].join(".")
+      const proxy = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpProxy((host) => (host === testPublicAddress ? loopback : host))),
+        (server) => Effect.promise(server.close)
+      )
+      yield* root.SetNetworkSettings({ proxyUrl: proxy.url, bypass: [], forceProxy: false })
+      const origin = new URL(withTestHost(mock.url, testPublicAddress)).origin
       yield* generateReply(api, {
         // Keep the direct offer visible so absence tests distinguish permissions from deferral.
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+        connection: { kind: "openai-chat", baseUrl: `${origin}/v1`, providerSettings: { toolLoading: "every" } },
         model: { context: 200000 }
       })
       const chat = yield* api.CreateWorkshop({}),
