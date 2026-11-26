@@ -8,15 +8,19 @@ Dreamspan keeps the original chat as automatic summaries make room for new turns
 
 ## Quick start from source
 
-From the repository root, with Node.js 24.11 or later and npm:
+1. Install [Node.js 24](https://nodejs.org/) (24.11 or later, with npm).
+2. Clone this repository or download and extract its source ZIP.
+3. Open the Dreamspan folder and start the app.
 
-```bash
-npm ci
-npm run build
-NODE_ENV=production npm start
-```
+   | Platform | How to start |
+   | --- | --- |
+   | Windows | Double-click `Start.bat`. |
+   | macOS | Double-click `Start.command`. If it lacks execute permission after extracting a ZIP, run `chmod +x Start.command` in Terminal first. |
+   | Linux | Run `./start.sh` in a terminal. |
 
-Open `http://127.0.0.1:8080`. By default Dreamspan listens only on loopback and stores its data in `./data`. Settings → Account lets you set a password for the local admin account.
+   You can also run `npm start` from the Dreamspan folder on any platform. The launcher installs dependencies and builds the app automatically on the first run. Keep the terminal open while Dreamspan runs. The launcher can restart Dreamspan automatically after a one-click update.
+
+4. Open `http://127.0.0.1:8080`. By default Dreamspan listens only on loopback and stores its data in `./data`. Go to **Settings → Account** to set a password for the local admin account.
 
 ## Development
 
@@ -46,17 +50,17 @@ Natively, without Docker, against a model server on the same machine: LM Studio,
    node -e "new (require('node:sqlite').DatabaseSync)(':memory:').exec('CREATE VIRTUAL TABLE t USING fts5(x)')"
    ```
    No output means it's fine. A Node built against another SQLite (some package managers do this) may fail here.
-2. In the repository: `npm ci`, then `npm run build`. Nothing after this needs the network: the client loads no fonts or scripts from elsewhere, and the server has no update checks, telemetry or remote model catalogs.
+2. In the repository, run `npm ci` and then `npm run build`. Local startup after this works without the network, and the client loads no fonts or scripts from elsewhere.
 3. Download the model weights and check that the model server starts.
 4. If you want your SillyTavern characters and presets, import them now (Import, or "Import a SillyTavern folder" there). You'll want a preset whose context size you can set (below).
 
 **Start it:**
 
 ```bash
-NODE_ENV=production npm start
+npm start
 ```
 
-`NODE_ENV=production` runs the bundled database workers. While no account has a password, a browser on the same machine opens as admin. After setting a password, sign in with it. Set `DATA_DIR` to store the data elsewhere on a local disk. Syncing a live SQLite database through a cloud drive can corrupt it.
+While no account has a password, a browser on the same machine opens as admin. After setting a password, sign in with it. Set `DATA_DIR` to store the data elsewhere on a local disk. Syncing a live SQLite database through a cloud drive can corrupt it.
 
 `llama-server` and `mlx_lm.server` also default to port 8080. Start them on another port (below), or move this one with `PORT=8090`.
 

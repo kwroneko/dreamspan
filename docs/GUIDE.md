@@ -2,6 +2,12 @@
 
 Dreamspan is a browser-based roleplay app. You can play one or more characters, try different versions of a reply, and branch a story to see where it goes.
 
+## Start Dreamspan on your computer
+
+Install [Node.js 24](https://nodejs.org/) (24.11 or later, with npm), then clone Dreamspan or download and extract its source ZIP. Open `Start.bat` on Windows or `Start.command` on macOS. On Linux run `./start.sh` in the Dreamspan folder. You can also run `npm start` from that folder on any platform.
+
+The first launch installs dependencies and builds the app. Leave the launcher running and open `http://127.0.0.1:8080` in your browser. If a one-click update is available, the launcher lets Dreamspan restart automatically once the update is ready.
+
 ## Sign in and write your first turn
 
 Open the address your host gave you and sign in with your handle and password. If your host uses a separate sign-in page, follow that page. For a fresh local install, Dreamspan opens as admin on the same machine until you set a password under **Settings → Account**.

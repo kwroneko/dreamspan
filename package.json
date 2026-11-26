@@ -12,8 +12,9 @@
   "scripts": {
     "dev:server": "node --watch packages/server/src/dev/main.ts",
     "dev:client": "npm run dev -w @dreamspan/client",
-    "build": "export MIMALLOC_ALLOW_THP=0 && npm run build -w @dreamspan/client && npm run build -w @dreamspan/server",
-    "start": "node packages/server/src/main.ts",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/start.mjs",
+    "start:server": "node packages/server/src/main.ts",
     "typecheck": "tsc --noEmit -p packages/shared && NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit -p packages/server && NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit -p packages/server/test/protocol && tsc --noEmit -p packages/client && tsc --noEmit -p packages/client/e2e && tsc --noEmit -p packages/client/perf",
     "lint": "eslint .",
     "format": "prettier --write .",
