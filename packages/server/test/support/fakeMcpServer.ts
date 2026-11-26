@@ -91,7 +91,10 @@ const methodsOf = (body: unknown): Array<string> =>
       : []
   )
 
-export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): Promise<FakeMcpServer> => {
+export const startFakeMcpServer = async (
+  initial: Partial<FakeMcpState> = {},
+  advertise?: string
+): Promise<FakeMcpServer> => {
   const state: FakeMcpState = {
     tools: [],
     pageSize: 0,
@@ -269,7 +272,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
   })
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve))
   const { port } = http.address() as AddressInfo
-  base = `http://127.0.0.1:${port}`
+  base = `http://${advertise ?? "127.0.0.1"}:${port}`
   return {
     url: base,
     streamableUrl: `${base}/mcp`,

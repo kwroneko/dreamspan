@@ -9,7 +9,7 @@ import { BlockList, connect, isIP, type Socket } from "node:net"
 import { networkInterfaces } from "node:os"
 import { rm } from "node:fs/promises"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
-import { isPublicMediaAddress } from "../net/externalMedia.ts"
+import { isPublicAddress } from "../net/addresses.ts"
 
 export type Resolve = (host: string) => Promise<ReadonlyArray<string>>
 
@@ -59,7 +59,7 @@ const bare = (host: string) => (host.startsWith("[") && host.endsWith("]") ? hos
 export const sandboxMayReach = (
   address: string,
   own: { readonly has: (address: string) => boolean } = ownAddresses()
-) => isPublicMediaAddress(address) && !own.has(address.toLowerCase())
+) => isPublicAddress(address) && !own.has(address.toLowerCase())
 
 /** The addresses of `host` a command may reach, in the resolver's order; empty: refused. */
 export const reachableAddresses = async (host: string, resolve: Resolve = defaultResolve) => {

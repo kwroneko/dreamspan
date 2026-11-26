@@ -15,6 +15,8 @@ export interface FakeAuthState {
   registerBody: string | null
   /** Lets a test pause an authorization-code exchange after it arrives. */
   beforeCodeExchange?: () => Promise<void>
+  /** Redirects a token request before the grant is redeemed. */
+  tokenRedirect?: string
 }
 
 interface Issued {
@@ -137,6 +139,10 @@ export const startFakeAuthServer = async (
       const form = new URLSearchParams(body)
       const grant = form.get("grant_type")
       recorded.push(`token:${grant}`)
+      if (state.tokenRedirect !== undefined) {
+        response.writeHead(307, { location: state.tokenRedirect }).end()
+        return
+      }
       if (grant === "authorization_code") {
         await state.beforeCodeExchange?.()
         const entry = codes.get(form.get("code") ?? "")

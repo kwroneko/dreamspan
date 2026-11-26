@@ -278,6 +278,7 @@ interface Pooled {
   readonly userId: string
   /** The connection's `cache_revision` it was opened at. */
   readonly revision: number
+  readonly publicOnly: boolean
   /** The sign-in its headers carry (McpPrepared.signIn). */
   readonly signIn: string
   readonly scope: Scope.Closeable
@@ -693,7 +694,8 @@ export const layer = Layer.effect(
         const headersJson = yield* decrypt(resolved.headersEnc, headersBinding(connectionId))
         const proxyUrl = yield* decrypt(resolved.proxyUrlEnc, proxyBinding(connectionId))
         // An admin may require the instance proxy for everyone else, as for provider connections.
-        const forced = network.forced() && resolved.ownerRole !== "admin"
+        const publicOnly = resolved.ownerRole !== "admin" || resolved.callerRole !== "admin"
+        const forced = publicOnly && network.forced()
         if (forced && (yield* network.view).proxy === null)
           return yield* refused("The admin requires the instance proxy, but none is set.")
         const override: ProxyOverride = forced
@@ -703,7 +705,7 @@ export const layer = Layer.effect(
             : connection.proxyMode === "direct"
               ? { mode: "direct" }
               : { mode: "inherit" }
-        const requestNetwork = network.prepare(override, inventory.add)
+        const requestNetwork = network.prepare(override, inventory.add, { publicOnly })
         // The user's own sign-in, when they have one, is sent in place of the connection's key.
         const signIn =
           withSignIn && resolved.oauthEnc !== null
@@ -997,6 +999,7 @@ export const layer = Layer.effect(
             kept !== stale &&
             !kept.dead &&
             kept.revision === prepared.connection.cacheRevision &&
+            kept.publicOnly === prepared.network.publicOnly &&
             kept.signIn === prepared.signIn
           ) {
             kept.users += 1
@@ -1014,6 +1017,7 @@ export const layer = Layer.effect(
             connectionId: prepared.connection.id,
             userId,
             revision: prepared.connection.cacheRevision,
+            publicOnly: prepared.network.publicOnly,
             signIn: prepared.signIn,
             scope,
             session,

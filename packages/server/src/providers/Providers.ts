@@ -77,7 +77,7 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@dreamspan/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
-import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
+import { AddressRefused, Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem, requestRoute, type Route } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry, withCatalog } from "./catalog.ts"
@@ -1029,7 +1029,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           const headersJson = yield* decryptWith(resolved.headersEnc, binding(connectionId, "headers"))
           const proxyUrl = yield* decryptWith(resolved.proxyUrlEnc, binding(connectionId, "proxy_url"))
           // An admin may require the instance proxy for everyone else (owner, 2026-10-11).
-          const forced = network.forced() && resolved.ownerRole !== "admin"
+          const publicOnly = resolved.ownerRole !== "admin"
+          const forced = publicOnly && network.forced()
           // Fails closed: setInstance refuses forcing without a proxy, but an unreadable one counts too.
           if (forced && (yield* network.view).proxy === null) {
             return yield* providerError("unusable", "the admin requires the instance proxy, but none is set")
@@ -1043,7 +1044,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 : { mode: "inherit" }
           const headers = headersJson === null ? {} : (JSON.parse(headersJson) as Record<string, string>)
           inventory.headers(headers)
-          const transport = network.prepare(override, inventory.add)
+          const transport = network.prepare(override, inventory.add, { publicOnly })
           // Over http a connection's own proxy reads every byte. Setting one needs no key, so
           // it would otherwise be a way to collect the key in the clear.
           const secret = apiKey !== null || Object.keys(headers).length > 0
@@ -1068,6 +1069,9 @@ export const layer = (options: ProvidersOptions = {}) =>
             scrub: inventory.scrub
           }
           if (!info.acceptsFetch) {
+            if (publicOnly) {
+              return yield* providerError("unusable", `${info.label} does not support public-address checks.`)
+            }
             // Its traffic would bypass our fetch, so it may only go where we'd send it direct anyway.
             const route = yield* transport.route(new URL(prepared.baseUrl))
             if (route.via === "proxy") {
@@ -2044,7 +2048,13 @@ export const layer = (options: ProvidersOptions = {}) =>
           }
           // pi-ai reports onResponse only for successful responses (the SDKs throw first on
           // errors), so the status and Retry-After are read here, on every response.
-          const routed = fetchFor(prepared, onRoute)
+          const send = fetchFor(prepared, onRoute)
+          // Keep transport refusals that an SDK would otherwise report as a generic connection error.
+          const routed: typeof fetch = (input, init) =>
+            send(input, init).catch((error: unknown) => {
+              if (error instanceof RedirectRefused || error instanceof AddressRefused) state.refused = error.message
+              throw error
+            })
 
           const message = yield* Effect.tryPromise({
             try: async (signal) => {
@@ -2114,15 +2124,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                 recordSent = undefined
                 heardAt = Date.now()
                 // SDK-created affinity headers are now available, before any HTTP is sent.
-                // Preserve refused redirects instead of retrying the SDK's generic network error.
                 if (configuration !== null && configuration !== autoConfigurationStamp()) {
                   state.refused = autoChanged().message
                   throw new Error(state.refused)
                 }
-                const response = await routed(input, init).catch((error: unknown) => {
-                  if (error instanceof RedirectRefused) state.refused = error.message
-                  throw error
-                })
+                const response = await routed(input, init)
                 captureUsageHeaders(response.headers, state.capture)
                 state.status = response.status
                 state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
@@ -2884,7 +2890,13 @@ export const layer = (options: ProvidersOptions = {}) =>
             model: key
           }
           const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
-          const routed = fetchFor(prepared, (description) => (route = description))
+          let refusal: string | null = null
+          const send = fetchFor(prepared, (description) => (route = description))
+          const routed: typeof fetch = (input, init) =>
+            send(input, init).catch((error: unknown) => {
+              if (error instanceof RedirectRefused || error instanceof AddressRefused) refusal = error.message
+              throw error
+            })
           const failed = (errorMessage: string): AssistantMessage => ({
             role: "assistant",
             content: [],
@@ -2949,7 +2961,11 @@ export const layer = (options: ProvidersOptions = {}) =>
               orElse: () => Effect.succeed(failed(`no answer in ${TEST_TIMEOUT_MS / 1000} s`))
             })
           )
-          return done(classify(message, { ...seen, category: null }, undefined, text !== "", true))
+          return done(
+            refusal === null
+              ? classify(message, { ...seen, category: null }, undefined, text !== "", true)
+              : providerError("unusable", refusal)
+          )
         })
 
       const testDraft: ProvidersShape["testDraft"] = (input) =>
@@ -3123,7 +3139,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             catch: (error) =>
               scrubbed(
                 prepared,
-                error instanceof RedirectRefused
+                error instanceof RedirectRefused || error instanceof AddressRefused
                   ? providerError("unusable", error.message)
                   : providerError("network", error instanceof Error ? error.message : String(error))
               )

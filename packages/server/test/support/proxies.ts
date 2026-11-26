@@ -20,14 +20,15 @@ const track = (sockets: Set<Socket>, socket: Socket) => {
   socket.on("close", () => sockets.delete(socket))
 }
 
-export const startHttpProxy = (): Promise<TestProxy> =>
+export const startHttpProxy = (mapHost: (host: string) => string = (host) => host): Promise<TestProxy> =>
   new Promise((resolve) => {
     const tunnels: Array<string> = []
     const sockets = new Set<Socket>()
-    // Plain http:// targets arrive as absolute-URI requests; https:// ones as CONNECT.
+    // Accept absolute-URI forwarding and CONNECT tunnels.
     const server = createHttpServer((req, res) => {
       const target = new URL(req.url ?? "")
       tunnels.push(target.host)
+      target.hostname = mapHost(target.hostname)
       const upstream = httpRequest(target, { method: req.method, headers: req.headers }, (answer) => {
         res.writeHead(answer.statusCode ?? 502, answer.headers)
         answer.pipe(res)
@@ -38,8 +39,9 @@ export const startHttpProxy = (): Promise<TestProxy> =>
     server.on("connection", (socket) => track(sockets, socket))
     server.on("connect", (req, client: Socket, head) => {
       tunnels.push(req.url ?? "")
-      const [host, port] = (req.url ?? "").split(":")
-      const upstream = connect(Number(port), host, () => {
+      const target = new URL(`http://${req.url}`)
+      const host = mapHost(target.hostname).replace(/^\[(.*)\]$/, "$1")
+      const upstream = connect(Number(target.port || 80), host, () => {
         client.write("HTTP/1.1 200 Connection Established\r\n\r\n")
         upstream.write(head)
         upstream.pipe(client)
@@ -60,7 +62,10 @@ export const startHttpProxy = (): Promise<TestProxy> =>
   })
 
 /** SOCKS5 with optional username/password auth (RFC 1928, RFC 1929); CONNECT only. */
-export const startSocks5Proxy = (auth?: { username: string; password: string }): Promise<TestProxy> =>
+export const startSocks5Proxy = (
+  auth?: { username: string; password: string },
+  mapHost: (host: string) => string = (host) => host
+): Promise<TestProxy> =>
   new Promise((resolve) => {
     const tunnels: Array<string> = []
     const sockets = new Set<Socket>()
@@ -103,6 +108,11 @@ export const startSocks5Proxy = (auth?: { username: string; password: string }):
             if (buffer.length < 10) return
             host = [...buffer.subarray(4, 8)].join(".")
             offset = 8
+          } else if (atyp === 0x04) {
+            if (buffer.length < 22) return
+            const words = Array.from({ length: 8 }, (_, i) => buffer.readUInt16BE(4 + i * 2).toString(16))
+            host = new URL(`http://[${words.join(":")}]`).hostname.slice(1, -1)
+            offset = 20
           } else if (atyp === 0x03) {
             const len = buffer[4]!
             if (buffer.length < 7 + len) return
@@ -115,7 +125,7 @@ export const startSocks5Proxy = (auth?: { username: string; password: string }):
           const rest = buffer.subarray(offset + 2)
           client.off("data", onData)
           tunnels.push(`${host}:${port}`)
-          const upstream = connect(port, host, () => {
+          const upstream = connect(port, mapHost(host), () => {
             client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
             if (rest.length > 0) upstream.write(rest)
             upstream.pipe(client)
@@ -169,3 +179,12 @@ export const startTarget = (
       resolve({ url: `http://127.0.0.1:${port}`, requests: () => count, close: () => closeServer(server, sockets) })
     })
   })
+
+/** An address classified as public, routed exclusively through a local test proxy. */
+export const testPublicAddress = [93, 184, 216, 34].join(".")
+
+export const withTestHost = (url: string, host: string) => {
+  const target = new URL(url)
+  target.hostname = host
+  return target.href
+}

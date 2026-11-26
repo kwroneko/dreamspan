@@ -12,6 +12,7 @@ import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { auth, type OAuthClientProvider, type OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js"
 import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js"
+import { bareHost, isLocalhostName } from "../net/addresses.ts"
 import type { TargetAddresses } from "../net/Network.ts"
 import { sandboxMayReach } from "../sandbox/network.ts"
 
@@ -311,15 +312,8 @@ class SignInTargetRefused extends Error {
   override readonly name = "SignInTargetRefused"
 }
 
-const bareHost = (hostname: string) =>
-  hostname
-    .replace(/^\[(.*)\]$/, "$1")
-    .replace(/\.$/, "")
-    .toLowerCase()
-
-/** `localhost` and its subdomains always mean this machine: never asked of DNS. */
+/** Localhost names use loopback without a DNS lookup. */
 const LOOPBACK = ["127.0.0.1", "::1"]
-const isLocalhostName = (host: string) => host === "localhost" || host.endsWith(".localhost")
 
 /**
  * Whether the server counts as local, from what the user typed only: an IP literal that isn't

@@ -20,6 +20,7 @@ import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import { startHttpProxy, testPublicAddress, withTestHost } from "./support/proxies.ts"
 
 const layer = (bindKeysToOrigins = true) =>
   Providers.layer({ retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }, bindKeysToOrigins }).pipe(
@@ -1606,7 +1607,12 @@ describe("secrets stay where they were entered (audit regressions)", () => {
   it.live("an admin can require the instance proxy for everyone else", () =>
     Effect.gen(function* () {
       const target = yield* mock(listing)
-      const proxy = yield* mock(listing)
+      const loopback = new URL(target.url).hostname
+      const proxy = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpProxy((host) => (host === testPublicAddress ? loopback : host))),
+        (server) => Effect.promise(server.close)
+      )
+      const publicUrl = withTestHost(`${target.url}/v1`, testPublicAddress)
       const providers = yield* Providers.Providers
       const network = yield* Network.Network
       const admin = yield* user("ana")
@@ -1614,16 +1620,15 @@ describe("secrets stay where they were entered (audit regressions)", () => {
       const own = yield* providers.createConnection({
         userId: bo,
         kind: "openai-chat",
-        settings: settings(`${target.url}/v1`),
+        settings: settings(publicUrl),
         apiKey: null
       })
       yield* providers.setProxy(bo, own.id, "direct", null)
-      // The target is on loopback, which the default bypass list sends direct; clear it.
       yield* network.setInstance({ proxyUrl: proxy.url, bypass: [], forceProxy: true })
       const tested = yield* providers.testConnection(bo, own.id)
-      assert.isTrue(tested.ok)
-      assert.lengthOf(target.requests(), 0)
-      assert.isAbove(proxy.requests().length, 0)
+      assert.isTrue(tested.ok, tested.detail)
+      assert.lengthOf(target.requests(), 1)
+      assert.deepStrictEqual(proxy.tunnels(), [new URL(publicUrl).host])
       assert.strictEqual((yield* flipped(providers.setProxy(bo, own.id, "direct", null))).reason, "bad_request")
       const admins = yield* providers.createConnection({
         userId: admin,

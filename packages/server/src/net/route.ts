@@ -3,7 +3,7 @@
 // without a network.
 import { BlockList, isIP } from "node:net"
 import type { RequestRoute } from "@dreamspan/shared/usage.ts"
-import { addAddressRange, inAddresses } from "./addresses.ts"
+import { addAddressRange, bareHost, inAddresses } from "./addresses.ts"
 
 /**
  * Local ranges go direct by default, so local model servers aren't sent through the
@@ -55,13 +55,6 @@ export const parseBypass = (entries: ReadonlyArray<string>) => {
   }
   return { list: { hosts, suffixes, addresses, hasAddresses } satisfies BypassList, invalid }
 }
-
-/** URL hostnames keep IPv6 brackets; addresses are compared without them. */
-const bareHost = (hostname: string) =>
-  hostname
-    .toLowerCase()
-    .replace(/^\[(.*)\]$/, "$1")
-    .replace(/\.$/, "")
 
 /**
  * Whether `host` is on the list by name or by address; `resolved` are its DNS answers.
