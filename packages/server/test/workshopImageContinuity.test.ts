@@ -8,7 +8,7 @@ import { png, textChunk } from "./formats/support.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 for (const imageLimit of [1, 2])
-  it.live(`image limit ${imageLimit}: rebuilds only when a new screenshot would evict a cached image`, () => {
+  it.live(`image limit ${imageLimit}: retains the recent screenshots within the provider limit`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -62,19 +62,16 @@ for (const imageLimit of [1, 2])
           assert.strictEqual(finished(events, reply.entry.version.id)!.status, "complete")
           return reply.entry.version.id
         })
-      const first = yield* send("First screenshot.", [firstImage])
+      yield* send("First screenshot.", [firstImage])
       const second = yield* send("New screenshot.", [secondImage])
       const run = yield* api.GetRunContext({ versionId: second })
-      if (imageLimit === 1) {
-        assert.isUndefined(run.continuity?.parentVersionId)
-        assert.match(run.continuity?.reason ?? "", /image limit/)
-      } else assert.strictEqual(run.continuity?.parentVersionId, first)
+      assert.isUndefined(run.continuity)
       const request = JSON.stringify(mock.requests().at(-1)!.body)
       assert.include(request, "New screenshot.")
       assert.include(request, Buffer.from(secondBytes).toString("base64"))
       if (imageLimit === 1) assert.notInclude(request, Buffer.from(firstBytes).toString("base64"))
       else assert.include(request, Buffer.from(firstBytes).toString("base64"))
       const third = yield* send("Keep working without another image.")
-      assert.strictEqual((yield* api.GetRunContext({ versionId: third })).continuity?.parentVersionId, second)
+      assert.isUndefined((yield* api.GetRunContext({ versionId: third })).continuity)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

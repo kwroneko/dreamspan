@@ -82,6 +82,13 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
             (m) => m.role === "user" && JSON.stringify(m.content).includes("DISPATCH TASK")
           )
           const done = body.messages.slice(task).filter((m) => m.role === "tool").length
+          const dispatch = body.tools?.some((tool) => tool.function.name === "call_tool")
+          if (!dispatch) {
+            const deferred = body.tools?.some((tool) => tool.function.name === "tool_search")
+            if (done === 0 && deferred) return sse(res, call("tool_search", { query: "select:create_card" }, "load"))
+            if (done === (deferred ? 1 : 0)) return sse(res, call("create_card", { name: "Dispatcher card" }, "create"))
+            return sse(res, completionChunks(["Done."], {}))
+          }
           const step = steps[done]
           sse(res, step ? call(step[0], step[1], step[2]) : completionChunks(["Done."], {}))
         })
@@ -152,7 +159,6 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
         "bash_stop",
         "tool_search",
         "load_skill",
-        "send_message",
         "call_tool"
       ]
     )
@@ -254,9 +260,10 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       .find((r) => r.body && Array.isArray(r.body.messages))!.body as unknown as Body
     assert.strictEqual(JSON.stringify(replayBody.tools), tools)
     dispatcherDefinition.description = originalDescription
-    // A model switch on a several-message Resume retains canonical calls and changes only transport.
+    // A swipe on another transport starts from the original user request.
+    yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "allow" })
     let selected = replay
-    for (const mode of ["every", "native", "dispatcher"] as const) {
+    for (const [index, mode] of (["every", "native", "dispatcher"] as const).entries()) {
       const connection = yield* api.CreateConnection({
         kind: "openrouter",
         settings: {
@@ -287,7 +294,7 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       const switched = mock
         .requests()
         .slice(from)
-        .find((r) => r.body && Array.isArray(r.body.messages))!.body as unknown as Body
+        .findLast((r) => r.body && Array.isArray(r.body.messages))!.body as unknown as Body
       const created = switched.messages
         .flatMap((m) => m.tool_calls ?? [])
         .find((c) => {
@@ -301,13 +308,10 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       )
       assert.lengthOf(
         (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Dispatcher card"),
-        1
+        index + 2
       )
       assert.lengthOf(yield* api.ListVersionEffects({ versionId: selected.version.id }), 1)
-      assert.include(
-        (yield* api.GetRunContext({ versionId: selected.version.id })).continuity?.reason ?? "",
-        "full input cost"
-      )
+      assert.isUndefined((yield* api.GetRunContext({ versionId: selected.version.id })).continuity)
     }
     const undone = yield* api.UndoRolloutEffect(effects[0]!)
     assert.isNotNull(undone.undoneAt)

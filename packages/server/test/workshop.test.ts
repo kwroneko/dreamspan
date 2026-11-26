@@ -307,8 +307,7 @@ describe("workshop", () => {
           ...cardSourceExposures.map((e) => e.id),
           ...parityTools,
           // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
-          "load_skill",
-          "send_message"
+          "load_skill"
         ])
         assert.deepStrictEqual(bodies[1]!.tools, first.tools)
         assert.deepStrictEqual((bodies[1]!.messages as Array<unknown>).slice(0, messages.length), messages)
@@ -338,7 +337,7 @@ describe("workshop", () => {
           (yield* api.ListModelUse()).map((use) => use.modelId),
           setup.model.id
         )
-        assert.strictEqual(snapshot.agent.contract, "several")
+        assert.strictEqual(snapshot.agent.contract, "final_text")
         // A workshop has no request cap (owner, 2026-11-17).
         assert.notProperty(snapshot.agent, "turnCap")
         assert.deepStrictEqual(
@@ -603,8 +602,7 @@ describe("workshop", () => {
           ...cardSourceExposures.map((e) => e.id),
           ...parityTools,
           // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
-          "load_skill",
-          "send_message"
+          "load_skill"
         ]
       )
       // The snapshot holds the definitions; the read adds each one's size in tokens.

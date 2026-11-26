@@ -35,7 +35,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
     void (async () => {
       const read = await call((client) => client("ListVersionEffects", { versionId: asked.request.versionId }))
       const steps =
-        read.ok && outstanding(read.value).length > 0
+        asked.request.fromStep && read.ok && outstanding(read.value).length > 0
           ? await call((client) => client("GetRolloutSteps", { versionId: asked.request.versionId }))
           : { ok: true as const, value: [] }
       const selected = warningEffects(asked.request, read, steps)

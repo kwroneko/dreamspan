@@ -128,8 +128,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
         "bash_output",
         "bash_stop",
         "tool_search",
-        "load_skill",
-        "send_message"
+        "load_skill"
       ]
     )
     assert.isTrue(tools.find((t) => t.name === "read_card")?.defer_loading)
@@ -137,7 +136,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
     assert.include(tools.find((t) => t.name === "load_skill")?.description ?? "", "- cards:")
     assert.deepStrictEqual(
       tools.filter((t) => t.cache_control !== undefined).map((t) => t.name),
-      ["send_message"]
+      []
     )
     // Called before it was loaded: refused, and nothing was read.
     const refused = lastResult(bodies[1]!)!
@@ -154,7 +153,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
     // The transcript keeps what was loaded, so a resume or step edit loads it at the same point.
     const transcript = yield* api.GetRunTranscript({ versionId: version.id })
     assert.isTrue(transcript.entries.some((e) => e.role === "toolResult" && e.tool === "tool_search"))
-    // A follow-up reuses exactly this run's loaded catalog and request prefix.
+    // The next turn keeps the tool trace in history and starts a fresh run.
     const current = yield* api.GetChat({ chatId: chat.id })
     const nextUser = yield* posted(
       api.SendMessage({
@@ -169,14 +168,9 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
     yield* eventually(() => finished(events, next.entry.version.id) !== undefined)
     const nextBody = mock.requests()[from]!.body as unknown as Body
     assert.strictEqual(JSON.stringify(nextBody.tools), JSON.stringify(tools))
-    assert.strictEqual(
-      JSON.stringify(nextBody.messages.slice(0, bodies[3]!.messages.length)),
-      JSON.stringify(bodies[3]!.messages)
-    )
-    assert.strictEqual(
-      (yield* api.GetRunContext({ versionId: next.entry.version.id })).continuity?.parentVersionId,
-      version.id
-    )
+    assert.include(JSON.stringify(nextBody.messages), "tool_search")
+    assert.include(JSON.stringify(nextBody.messages), "Continue the same task.")
+    assert.isUndefined((yield* api.GetRunContext({ versionId: next.entry.version.id })).continuity)
     // An edited load result preserves its references and frozen definitions on resume.
     const { Reader } = yield* Effect.promise(() => import("../src/db/Database.ts"))
     const me = yield* api.Whoami()

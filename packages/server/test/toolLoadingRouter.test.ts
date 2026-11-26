@@ -139,7 +139,7 @@ it.live("keeps its explicit route through mid-run edits and step Resume, then re
     assert.notInclude(JSON.stringify(bodies[2]!.messages), "isn't loaded yet")
     assert.deepStrictEqual(
       bodies[0]!.tools!.filter((t) => t.cache_control).map((t) => t.function.name),
-      ["send_message"]
+      []
     )
     assert.strictEqual(
       JSON.stringify(bodies[2]!.messages.slice(0, bodies[0]!.messages.length)),
@@ -184,9 +184,9 @@ it.live("keeps its explicit route through mid-run edits and step Resume, then re
     const switchedBody = mock.requests()[vertexFrom]!.body as unknown as Body
     assert.deepStrictEqual(switchedBody.provider, vertex)
     assert.isTrue(switchedBody.tools!.some((t) => t.function.defer_loading))
-    assert.notInclude(JSON.stringify(switchedBody.messages), "Edited load.")
+    assert.include(JSON.stringify(switchedBody.messages), "Edited load.")
 
-    // Crossing APIs starts a new transcript and uses each API's own loading representation.
+    // Crossing APIs keeps the historical results and uses the new API's own loading representation.
     yield* generateReply(api, {
       connection: { kind: "anthropic", baseUrl: mock.url, apiKey: "sk-ant-synthetic-key" },
       modelKey: "claude-sonnet-4-5",

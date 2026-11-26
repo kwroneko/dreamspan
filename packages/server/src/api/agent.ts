@@ -20,14 +20,7 @@ import type { UserId } from "@dreamspan/shared/domain.ts"
 import { GenerationUnavailable } from "@dreamspan/shared/chatApi.ts"
 import { uuidv7 } from "@dreamspan/shared/id.ts"
 import { Effect, Option } from "effect"
-import {
-  planResume,
-  planStepResume,
-  planMessageResume,
-  type ResumePlan,
-  StepNotResumable,
-  withoutThinking
-} from "../agent/resume.ts"
+import { planResume, planStepResume, type ResumePlan, StepNotResumable, withoutThinking } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
 import {
@@ -635,43 +628,4 @@ export const makeAgentHandlers = Effect.gen(function* () {
         })
       ).pipe(internal("ListActivity"))
   } satisfies Parameters<typeof AgentApi.of>[0]
-})
-
-/** Used by the existing Regenerate/swipe action. Other contracts keep fresh generation. */
-export const regenerateSeveral = Effect.fnUntraced(function* (input: {
-  readonly versionId: VersionId
-  readonly forkId: ForkId | null
-  readonly expectedRowVersion: number
-  readonly model?: RetryModel
-  readonly direction?: string
-}) {
-  const userId = (yield* CurrentUser).id
-  const reader = yield* Reader
-  const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
-  if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
-    return null
-  // A swipe past a reply still being written starts another reply beside it (DESIGN §3.1): the
-  // unfinished run has no transcript to carry on, so the new version is written afresh.
-  if (material.value.versionStatus === "generating" || material.value.status === "running") return null
-  const located = yield* reader.GetVersion({ userId, versionId: input.versionId })
-  const storyAt = yield* serverStoryAt(
-    reader,
-    userId,
-    (yield* reader.GetSlot({ userId, slotId: located.slotId, forkId: input.forkId })).chatId,
-    input.forkId
-  )
-  // A new version can assemble afresh at the current position; a retained transcript
-  // cannot, because its old tool results may contain another branch or later messages.
-  if (!isDeepStrictEqual((JSON.parse(material.value.snapshot) as Frozen).storyAt, storyAt)) return null
-  if ((JSON.parse(material.value.snapshot) as Frozen).storyStamp !== (yield* storyReadStamp(reader, userId, storyAt)))
-    return null
-  const resume = yield* agentVersionResumer
-  return yield* resume(
-    input.versionId,
-    input.forkId,
-    input.expectedRowVersion,
-    (stored, frozen) => planMessageResume(stored.transcript, input.versionId, frozen.continuity?.historical ?? 0),
-    "edit",
-    input
-  ).pipe(Effect.catchTag("NotResumable", (error) => Effect.fail(new GenerationUnavailable({ message: error.message }))))
 })

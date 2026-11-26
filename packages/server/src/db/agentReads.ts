@@ -266,7 +266,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly rollout_id: string
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
-            r.status IN ('pending', 'running') AS running, r.id AS rollout_id
+            r.status IN ('pending', 'created', 'running') AS running, r.id AS rollout_id
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -274,7 +274,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
-        // An `agent` call's step carries the subagent it started (spec/SUBAGENTS.md §7).
+        // The selected version scopes legacy carried transcripts; the call keeps its own subagent row.
         const messages = JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>
         return yield* withSubagents(
           sql,

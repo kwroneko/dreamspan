@@ -1,3 +1,6 @@
+import { forTarget } from "../agent/wire.ts"
+import { ELIDE_TRIGGER, elidedResultText } from "../agent/continuity.ts"
+import { workshopMessageText, type WorkshopMessage } from "../agent/workshopHistory.ts"
 import { resolveSummaryModel } from "./summaryModel.ts"
 import { cardSkills as readCardSkills, cardSkillsText, offeredSkills, skillsIndexText } from "../agent/toolLoading.ts"
 import { prepareTextTokens } from "./textTokens.ts"
@@ -1356,13 +1359,33 @@ const chatLine = (
   // A merged chat's section and join (assembler/merges.ts): system text, as summaries are sent.
   if (projected.system)
     return { role: "system", content: text, pieces, kind: scripted.volatile ? "volatile" : "history" }
+  const workshop = assembly.request.agent?.workshop && !assembly.request.summarizing
+  const model = assembly.model
+  const trace =
+    workshop && projected.role === "assistant" && model && projected.entry.workshopHistory?.length
+      ? (forTarget(
+          projected.entry.workshopHistory,
+          { api: model.api, key: model.key, kind: model.kind },
+          projected.entry.workshopEdited || !!projected.entry.thinkingHidden
+        ) as Array<WorkshopMessage>)
+      : undefined
+  if (trace && projected.entry.workshopEdited) {
+    const final = trace.findLastIndex((m) => m.role === "assistant" && !m.content.some((p) => p.type === "toolCall"))
+    const own = trace[final]
+    if (own?.role === "assistant") trace[final] = { ...own, content: [{ type: "text", text }] }
+    else {
+      const last = trace.findLast((m) => m.role === "assistant")
+      if (last) trace.push({ ...last, content: [{ type: "text", text }], stopReason: "stop" })
+    }
+  }
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
     content: prefix ? speakerLabel(projected.name, text) : text,
     ...images,
     pieces,
     // A depth-bounded regex script changes it as the chat grows: it isn't part of the stable prefix.
-    kind: scripted.volatile ? "volatile" : "history"
+    kind: !workshop && scripted.volatile ? "volatile" : "history",
+    ...(trace?.length ? { workshopHistory: trace } : {})
   })
   switch (behavior) {
     case "content":
@@ -2431,6 +2454,24 @@ const composeStage = sync("compose", (assembly) => {
     return 3 + Math.max(tokens(all), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
+  if (assembly.request.agent?.workshop && !assembly.request.summarizing && !assembly.lcm) {
+    let estimated = reserve + cost(candidate(0, Number.POSITIVE_INFINITY))
+    if (estimated > contextBudget(assembly) * ELIDE_TRIGGER) {
+      for (const [index, line] of lines.entries()) {
+        const trace = line.workshopHistory
+        if (!trace?.length) continue
+        const marker = elidedResultText(projected[index]!.entry.depth + 1)
+        const next = trace.map((message): WorkshopMessage => {
+          if (estimated <= contextBudget(assembly) / 2 || message.role !== "toolResult") return message
+          const text = workshopMessageText(message)
+          if (text.length <= marker.length && !message.content.some((part) => part.type === "image")) return message
+          estimated -= assembly.countText!(text) - assembly.countText!(marker)
+          return { ...message, content: [{ type: "text", text: marker }] }
+        })
+        lines[index] = { ...line, workshopHistory: next }
+      }
+    }
+  }
   const contextBudgetInfo = (nonHistoryTokens: number) => ({
     maximum: contextBudget(assembly) + doc.samplers.openai_max_tokens,
     target: targetBudget(assembly) + doc.samplers.openai_max_tokens,
@@ -2907,6 +2948,7 @@ const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
 const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
   // An empty skipped note still marks the next sent message as the potential boundary.
+  const workshop = assembly.request.agent?.workshop && !assembly.request.summarizing
   let barrier = false
   // After the first place pinned lore can go, the prefix holds only until the history's start moves.
   let pinned = false
@@ -2916,19 +2958,43 @@ const messagesStage = sync("messages", (assembly) => {
     const summary = message.pieces.some((p) => hasSummary(assembly, p))
     return {
       ...message,
-      ...(barrier
-        ? { kind: "volatile" as const }
-        : pinned && message.kind !== "history"
-          ? { kind: "pinned" as const }
-          : summary
-            ? { kind: "summary" as const }
-            : {}),
+      ...(workshop
+        ? { kind: summary ? ("summary" as const) : message.kind === "pinned" ? ("prefix" as const) : message.kind }
+        : barrier
+          ? { kind: "volatile" as const }
+          : pinned && message.kind !== "history"
+            ? { kind: "pinned" as const }
+            : summary
+              ? { kind: "summary" as const }
+              : {}),
       summary
     }
   })
-  messages = messages.filter((m) => m.content)
-  if (doc.squash) messages = squash(messages)
-  messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
+  messages = messages.filter((m) => m.content || m.workshopHistory?.length)
+  if (workshop) {
+    const prefix = messages.filter((m) => m.kind === "prefix")
+    messages = [
+      ...(doc.squash ? squash(prefix) : prefix),
+      ...messages.filter((m) => m.kind === "summary"),
+      ...messages
+        .filter((m) => m.kind === "history")
+        .flatMap((m) =>
+          m.workshopHistory?.length
+            ? m.workshopHistory.map((workshopMessage): StMessage => ({
+                role: workshopMessage.role === "assistant" ? "assistant" : "user",
+                content: workshopMessageText(workshopMessage),
+                pieces: m.pieces,
+                kind: "history",
+                workshopMessage
+              }))
+            : [m]
+        ),
+      ...messages.filter((m) => m.kind === "volatile")
+    ]
+  } else {
+    if (doc.squash) messages = squash(messages)
+    messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
+  }
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.
   const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
   // Continue without a prefill (owner, 2026-10-31): the reply so far, the model's own message,
@@ -2957,12 +3023,13 @@ const messagesStage = sync("messages", (assembly) => {
     messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
     assembly.endsWithEnd = true
   }
-  assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
+  assembly.messages = messages.map(({ role, content, name, pieces, kind, workshopMessage }) => ({
     role,
     content,
     ...(name !== undefined ? { name } : {}),
     pieces,
-    kind
+    kind,
+    ...(workshopMessage ? { workshopMessage } : {})
   }))
 })
 
@@ -2978,13 +3045,22 @@ const requestStage = sync("request", (assembly) => {
       reason: "invalid_document",
       message: "This preset has no enabled placement for its summaries."
     })
+  const workshop = assembly.request.agent?.workshop && !assembly.request.summarizing
   assembly.result = {
+    ...(workshop ? { workshop: true as const } : {}),
     ...(firstSummary >= 0 ? { summaryStart: firstSummary } : {}),
     messages: limitImageEstimates(
-      messages.map(({ role, content, name, pieces }) => {
+      messages.map(({ role, content, name, pieces, kind, workshopMessage }) => {
         // Images the fork took out are left out here, so every limit counts only what's sent.
-        const images = imagesOf(pieces).map(({ image }) => image)
-        return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
+        const images = workshopMessage ? [] : imagesOf(pieces).map(({ image }) => image)
+        return {
+          role,
+          content,
+          ...(workshop ? { kind } : {}),
+          ...(workshopMessage ? { workshopMessage } : {}),
+          ...(name ? { name } : {}),
+          ...(images.length ? { images } : {})
+        }
       }),
       assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES
     ),
@@ -3005,7 +3081,7 @@ const requestStage = sync("request", (assembly) => {
     ...(messages.some((m) => m.kind === "pinned")
       ? { pinnedStart: messages.findIndex((m) => m.kind === "pinned") }
       : {}),
-    useSystemPrompt: doc.use_sysprompt,
+    useSystemPrompt: workshop || doc.use_sysprompt,
     breakpoints: assembly.breakpoints ?? [],
     ...(assembly.cacheHistoryCandidate ? { cacheHistoryCandidate: assembly.cacheHistoryCandidate } : {}),
     names: assembly.postNames ?? { user: "", char: "", group: [] },

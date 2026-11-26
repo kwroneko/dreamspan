@@ -2,7 +2,6 @@
 // Verify the shown path before reuse.
 import { isDeepStrictEqual } from "node:util"
 import type { UserId } from "@dreamspan/shared/domain.ts"
-import type { PathWindow } from "@dreamspan/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { ChatId, ForkId, PathEntry, StoryAt, VersionId } from "@dreamspan/shared/chat.ts"
 import type { RolloutStep } from "@dreamspan/shared/agent.ts"
@@ -10,14 +9,11 @@ import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"
 import type { GenerationRequest } from "../chat/Generator.ts"
-import { placedSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
+import { placedSteps, SEND_MESSAGE } from "./steps.ts"
 import type { Skill } from "./toolLoading.ts"
 import type { FrozenTool } from "./tools.ts"
 
-/** Legacy step labels for a fresh build when Summaries is explicitly off. */
-export const WORKSHOP_OVERFLOW_STEP_SUMMARIES = true
-
-export interface ContinuityRecord {
+interface ContinuityRecord {
   readonly path: ReadonlyArray<string>
   readonly prefix?: ContextSnapshot
   readonly inspection?: import("../assembler/types.ts").InspectionInputs
@@ -63,7 +59,7 @@ export const serverStoryAt = (
     Effect.orElseSucceed(() => undefined)
   )
 
-export const pathStamp = (entry: PathEntry) =>
+const pathStamp = (entry: PathEntry) =>
   JSON.stringify([
     entry.slotId,
     entry.version.id,
@@ -75,28 +71,6 @@ export const pathStamp = (entry: PathEntry) =>
     // Only when some is hidden, so stamps stored before hiding existed still match.
     ...(entry.hiddenThinking?.length ? [entry.hiddenThinking] : [])
   ])
-
-export const readContinuityPath = Effect.fnUntraced(function* (
-  reader: Reader["Service"],
-  request: GenerationRequest,
-  leaf: PathEntry["slotId"] | null
-) {
-  const entries: Array<PathEntry> = []
-  let from: PathEntry["slotId"] | null = null
-  do {
-    const window: PathWindow = yield* reader.ReadPath({
-      userId: request.userId,
-      chatId: request.chatId,
-      forkId: request.forkId ?? null,
-      leafSlotId: leaf,
-      range: from ? { _tag: "Older", from } : { _tag: "Bottom" },
-      limit: 500
-    })
-    entries.unshift(...window.entries)
-    from = window.older
-  } while (from !== null)
-  return entries
-})
 
 export const previousRun = Effect.fnUntraced(function* (
   reader: Reader["Service"],
@@ -218,39 +192,6 @@ export const previousRun = Effect.fnUntraced(function* (
   } as const
 })
 
-export const summarizeMessageSteps = Effect.fnUntraced(function* (
-  reader: Reader["Service"],
-  request: GenerationRequest,
-  path: ReadonlyArray<PathEntry>
-) {
-  const summaries: Record<string, string> = {}
-  for (const entry of path) {
-    if (!entry.inContext || !entry.version.context || entry.side !== "assistant") continue
-    const material = yield* reader
-      .RolloutMaterial({ userId: request.userId, versionId: entry.version.id })
-      .pipe(Effect.option)
-    if (material._tag === "None" || !material.value.transcript) continue
-    const frozen = JSON.parse(material.value.snapshot) as { agent?: { tools: ReadonlyArray<FrozenTool> } }
-    const steps = stepsOf(
-      JSON.parse(material.value.transcript) as Array<AgentMessage>,
-      frozen.agent?.tools ?? [],
-      true,
-      entry.version.id
-    )
-    const words = stepWords(steps)
-    // The number lets read_run read them back (spec/WORKSHOP-CONTEXT.md §3.2).
-    if (words.length)
-      summaries[entry.version.id] =
-        `[Message ${(entry.position ?? entry.depth) + 1} steps: ${words.join("; ").replaceAll(/\s+/g, " ")}]`
-  }
-  return summaries
-})
-
-/**
- * A message's tool steps as its summary names them. An MCP tool's label is the server's title
- * for it, so outside the data boundary only its exposed name (the app's, sanitized) stands for it
- * (spec/MCP.md §9).
- */
 export const stepWords = (steps: ReadonlyArray<RolloutStep>) =>
   steps.flatMap((s) =>
     s.kind === "tool"
@@ -269,6 +210,7 @@ export const ELIDE_TRIGGER = 3 / 4
 const ELIDE_TARGET = 1 / 2
 
 const ELIDED = "[Result left out to save room."
+export const elidedResultText = (message: number) => `${ELIDED} read_run with message ${message} shows it again.]`
 const elisionMarker = (message: number | null, call: string) =>
   message === null
     ? `${ELIDED} search_chat and read_run can find it again.]`
@@ -364,10 +306,7 @@ export const elideCarried = <E>(input: {
     for (const { index, call } of candidates) {
       const message = next[index] as AgentMessage & { role: "toolResult" }
       const number = numbers.get(index) ?? null
-      const marker =
-        input.quoteResults && number !== null
-          ? `${ELIDED} read_run with message ${number} shows it again.]`
-          : elisionMarker(number, call)
+      const marker = input.quoteResults && number !== null ? elidedResultText(number) : elisionMarker(number, call)
       if (textOf(message.content).length <= marker.length) continue
       next[index] = {
         ...message,

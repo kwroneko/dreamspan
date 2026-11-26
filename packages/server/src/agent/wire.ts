@@ -5,6 +5,19 @@
 import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai"
 import type { ProviderRequest } from "../assembler/wire.ts"
 import type { ModelInput } from "../assembler/types.ts"
+const piProviders: Readonly<Record<string, string>> = {
+  "openai-chat": "openai",
+  "openai-responses": "openai",
+  "openai-chat-bedrock": "amazon-bedrock",
+  "openai-responses-bedrock": "amazon-bedrock",
+  "anthropic-bedrock": "amazon-bedrock",
+  "anthropic-vertex": "google-vertex",
+  anthropic: "anthropic",
+  deepseek: "deepseek",
+  google: "google",
+  openrouter: "openrouter"
+}
+
 type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key"> & { readonly provider?: string | undefined }
 
 /** A suffix message as Chat Completions takes it: assistant `tool_calls`, `role: "tool"` results. */
@@ -18,7 +31,7 @@ const signedDetails = (signature: string | undefined): ReadonlyArray<unknown> | 
   }
 }
 
-const completionsMessage = (
+export const completionsMessage = (
   m: Message,
   replayReasoning = false,
   target?: ReasoningTarget,
@@ -39,9 +52,7 @@ const completionsMessage = (
       .join("")
     // pi-ai stores OpenRouter's opaque reasoning_details in thinkingSignature.
     // Replaying only visible thinking loses encrypted reasoning required by Claude/Gemini.
-    const provider =
-      target?.provider ??
-      (target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind)
+    const provider = target?.provider ?? (target ? piProviders[target.kind] : undefined)
     const sameModel = !target || (m.api === target.api && m.model === target.key && m.provider === provider)
     const details =
       replayReasoning && sameModel
@@ -109,27 +120,39 @@ const completionsMessage = (
  */
 export const forTarget = (
   suffix: ReadonlyArray<Message>,
-  target: Pick<ModelInput, "api" | "key"> & { readonly provider?: string | undefined }
-): Array<Message> =>
-  suffix.map((m) => {
+  target: Pick<ModelInput, "api" | "key"> & { readonly kind?: string; readonly provider?: string | undefined },
+  strip = false
+): Array<Message> => {
+  const provider = target.provider ?? (target.kind ? piProviders[target.kind] : undefined)
+  return suffix.map((m) => {
     if (
       m.role !== "assistant" ||
-      (m.api === target.api &&
-        m.model === target.key &&
-        (target.provider === undefined || m.provider === target.provider))
+      (!strip && m.api === target.api && m.model === target.key && (provider === undefined || m.provider === provider))
     )
       return m
-    if (!m.content.some((p) => p.type === "thinking" || (p.type === "toolCall" && p.thoughtSignature))) return m
+    if (
+      !m.content.some(
+        (p) =>
+          p.type === "thinking" ||
+          (p.type === "toolCall" && p.thoughtSignature) ||
+          (p.type === "text" && p.textSignature)
+      )
+    )
+      return m
     const content: AssistantMessage["content"] = []
     for (const p of m.content) {
       if (p.type === "thinking") continue
       if (p.type === "toolCall" && p.thoughtSignature) {
         const { thoughtSignature: _signature, ...call } = p
         content.push(call)
+      } else if (p.type === "text" && p.textSignature) {
+        content.push({ type: "text", text: p.text })
       } else content.push(p)
     }
-    return { ...m, content }
+    const { providerThinkingLevel: _effort, ...message } = m
+    return { ...message, content }
   })
+}
 
 /**
  * The request for one step of a rollout: the frozen prefix, then `suffix`, with `tools`.
@@ -169,5 +192,20 @@ export const rolloutRequest = (
     options.explicitTail && suffix.length && !prefix.breakpoints.includes(tail)
       ? [...prefix.breakpoints, tail]
       : prefix.breakpoints
-  return { ...prefix, context, payload, breakpoints }
+  const stable = prefix.stable
+  const lastAssistant = suffix.findLastIndex((message) => message.role === "assistant")
+  return {
+    ...prefix,
+    context,
+    payload,
+    breakpoints,
+    ...(stable?.workshop && suffix.length
+      ? {
+          stable: {
+            ...stable,
+            workshop: { ...stable.workshop, previousTail: stable.end + Math.max(0, lastAssistant) - 1 }
+          }
+        }
+      : {})
+  }
 }

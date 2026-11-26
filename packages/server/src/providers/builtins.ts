@@ -169,7 +169,7 @@ export const layer = Layer.effectDiscard(
       id: "anthropic-explicit-breakpoints",
       appliesTo: (target) => target.api === "anthropic-messages",
       transform: (payload, request) => {
-        if (request.breakpoints.length > 0)
+        if (request.breakpoints.length > 0 && !request.stable?.workshop)
           applyAnthropicBreakpoints(
             payload,
             request.messages,
@@ -185,7 +185,7 @@ export const layer = Layer.effectDiscard(
       id: "anthropic-stable-endpoint",
       appliesTo: (target) => target.api === "anthropic-messages",
       transform: (payload, request) => {
-        if (request.stable && request.breakpoints.length === 0)
+        if (request.stable && (request.stable.workshop || request.breakpoints.length === 0))
           applyAnthropicStableEndpoint(payload, request.messages, request.stable, request.cacheLayout)
         return payload
       }
@@ -232,13 +232,15 @@ export const layer = Layer.effectDiscard(
       id: "bedrock-openai-explicit-breakpoints",
       appliesTo: (target) => target.api === "openai-responses" || target.api === "openai-completions",
       transform: (payload, request) => {
-        if (request.cacheLayout?.marker !== "prompt_cache_breakpoint") return payload
+        if (request.cacheLayout?.marker !== "prompt_cache_breakpoint" || request.target.kind === "openai-chat-bedrock")
+          return payload
         applyBedrockBreakpoints(
           payload,
           request.messages,
           request.breakpoints,
           request.target.api === "openai-responses",
-          request.cacheLayout
+          request.cacheLayout,
+          request.stable
         )
         return payload
       }

@@ -31,18 +31,16 @@ const notify = () => {
  */
 export const warningText = (action: "regenerate" | "resume-step") =>
   action === "regenerate"
-    ? "Made by the replies its run wrote after this one. A new swipe keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
+    ? "A new swipe runs the assistant’s work again from the start. These changes stay in place, and the assistant may make them again."
     : "Made from this step on, or by the replies its run wrote after this one. Carrying on keeps the steps before it and their changes and undoes none of these, but the assistant may make them again."
 
 /**
- * The calls a new version keeps, by id, from the version's own steps: all of them for a new
- * version of the reply (only its message is written again); for carrying on from a step, those
- * before it, and the step's own call when its result is edited in place.
+ * A step resume retains the preceding calls and, when editing a result, the call itself.
  */
 export const keptCalls = (steps: ReadonlyArray<RolloutStep>, request: ReplyGuardRequest) =>
   new Set(
     steps
-      .slice(0, request.fromStep ? request.fromStep.index + (request.fromStep.keepsCall ? 1 : 0) : steps.length)
+      .slice(0, request.fromStep ? request.fromStep.index + (request.fromStep.keepsCall ? 1 : 0) : 0)
       .flatMap((step) => (step.kind === "tool" ? [step.id] : []))
   )
 
@@ -55,6 +53,7 @@ export const warningEffects = (
   if (!effects.ok) return effects
   const left = outstanding(effects.value)
   if (left.length === 0) return { ok: true, value: [] }
+  if (!request.fromStep) return { ok: true, value: left }
   if (!steps.ok) return steps
   const kept = keptCalls(steps.value, request)
   // A subagent's changes go or stay with the `agent` call that started it (spec/SUBAGENTS.md §8).

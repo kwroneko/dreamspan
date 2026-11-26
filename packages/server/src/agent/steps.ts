@@ -53,8 +53,9 @@ export const stepsOf = (
   messages: ReadonlyArray<AgentMessage>,
   tools: ReadonlyArray<FrozenTool>,
   final: boolean,
-  versionId?: string
-): Array<RolloutStep> => placedSteps(messages, tools, final, versionId).map((p) => p.step)
+  versionId?: string,
+  showLastPlain = false
+): Array<RolloutStep> => placedSteps(messages, tools, final, versionId, showLastPlain).map((p) => p.step)
 
 /** A step, with where it is in the transcript: its message and the part of that message. */
 export interface PlacedStep {
@@ -71,11 +72,12 @@ export const placedSteps = (
   all: ReadonlyArray<AgentMessage>,
   tools: ReadonlyArray<FrozenTool>,
   final: boolean,
-  versionId?: string
+  versionId?: string,
+  showLastPlain = false
 ): Array<PlacedStep> => {
   // A fork subagent's transcript starts with its parent's conversation: never its steps. Its
   // places keep their indexes, so Resume edits the same messages.
-  const own = forkStart(all)
+  const own = Math.max(forkStart(all), versionId === undefined ? all.findLastIndex((m) => m.role === "rpUser") + 1 : 0)
   const messages = own === 0 ? all : all.map((m, i) => (i < own ? PARENT : m))
   const bounds = versionId === undefined ? null : messageBounds(messages, versionId, final)
   const meta = new Map(tools.map((t) => [t.name, t]))
@@ -135,7 +137,12 @@ export const placedSteps = (
     !(messages[plain] as import("@earendil-works/pi-ai").AssistantMessage).content.some(
       (p) => p.type === "text" && p.text.trim()
     )
-  const lastPlain = sent > plain || noFinalText || stray ? -1 : plain
+  const hasFollowup =
+    plain >= 0 &&
+    messages
+      .slice(plain + 1)
+      .some((message) => message.role === "rpApp" && (message.report !== undefined || message.progress !== undefined))
+  const lastPlain = showLastPlain || hasFollowup || sent > plain || noFinalText || stray ? -1 : plain
   const steps: Array<PlacedStep> = []
   messages.forEach((m, index) => {
     if (m.role !== "assistant" || index === lastPlain) return

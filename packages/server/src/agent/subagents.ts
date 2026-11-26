@@ -1790,7 +1790,7 @@ export const agentTool: RolloutTool<AgentArgs> = {
     Effect.gen(function* () {
       const at = yield* modelsAt(context)
       // Background children only where the run can go on after their reports (§3.2).
-      const background = context.contract === "several"
+      const background = context.kind === "workshop" || context.contract === "several"
       // The types this run's kind offers, as the user has them (§10); none: no subagents.
       const registered = context.execution?.subagentTypes.list() ?? builtinSubagentTypes
       const types = offeredTypes(registered, at?.types, context.kind ?? "workshop")
@@ -2326,8 +2326,8 @@ export const messageAgentTool: RolloutTool<MessageArgs> = {
           ? null
           : ({
               ...messageAgentTool,
-              description: messageDescription(context.contract === "several"),
-              parameters: messageParameters(context.contract === "several")
+              description: messageDescription(context.kind === "workshop" || context.contract === "several"),
+              parameters: messageParameters(context.kind === "workshop" || context.contract === "several")
             } as RolloutTool<never>)
       )
     ),

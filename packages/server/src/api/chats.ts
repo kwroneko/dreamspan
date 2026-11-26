@@ -1,6 +1,5 @@
 import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
 import { OperationCall } from "../agent/operations.ts"
-import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@dreamspan/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
@@ -526,20 +525,6 @@ export const makeChatHandlers = Effect.gen(function* () {
         const model = named ?? (yield* shownModel(reader, { userId: id, chatId, slotId, forkId: forkId ?? null }))
         if (!model && Option.isSome(generator) && generator.value.requiresModel === true)
           return yield* new GenerationUnavailable({ message: "No model is chosen for this chat. Choose one first." })
-        if (before.version.context) {
-          const resumed = yield* regenerateSeveral({
-            versionId: before.version.id,
-            forkId: forkId ?? null,
-            expectedRowVersion,
-            ...(model ? { model } : {}),
-            ...(direction !== undefined ? { direction } : {})
-          })
-          if (resumed) {
-            yield* publishChat(id, chatId)
-            hub.publish(chatId, { _tag: "Reload" })
-            return resumed
-          }
-        }
         const guidance = direction ?? before.version.direction
         const added = yield* writer.AddSelectedVersion({
           userId: id,

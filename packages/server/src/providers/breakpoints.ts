@@ -1,3 +1,4 @@
+import type { StableEndpoint } from "./registry.ts"
 // Explicit cache breakpoints (spec/PROVIDERS.md §8). The caller names messages of the
 // Context it built; this places `cache_control` markers on the wire messages pi-ai
 // produced for them, in its onPayload hook.
@@ -14,7 +15,13 @@ import { Predicate } from "effect"
 const MAX_ANTHROPIC_BREAKPOINTS = 4
 
 type Block = Record<string, unknown>
-type WireMessage = { role: string; content: string | Array<Block> }
+type WireMessage = {
+  role: string
+  content: string | Array<Block>
+  type?: string
+  call_id?: string
+  tool_call_id?: string
+}
 
 const textOf = (message: Message): string => {
   if (message.role === "user") {
@@ -34,7 +41,7 @@ const textOf = (message: Message): string => {
 const wireText = (message: WireMessage) =>
   typeof message.content === "string"
     ? message.content
-    : message.content
+    : (message.content ?? [])
         .map((block) => {
           if (Predicate.isString(block.text)) return block.text
           // Tool results nest their text one level down.
@@ -47,7 +54,21 @@ const wireText = (message: WireMessage) =>
         })
         .join("")
 
-const wireRole = (message: Message) => (message.role === "assistant" ? "assistant" : "user")
+const matchingResult = (candidate: WireMessage, id: string) => {
+  const same = (wireId: unknown) => typeof wireId === "string" && (wireId === id || wireId === id.split("|", 1)[0])
+  if (candidate.type === "function_call_output") return same(candidate.call_id)
+  if (candidate.role === "tool") return same(candidate.tool_call_id)
+  return (
+    candidate.role === "user" &&
+    Array.isArray(candidate.content) &&
+    candidate.content.some((block) => block.type === "tool_result" && same(block.tool_use_id))
+  )
+}
+
+const hasResults = (candidate: WireMessage) =>
+  candidate.type === "function_call_output" ||
+  candidate.role === "tool" ||
+  (Array.isArray(candidate.content) && candidate.content.some((block) => block.type === "tool_result"))
 
 /**
  * For each transcript message, the index of the wire message carrying it, or null if
@@ -74,11 +95,28 @@ export const alignTranscript = (
       continue
     }
     let found: number | null = null
-    // A merged tool result stays on the wire message the previous one matched.
-    for (let i = Math.max(0, cursor - (message.role === "toolResult" ? 1 : 0)); i < wire.length; i++) {
+    // Adjacent tool results may share a single Anthropic message.
+    const priorResult =
+      message.role === "toolResult" &&
+      result.at(-1) === cursor - 1 &&
+      cursor > 0 &&
+      wire[cursor - 1]?.role === "user" &&
+      hasResults(wire[cursor - 1]!)
+    for (let i = Math.max(0, cursor - (priorResult ? 1 : 0)); i < wire.length; i++) {
       const candidate = wire[i]!
-      if (candidate.role !== wireRole(message)) continue
-      if (text === "" || wireText(candidate).includes(text)) {
+      if (message.role === "toolResult") {
+        if (
+          !matchingResult(candidate, message.toolCallId) &&
+          !(hasResults(candidate) && text && wireText(candidate).includes(text))
+        )
+          continue
+        found = i
+        break
+      }
+      if (candidate.role !== message.role || hasResults(candidate)) continue
+      if (message.role === "assistant" && text === "" && !message.content.some((part) => part.type === "toolCall"))
+        break
+      if (text === "" || wireText(candidate).trim() === text) {
         found = i
         break
       }
@@ -174,7 +212,8 @@ export const applyBedrockBreakpoints = (
   transcript: ReadonlyArray<Message>,
   breakpoints: ReadonlyArray<number>,
   responses: boolean,
-  capabilities: CacheLayout = {}
+  capabilities: CacheLayout = {},
+  stable?: StableEndpoint
 ): void => {
   const items = responses ? payload.input : payload.messages
   if (!Array.isArray(items) || breakpoints.length === 0) return
@@ -197,13 +236,26 @@ export const applyBedrockBreakpoints = (
       (m.role === "developer" || m.role === "system") &&
       wire.slice(0, i).every((p) => p.role === "developer" || p.role === "system")
   )
-  const targets = [...breakpoints.flatMap((b) => (aligned[b] == null ? [] : [aligned[b]!])), prefix]
+  const workshop = responses ? stable?.workshop : undefined
+  const desired =
+    workshop && stable
+      ? [stable.message, workshop.previousTail === undefined ? workshop.previous : stable.end - 1, workshop.summary]
+      : breakpoints
+  const targets = [
+    ...desired.flatMap((b) => (aligned[b] == null ? [] : [aligned[b]!])),
+    ...(workshop && workshop.summary >= 0 ? [] : [prefix])
+  ]
+  if (workshop && prefix >= 0) {
+    const system = wire[prefix]!
+    if (typeof system.content === "string") system.content = [{ type: textType, text: system.content }]
+  }
   // Responses reserves an automatic endpoint. Explicit-only Chat needs its own final marker.
   const limit = responses ? Math.min(4, capabilities.maxMarkers ?? 4) : (capabilities.maxMarkers ?? 4)
   let budget = limit - (responses ? 1 : 0) - bedrockMarkers(wire)
   const mark = (index: number) => {
     if (budget <= 0 || index < 0 || (cumulative[index] ?? 0) < (capabilities.minTokens ?? 1024)) return
     const item = wire[index]!
+    if (responses && !["user", "developer", "system"].includes(item.role)) return
     if (typeof item.content === "string") item.content = [{ type: textType, text: item.content }]
     const last = item.content?.findLast((b) => b.type === textType)
     if (!last || last.prompt_cache_breakpoint) return
@@ -229,7 +281,7 @@ const unmark = (message: WireMessage) => {
 export const applyAnthropicStableEndpoint = (
   payload: Record<string, unknown>,
   transcript: ReadonlyArray<Message>,
-  stable: { readonly message: number; readonly end: number },
+  stable: StableEndpoint,
   capabilities: CacheLayout = {}
 ): boolean => {
   const marker = firstMarker(payload)
@@ -238,6 +290,32 @@ export const applyAnthropicStableEndpoint = (
   const aligned = alignTranscript(transcript, wire)
   const target = aligned[stable.message]
   if (target === null || target === undefined) return false
+  if (stable.workshop) {
+    const { prefix, previous, summary, previousTail } = stable.workshop
+    for (const message of wire) unmark(message)
+    // Tools precede the system, so its checkpoint already covers their declarations.
+    const systemMarked = firstMarker(payload.system) !== undefined
+    if ((systemMarked || aligned[prefix] != null) && Array.isArray(payload.tools))
+      for (const tool of payload.tools) if (Predicate.isObject(tool)) delete tool.cache_control
+    const repeat = capabilities.lookback === false ? (previousTail ?? (previous >= 0 ? previous : summary)) : summary
+    let budget = Math.min(MAX_ANTHROPIC_BREAKPOINTS, capabilities.maxMarkers ?? 4) - countMarkers(payload)
+    for (const index of new Set([
+      target,
+      wire.length - 1,
+      systemMarked ? undefined : aligned[prefix],
+      aligned[repeat]
+    ])) {
+      if (budget <= 0 || index == null) continue
+      const message = wire[index]
+      if (!message) continue
+      if (typeof message.content === "string") message.content = [{ type: "text", text: message.content }]
+      const last = message.content.findLast((block) => !String(block.type).includes("thinking"))
+      if (!last) continue
+      last.cache_control = marker
+      budget--
+    }
+    return true
+  }
   for (let i = stable.message + 1; i < Math.min(stable.end, transcript.length); i++) {
     const at = aligned[i]
     if (at !== null && at !== undefined && at !== target) unmark(wire[at]!)
@@ -297,7 +375,7 @@ export const applyRouterCacheControl = (
   family: RouterCacheFamily,
   request: {
     readonly breakpoints: ReadonlyArray<number>
-    readonly stable?: { readonly message: number; readonly end: number } | undefined
+    readonly stable?: StableEndpoint | undefined
     readonly cacheRetention?: "none" | "short" | "long" | undefined
     readonly cacheLayout?: CacheLayout | undefined
   }
@@ -307,8 +385,29 @@ export const applyRouterCacheControl = (
     return
   const wire = payload.messages as Array<WireMessage>
   const { stable } = request
-  const targets =
-    request.breakpoints.length > 0
+  const system = stable?.workshop
+    ? wire.findLastIndex(
+        (m, i) =>
+          (m.role === "system" || m.role === "developer") &&
+          wire.slice(0, i).every((p) => p.role === "system" || p.role === "developer")
+      )
+    : wire.findIndex((m) => m.role === "system" || m.role === "developer")
+  const workshop = stable?.workshop
+  if (workshop)
+    for (const message of wire)
+      if (typeof message.content === "string" && message.content)
+        message.content = [{ type: "text", text: message.content }]
+  const targets = workshop
+    ? family !== "anthropic"
+      ? [workshop.previousTail === undefined ? stable.message : wire.length - 1]
+      : [
+          stable.message,
+          wire.length - 1,
+          request.cacheLayout?.lookback === false
+            ? (workshop.previousTail ?? (workshop.previous >= 0 ? workshop.previous : workshop.summary))
+            : workshop.summary
+        ]
+    : request.breakpoints.length > 0
       ? [...request.breakpoints]
       : stable
         ? [stable.message, ...(wire.length > stable.end ? [wire.length - 1] : [])]
@@ -320,9 +419,11 @@ export const applyRouterCacheControl = (
     return
   }
   const marker = { type: "ephemeral", ...(request.cacheRetention === "long" ? { ttl: "1h" } : {}) }
+  if (workshop && system >= 0 && Array.isArray(payload.tools))
+    for (const tool of payload.tools) if (Predicate.isObject(tool)) delete tool.cache_control
   let budget = Math.min(MAX_ANTHROPIC_BREAKPOINTS, request.cacheLayout?.maxMarkers ?? 4) - countMarkers(payload)
-  const system = wire.findIndex((m) => m.role === "system" || m.role === "developer")
-  for (const index of [...(system >= 0 ? [system] : []), ...targets]) {
+  const permanent = workshop && workshop.prefix >= 0 ? workshop.prefix : system
+  for (const index of [...(permanent >= 0 ? [permanent] : []), ...targets]) {
     if (budget <= 0) break
     const message = wire[index]
     if (!message || countMarkers(message) > 0) continue

@@ -1,3 +1,5 @@
+import { completionsMessage, forTarget } from "../agent/wire.ts"
+import type { StableEndpoint } from "../providers/registry.ts"
 // The provider-neutral request mapped per provider, as ST 1.19 maps its sources (ARCHITECTURE §15).
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared"
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript"
@@ -23,22 +25,26 @@ const withPrefill = (request: AssembledRequest): ReadonlyArray<RequestMessage> =
 export const chatCompletionsFields = (request: AssembledRequest, kind: string, key = ""): Record<string, unknown> => {
   const s = request.samplers
   const fields: Record<string, unknown> = {
-    messages: withPrefill(request).map(({ role, content, name, images }, i, all) => ({
-      role: images?.length ? "user" : role,
-      content: images?.some((image) => image.data)
-        ? [
-            { type: "text", text: content },
-            ...images
-              .filter((image) => image.data)
-              .map((image) => ({
-                type: "image_url",
-                image_url: { url: `data:${image.mimeType};base64,${image.data}` }
-              }))
-          ]
-        : content,
-      ...(name ? { name } : {}),
-      ...(kind === "deepseek" && request.prefill && i === all.length - 1 ? { prefix: true } : {})
-    })),
+    messages: withPrefill(request).map(({ role, content, name, images, workshopMessage }, i, all) =>
+      workshopMessage
+        ? completionsMessage(workshopMessage, true, { api: "openai-completions", kind, key })
+        : {
+            role: images?.length ? "user" : role,
+            content: images?.some((image) => image.data)
+              ? [
+                  { type: "text", text: content },
+                  ...images
+                    .filter((image) => image.data)
+                    .map((image) => ({
+                      type: "image_url",
+                      image_url: { url: `data:${image.mimeType};base64,${image.data}` }
+                    }))
+                ]
+              : content,
+            ...(name ? { name } : {}),
+            ...(kind === "deepseek" && request.prefill && i === all.length - 1 ? { prefix: true } : {})
+          }
+    ),
     temperature: s.temperature,
     frequency_penalty: s.frequency_penalty,
     presence_penalty: s.presence_penalty,
@@ -105,11 +111,20 @@ export interface ProviderRequest {
    * The automatic layout's reusable endpoint: the context message the next request repeats
    * (the assembly's last breakpoint), for the transforms that place a provider's own markers.
    */
-  readonly stable?: { readonly message: number; readonly end: number }
+  readonly stable?: StableEndpoint
 }
 
 /** The automatic layout's endpoint, `offset` messages into the system prompt; none for explicit or off. */
 const stableEndpoint = (request: AssembledRequest, model: ModelInput, offset: number, end: number) => {
+  if (request.workshop && model.cacheBreakpoints !== "none") {
+    const history = request.breakpoints.filter((b) => b.reason === "history")
+    const message = (history[0]?.message ?? -1) - offset
+    if (message < 0 || message >= end) return {}
+    const previous = (history[1]?.message ?? -1) - offset
+    const summary = (request.breakpoints.findLast((b) => b.reason === "summary")?.message ?? -1) - offset
+    const prefix = (request.breakpoints.find((b) => b.reason === "prefix")?.message ?? -1) - offset
+    return { stable: { message, end, workshop: { previous, summary, prefix } } }
+  }
   if (model.cacheBreakpoints !== "auto" || request.breakpoints.length === 0) return {}
   const message = Math.max(...request.breakpoints.map((b) => b.message)) - offset
   return message < 0 || message >= end ? {} : { stable: { message, end } }
@@ -158,7 +173,16 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
   if (model.api === "openai-completions") {
     const messages = withPrefill(request)
     return {
-      context: { messages: messages.map((m) => ({ role: "user", content: m.content, timestamp: 0 })) },
+      context: {
+        messages: messages.map(
+          (m) =>
+            m.workshopMessage ?? {
+              role: request.workshop && m.role === "system" ? "system" : "user",
+              content: m.content,
+              timestamp: 0
+            }
+        )
+      },
       payload: chatCompletionsFields(request, model.kind, model.key),
       breakpoints: model.cacheBreakpoints === "explicit" ? request.breakpoints.map((b) => b.message) : [],
       ...stableEndpoint(request, model, 0, messages.length)
@@ -190,26 +214,28 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
   }
   // One message each: consecutive turns of a role stay apart, so a breakpoint on one
   // covers it and nothing after it; the API joins them into one turn.
-  const piMessages = messages.slice(first).map((message): Message =>
-    message.role !== "assistant" || !!message.images?.length
-      ? { role: "user", content: [text(named(message, request.names)), ...imageBlocks(message)], timestamp: 0 }
-      : ({
-          role: "assistant",
-          content: [text(named(message, request.names))],
-          api: model.api as Api,
-          provider: model.kind,
-          model: model.key,
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-          },
-          stopReason: "stop",
-          timestamp: 0
-        } satisfies AssistantMessage)
+  const piMessages = messages.slice(first).map(
+    (message): Message =>
+      message.workshopMessage ??
+      (message.role !== "assistant" || !!message.images?.length
+        ? { role: "user", content: [text(named(message, request.names)), ...imageBlocks(message)], timestamp: 0 }
+        : ({
+            role: "assistant",
+            content: [text(named(message, request.names))],
+            api: model.api as Api,
+            provider: model.kind,
+            model: model.key,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+            },
+            stopReason: "stop",
+            timestamp: 0
+          } satisfies AssistantMessage))
   )
   const s = request.samplers
   const anthropic = model.api === "anthropic-messages"
@@ -313,7 +339,17 @@ const withReplay = (request: AssembledRequest, model: ModelInput, wire: Provider
 
 /** Apply model-owned provider options after prompt composition. */
 export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
-  const base = withReplay(request, model, baseProviderRequest(request, model))
+  const target = { api: model.api, key: model.key, kind: model.kind }
+  const native = request.workshop
+    ? {
+        ...request,
+        messages: request.messages.map((message) => {
+          const replay = message.workshopMessage
+          return replay ? { ...message, workshopMessage: forTarget([replay], target)[0]! as typeof replay } : message
+        })
+      }
+    : request
+  const base = withReplay(native, model, baseProviderRequest(native, model))
   const settings = model.settings
   if (!settings) return base
   const { stable, ...wire } = base
@@ -394,9 +430,10 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
   if (wire.maxTokens !== undefined) samplers.max_tokens = wire.maxTokens
   if (model.api === "openai-completions") {
     return {
-      messages: input.map(({ role, content, name, images }, i) => ({
-        role: images?.length ? ("user" as const) : role,
-        content,
+      ...(request.workshop ? { workshop: true as const } : {}),
+      messages: input.map(({ role, content, name, images, workshopMessage }, i) => ({
+        role: workshopMessage?.role === "toolResult" ? ("tool" as const) : images?.length ? ("user" as const) : role,
+        content: workshopMessage?.role === "assistant" ? displayParts(workshopMessage.content) : content,
         ...(name ? { name } : {}),
         ...(images?.length ? { images } : {}),
         inputs: [i]
@@ -423,13 +460,18 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
         : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")
     const images = input[i + systemCount]?.images
     messages.push({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content,
+      role: message.role === "toolResult" ? "tool" : message.role === "assistant" ? "assistant" : "user",
+      content: message.role === "assistant" ? displayParts(message.content) : content,
       ...(images?.length ? { images } : {}),
       inputs: [i + systemCount]
     })
   }
-  const projected = { messages, samplers, mapping: model.mapping }
+  const projected: WireContext = {
+    messages,
+    samplers,
+    mapping: model.mapping,
+    ...(request.workshop ? { workshop: true as const } : {})
+  }
   if (model.api === "openai-responses") {
     // Use the installed SDK's conversion, including developer roles and text normalization.
     const sdk = {
@@ -550,7 +592,25 @@ const capturedImages = (content: unknown): ReadonlyArray<RequestImage> => {
   })
 }
 
-const wireRows = (payload: Record<string, unknown>) => {
+const displayCall = (name: unknown, args: unknown) =>
+  `Tool call: ${String(name)} ${typeof args === "string" ? args : JSON.stringify(args ?? {})}`
+
+const displayParts = (parts: ReadonlyArray<unknown>): string =>
+  parts
+    .flatMap((part) => {
+      if (!Predicate.isObject(part)) return []
+      if (typeof part.text === "string") return [part.text]
+      if (part.type === "toolCall" || part.type === "tool_use")
+        return [displayCall(part.name, part.arguments ?? part.input)]
+      if (Predicate.isObject(part.functionCall)) return [displayCall(part.functionCall.name, part.functionCall.args)]
+      return []
+    })
+    .join("\n")
+
+const resultOutput = (output: unknown): string =>
+  typeof output === "string" ? output : Array.isArray(output) ? textContent(output) : JSON.stringify(output ?? "")
+
+const wireRows = (payload: Record<string, unknown>, workshop?: true) => {
   const config = Predicate.isObject(payload.config) ? payload.config : {}
   const rows: Array<{ row: TextMessage; carrier: Carrier; system?: true }> = []
   const system = textContent(payload.system ?? config.systemInstruction)
@@ -559,13 +619,58 @@ const wireRows = (payload: Record<string, unknown>) => {
   if (Array.isArray(messages))
     for (const message of messages) {
       if (!Predicate.isObject(message) || message.type === "additional_tools") continue
+      const parts = message.content ?? message.parts
+      if (workshop && (message.type === "function_call" || message.type === "function_call_output")) {
+        rows.push({
+          row:
+            message.type === "function_call"
+              ? { role: "assistant", content: displayCall(message.name, message.arguments) }
+              : { role: "tool", content: resultOutput(message.output), images: capturedImages(message.output) },
+          carrier: message
+        })
+        continue
+      }
+      if (workshop && Array.isArray(parts)) {
+        const results = parts.filter(
+          (part) =>
+            Predicate.isObject(part) && (part.type === "tool_result" || Predicate.isObject(part.functionResponse))
+        )
+        if (results.length) {
+          for (const part of results) {
+            const response = Predicate.isObject(part.functionResponse) ? part.functionResponse.response : part.content
+            rows.push({
+              row: { role: "tool", content: resultOutput(response), images: capturedImages(response) },
+              carrier: part
+            })
+          }
+          if (results.length === parts.length) continue
+        }
+      }
       const role = message.role
-      if (role !== "system" && role !== "developer" && role !== "user" && role !== "assistant" && role !== "model")
+      if (
+        (!workshop || role !== "tool") &&
+        role !== "system" &&
+        role !== "developer" &&
+        role !== "user" &&
+        role !== "assistant" &&
+        role !== "model"
+      )
         continue
       rows.push({
         row: {
           role,
-          content: textContent(message.content ?? message.parts),
+          content: [
+            workshop && Array.isArray(parts) ? displayParts(parts) : textContent(parts),
+            ...(workshop && Array.isArray(message.tool_calls)
+              ? message.tool_calls.flatMap((call) =>
+                  Predicate.isObject(call) && Predicate.isObject(call.function)
+                    ? [displayCall(call.function.name, call.function.arguments)]
+                    : []
+                )
+              : [])
+          ]
+            .filter(Boolean)
+            .join("\n"),
           images: capturedImages(message.content ?? message.parts),
           ...(typeof message.name === "string" ? { name: message.name } : {}),
           ...(message.prefix === true && role === "assistant"
@@ -612,7 +717,7 @@ export const markWireSources = (payload: Record<string, unknown>, sources: WireC
     queue.push(message.inputs)
     matches.set(key, queue)
   }
-  for (const { row, carrier, system } of wireRows(payload)) {
+  for (const { row, carrier, system } of wireRows(payload, sources.workshop)) {
     const inputs = matches.get(wireDigest({ ...row, images: [] }))?.shift() ?? []
     if (system) carrier[systemProvenance] = { content: row.content, inputs }
     else carrier[provenance] = inputs
@@ -668,11 +773,12 @@ export const sentWire = (
     }
   return {
     mapping: sources.mapping,
+    ...(sources.workshop ? { workshop: true as const } : {}),
     ...(historyCheckpoint !== undefined && markedHistory(payload, historyCheckpoint.message)
       ? { historyCheckpointSent: { digest: historyCheckpoint.digest, viewer: historyCheckpoint.viewer } }
       : {}),
     samplers,
-    messages: wireRows(payload).map(({ row: { images, ...row }, carrier, system }) => ({
+    messages: wireRows(payload, sources.workshop).map(({ row: { images, ...row }, carrier, system }) => ({
       ...row,
       digest: wireDigest({ ...row, images: images ?? [] }),
       content: scrub(row.content),

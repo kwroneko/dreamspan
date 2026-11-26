@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 87
+export const ASSEMBLER_VERSION = 88
 
 export type Role = "system" | "user" | "assistant"
 
@@ -136,6 +136,8 @@ export interface RequestImage {
 }
 
 export interface RequestMessage {
+  readonly workshopMessage?: import("../agent/workshopHistory.ts").WorkshopMessage
+  readonly kind?: import("./st.ts").Stability
   readonly images?: ReadonlyArray<RequestImage>
   readonly role: Role
   readonly content: string
@@ -165,6 +167,7 @@ interface Samplers {
 type BreakpointReason = "prefix" | "summary" | "history" | "pinned"
 
 export interface AssembledRequest {
+  readonly workshop?: true
   readonly summaryStart?: number
   /** Pinned lore starts outside the Messages system parameter, independently of cache markers. */
   readonly pinnedStart?: number
@@ -235,6 +238,7 @@ export interface SnapshotInputs {
 
 /** Safe provider mapping with indices back to the assembled messages. No transport settings. */
 export interface WireContext {
+  readonly workshop?: true
   readonly toolDeclarations?: import("../providers/requestTools.ts").CapturedRequestTools
   readonly extraMessageText?: ReadonlyArray<string>
   /** The current history checkpoint was present in the final payload. Server-only. */
@@ -246,7 +250,7 @@ export interface WireContext {
   readonly mapping?: ModelInput["mapping"]
   readonly messages: ReadonlyArray<
     Omit<RequestMessage, "role"> & {
-      readonly role: Role | "developer" | "model"
+      readonly role: Role | "developer" | "model" | "tool"
       readonly prefill?: ContextMessage["prefill"]
       readonly sources?: ContextMessage["sources"]
       readonly parts?: ContextMessage["parts"]
@@ -791,6 +795,8 @@ export interface MergeRow {
 
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
+  readonly workshopHistory?: ReadonlyArray<import("../agent/workshopHistory.ts").WorkshopMessage>
+  readonly workshopEdited?: true
   /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
   readonly merge?: HistoryMerge
   readonly images?: ReadonlyArray<HistoryImage>

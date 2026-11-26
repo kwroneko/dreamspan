@@ -215,10 +215,12 @@ export const versionExtras = (alias: string) =>
     WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json,
   (SELECT json_object('transcript', json(p.transcript_json), 'tools', json_extract(p.context_snapshot_json, '$.agent.tools'),
     'final', r.status NOT IN ('created', 'running'),
-    'perVersion', json_extract(p.context_snapshot_json, '$.agent.contract') = 'several')
+    'perVersion', json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'
+      OR coalesce(json_extract(p.context_snapshot_json, '$.continuity.historical'), 0) > 0)
     FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
     WHERE p.rollout_id = ${alias}.rollout_id AND (
       json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'
+      OR coalesce(json_extract(p.context_snapshot_json, '$.continuity.historical'), 0) > 0
       OR (r.step_count = 0 AND json_extract(p.context_snapshot_json, '$.agent.contract') IN ('send_message', 'both'))
     )) AS steps_material`
 

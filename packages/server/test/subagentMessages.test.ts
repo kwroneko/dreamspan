@@ -1,6 +1,6 @@
 // Subagents, milestone SA5 (spec/SUBAGENTS.md §3.2, §4): background subagents whose reports reach
 // the reply as app messages at its next request, a reply that waits ("Waiting for N subagents")
-// and posts what it wrote before as a message of its own, `message_agent` to a running subagent
+// and keeps its progress inline, `message_agent` to a running subagent
 // (delivered at its next request) and to a finished one (a continuation that remembers its run),
 // `report_progress`, causal handle lookup, and Resume carrying background subagents on.
 // Synthetic data and a scripted loopback provider only.
@@ -182,7 +182,7 @@ const resume = (api: Api, chat: Chat, versionId: VersionId) =>
 
 describe("subagents in the background, and messages", () => {
   it.live(
-    "a background subagent: the reply goes on, posts what it wrote, waits, and gets the report as a message",
+    "a background subagent: the reply shows inline progress, waits, and includes the report in its own message",
     () => {
       const config = testConfig()
       return Effect.gen(function* () {
@@ -205,9 +205,9 @@ describe("subagents in the background, and messages", () => {
         // The call returned at once; the reply wrote its text and now waits for one subagent.
         yield* eventually(() => steps(events).some((e) => e.waitingFor === 1))
         const waiting = steps(events).find((e) => e.waitingFor === 1)!
-        assert.notStrictEqual(waiting.versionId, versionId, "the text before is a message of its own")
-        yield* eventually(() => finished(events, versionId)?.status === "complete")
-        assert.strictEqual(finished(events, versionId)!.content, "Waiting on the cards.")
+        assert.strictEqual(waiting.versionId, versionId)
+        assert.isTrue(waiting.steps.some((step) => step.kind === "text" && step.text === "Waiting on the cards."))
+        assert.isUndefined(finished(events, versionId))
         // The row: in the background, with its progress line, still running.
         yield* eventually(() => liveRow(events, "spawn")?.progress === "Read 1 of 2 shelves")
         assert.strictEqual(liveRow(events, "spawn")!.background, true)
@@ -232,7 +232,7 @@ describe("subagents in the background, and messages", () => {
         // The reply's run sent no request while it waited: one with the result, one with the report.
         assert.lengthOf(parents(mock.requests()), 3)
 
-        // Stored: the first message's steps hold the spawn, done; the second holds none of it.
+        // The finished message still holds the spawn and its inline progress.
         const first = yield* api.GetRolloutSteps({ versionId })
         const row = spawnRow(first, "spawn")!
         assert.strictEqual(row.status, "done")
@@ -242,8 +242,7 @@ describe("subagents in the background, and messages", () => {
           row.steps?.map((s) => (s.kind === "tool" ? s.tool : s.kind)),
           ["report_progress", "list_library"]
         )
-        const second = yield* api.GetRolloutSteps({ versionId: waiting.versionId })
-        assert.isUndefined(spawnRow(second, "spawn"))
+        assert.isTrue(first.some((step) => step.kind === "text" && step.text === "Waiting on the cards."))
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     }
   )

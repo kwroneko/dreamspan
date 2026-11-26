@@ -222,7 +222,7 @@ export type ProviderEvent =
   | { readonly type: "paused"; readonly delayMs: number }
   | { readonly type: "text"; readonly delta: string }
   | { readonly type: "thinking"; readonly delta: string }
-  | { readonly type: "toolcall"; readonly name: string; readonly arguments: unknown }
+  | { readonly type: "toolcall"; readonly id: string; readonly name: string; readonly arguments: unknown }
   | {
       readonly type: "retrying"
       readonly attempt: number
@@ -2451,7 +2451,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                     if (event.type === "toolcall_delta") {
                       const call = event.partial.content[event.contentIndex]
                       if (call?.type === "toolCall")
-                        offer({ type: "toolcall", name: call.name, arguments: structuredClone(call.arguments) })
+                        offer({
+                          type: "toolcall",
+                          id: call.id,
+                          name: call.name,
+                          arguments: structuredClone(call.arguments)
+                        })
                     }
                   }
                 }

@@ -404,7 +404,7 @@ describe("workshop runs on a bound-thinking model", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
-  it.live("the next task carries the run on with every block", () =>
+  it.live("a new task retains calls and results across a changed signed prefix", () =>
     Effect.gen(function* () {
       const { fake, parents } = yield* workshopRun(
         (at) => (at < 2 ? LIST : "Summed up."),
@@ -412,8 +412,18 @@ describe("workshop runs on a bound-thinking model", () => {
         ["look through my cards", "and again"]
       )
       clean(fake)
-      appendOnly(parents)
-      assert.lengthOf(thinkingIn(parents.at(-1)!), 5)
+      appendOnly(parents.slice(0, 3))
+      const next = parents.at(-1)!
+      const earlier = parents[0]!.messages
+      const user = earlier.findIndex((message) => JSON.stringify(message).includes("look through my cards"))
+      const unmarked = (value: unknown) =>
+        JSON.stringify(value, (key, item) => (key === "cache_control" ? undefined : item))
+      assert.strictEqual(unmarked(next.messages.slice(0, user + 1)), unmarked(earlier.slice(0, user + 1)))
+      const history = JSON.stringify(next.messages)
+      assert.include(history, "and again")
+      assert.include(history, '"name":"list_library"')
+      assert.include(history, '"type":"tool_result"')
+      assert.lengthOf(thinkingIn(next), 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 })

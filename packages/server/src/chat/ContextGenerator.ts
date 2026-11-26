@@ -1,28 +1,13 @@
 import { admitsEffect, outsideEffect } from "../agent/effects.ts"
 import { toolForKind } from "../execution.ts"
-import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
-import { providerRequest } from "../assembler/wire.ts"
-import { liveSuffix } from "../agent/messages.ts"
-import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import {
-  previousRun,
-  storyReadStamp,
-  readContinuityPath,
-  pathStamp,
-  summarizeMessageSteps,
-  WORKSHOP_OVERFLOW_STEP_SUMMARIES,
-  ELIDE_TRIGGER,
-  elideCarried,
-  type ContinuousSnapshot,
-  type ContinuityRecord
-} from "../agent/continuity.ts"
+import { storyReadStamp, type ContinuousSnapshot } from "../agent/continuity.ts"
 import { AppConfig } from "../config.ts"
 import { hydrateMessageImages } from "./messageImages.ts"
 import { executionRegistry } from "../execution.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // The real generator: assembly, rollout, provider stream (ARCHITECTURE §15, "Generation").
 import { uuidv7 } from "@dreamspan/shared/id.ts"
-import { imagesOnly, type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
+import { type SlotId, type VersionId } from "@dreamspan/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@dreamspan/shared/providers.ts"
 import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import { type ContextSnapshot, type Generation, generationOf } from "../assembler/types.ts"
@@ -50,7 +35,7 @@ import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { makeLibrarySight } from "../agent/librarySight.ts"
 import { loaderFor, loadingWireFor, offerableTools, planToolLoading, skillMarkerInput } from "../agent/loadingPlan.ts"
 import { dispatcherDefinition } from "../agent/dispatcher.ts"
-import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
+import { frozenOffer, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import { McpConnections } from "../mcp/McpConnections.ts"
 import {
@@ -437,7 +422,6 @@ export const layer = Layer.effect(
           ]
           // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
           const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
-          let stepSummaries: Readonly<Record<string, string>> | undefined
           // The run's skills for the preset's skill markers, from what the loading plan lists them by.
           const markerSkills = agentic
             ? skillMarkerInput(execution, chat.kind, yield* offerableTools({ reader, userId }, tools))
@@ -490,7 +474,6 @@ export const layer = Layer.effect(
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
                         ...(turnNotes.length ? { turnNotes } : {}),
                         ...(plan.assembly?.response ? { response: plan.assembly.response } : {}),
-                        ...(stepSummaries ? { stepSummaries } : {}),
                         ...(markerSkills ? { skills: markerSkills } : {})
                       }
                     }
@@ -616,176 +599,6 @@ export const layer = Layer.effect(
               ? [{ ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" as const }]
               : [])
           ]
-          let continuity: ContinuityRecord | undefined
-          let seed: ReadonlyArray<AgentMessage> | undefined
-          if (agentic && plan.continuity === "resume_previous") {
-            const path = yield* readContinuityPath(reader, request, parent).pipe(
-              Effect.catch(serverFailure("ReadContinuityPath"))
-            )
-            const prior = yield* previousRun(reader, request, path, {
-              ...snapshot,
-              agent: { tools: frozenTools, cardSkills }
-            })
-            const baseline = path.map(pathStamp)
-            if ("reason" in prior)
-              continuity = {
-                path: baseline,
-                reason: prior.reason,
-                ...(generation.inspection ? { inspection: generation.inspection } : {})
-              }
-            else {
-              // New user turns use the same rendered history pieces as plain assembly. Images
-              // stay as references in storage, hydrated only when the request is dispatched.
-              const additions: Array<AgentMessage> = prior.after.map((entry) => {
-                // The last such piece: a later stage's (its attachment lines) stands for the message.
-                const piece = snapshot.pieces.findLast(
-                  (p) => p.source.kind === "message" && p.source.version === entry.version.id
-                )
-                const rendered =
-                  piece?.messages.flatMap((i) =>
-                    snapshot.request.messages[i] ? [snapshot.request.messages[i]!] : []
-                  ) ?? []
-                const imageIds = new Set(imagesOnly(entry.version.images ?? []).map((image) => image.mediaId))
-                const images = rendered
-                  .flatMap((message) => message.images ?? [])
-                  .filter((image) => imageIds.has(image.mediaId) && image.estimate?.sent !== false)
-                const message = {
-                  role: "user" as const,
-                  content: piece?.text ?? entry.version.content,
-                  ...(rendered[0]?.name ? { name: rendered[0].name } : {}),
-                  ...(images.length ? { images } : {})
-                }
-                // A workshop's images saved in Files are named by their attachment lines already.
-                if (imageIds.size && snapshot.inputs.model?.vision === false && !piece?.text.includes("<attachment "))
-                  message.content += " [image]"
-                return { role: "rpUser", message, timestamp: entry.version.createdAt }
-              })
-              // A workshop's tail lines (the working folder, agent/turnNotes.ts) are told again
-              // only on a turn after they changed: with the new user turn, after the cached prefix.
-              // Only the lines that are new are told, so one line's change doesn't repeat the rest.
-              const told = prior.snapshot.agentAssembly?.turnNotes ?? []
-              const newNotes = notes.filter((note) => note.events.length > 0 || !told.includes(note.text))
-              if (newNotes.length) {
-                const text = newNotes.map((note) => note.text).join("\n")
-                const last = additions.at(-1)
-                if (last?.role === "rpUser")
-                  additions[additions.length - 1] = {
-                    ...last,
-                    message: { ...last.message, content: `${last.message.content}\n${text}` }
-                  }
-                else
-                  additions.push({
-                    role: "rpUser",
-                    message: { role: "user", content: text },
-                    timestamp: Date.now()
-                  })
-              }
-              seed = [...prior.transcript, ...additions]
-              const budget = snapshot.contextBudget
-              const countSeed = (transcript: ReadonlyArray<AgentMessage>) =>
-                reader
-                  .CountRolloutContext({
-                    model: JSON.stringify(snapshot.inputs.model),
-                    request: JSON.stringify(prior.snapshot.request),
-                    transcript: JSON.stringify(transcript),
-                    // A deferred tool takes context only once it's loaded.
-                    tools: JSON.stringify(
-                      frozenTools.some((t) => t.name === "call_tool")
-                        ? frozenTools
-                        : frozenTools.filter(
-                            (t) =>
-                              (t as { readonly deferred?: true }).deferred !== true ||
-                              loadedSet(transcript, offer.deferred).has(t.name)
-                          )
-                    )
-                  })
-                  .pipe(Effect.catch(serverFailure("CountRolloutContext")))
-              let count = yield* countSeed(seed)
-              // Past the trigger, older tool results are left out before anything is rebuilt
-              // (spec/WORKSHOP-CONTEXT.md §2.2): the prefix and everything before them stay cached.
-              let elided = 0
-              const room = budget ? budget.maximum - budget.responseReserve : Number.POSITIVE_INFINITY
-              let needsRebuild = count > room * ELIDE_TRIGGER
-              if (needsRebuild && !state.lcm?.enabled) {
-                const compacted = yield* elideCarried({
-                  quoteResults: profile?.allowsOutside === true,
-                  reader,
-                  request,
-                  path,
-                  transcript: prior.transcript,
-                  count,
-                  room,
-                  recount: (transcript) => countSeed([...transcript, ...additions])
-                }).pipe(Effect.catch(serverFailure("ElideCarried")))
-                if (compacted && compacted.count <= room) {
-                  seed = [...compacted.transcript, ...additions]
-                  count = compacted.count
-                  elided = compacted.elided
-                  needsRebuild = false
-                }
-              }
-              if (state.lcm?.enabled) needsRebuild = false
-              // Provider image limits apply to the entire request. Hydrating the prefix
-              // and each carried user message separately must not evict a cached image.
-              const imageCount = [
-                ...prior.snapshot.request.messages,
-                ...seed.flatMap((message) => (message.role === "rpUser" ? [message.message] : []))
-              ].reduce((total, message) => total + (message.images?.length ?? 0), 0)
-              const imageOverflow =
-                snapshot.inputs.model?.vision !== false &&
-                additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
-                imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
-              if (
-                imageOverflow ||
-                needsRebuild ||
-                (!state.lcm?.enabled && budget && count > budget.maximum - budget.responseReserve)
-              ) {
-                seed = undefined
-                continuity = {
-                  path: baseline,
-                  reason: imageOverflow
-                    ? "The previous run exceeded the image limit, so this request was put together again from the messages."
-                    : "The previous run outgrew the context budget, so this request was put together again from the messages."
-                }
-                if (WORKSHOP_OVERFLOW_STEP_SUMMARIES) {
-                  stepSummaries = yield* summarizeMessageSteps(reader, request, path)
-                  assembled = yield* assembleWith()
-                  snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
-                  generation = JSON.parse(assembled.generation) as Generation
-                }
-              } else {
-                const priorWire = providerRequest(prior.snapshot.request, snapshot.inputs.model!)
-                const lastRequest = prior.transcript.findLastIndex((m) => m.role === "assistant")
-                const lastTail =
-                  priorWire.context.messages.length + liveSuffix(prior.transcript.slice(0, lastRequest)).length - 1
-                continuity = {
-                  path: baseline,
-                  parent: { rolloutId: prior.material.rolloutId, versionId: prior.versionId },
-                  historical: prior.transcript.length,
-                  ...(elided > 0 ? { elided } : {}),
-                  prefix:
-                    prior.snapshot.continuity?.prefix ??
-                    (() => {
-                      const { continuity: _continuity, ...prefix } = prior.snapshot
-                      return prefix
-                    })(),
-                  ...(prior.snapshot.continuity?.inspection
-                    ? { inspection: prior.snapshot.continuity.inspection }
-                    : {}),
-                  breakpoints: [
-                    ...(prior.snapshot.continuity?.breakpoints ?? (priorWire.stable ? [priorWire.stable.message] : [])),
-                    ...(snapshot.inputs.model?.cacheBreakpoints !== "none" ? [lastTail] : [])
-                  ]
-                }
-                snapshot = { ...snapshot, request: prior.snapshot.request }
-                generation = {
-                  ...generation,
-                  request: prior.snapshot.request,
-                  ...(continuity.inspection ? { inspection: continuity.inspection } : {})
-                }
-              }
-            }
-          }
           const { model } = generation
           if (model === null) {
             return yield* new GenerationFailed({
@@ -794,10 +607,9 @@ export const layer = Layer.effect(
             })
           }
           if (agentic && plan.assembly?.workshop) {
-            // A carried turn adds its notes to the new suffix. A rebuilt turn sends the assembled
-            // notes whose pieces survived into the request. Even an empty list tracks dispatch.
+            // Even an empty list tracks dispatch.
             const turnEvents = notes.flatMap((note, i) =>
-              seed || snapshot.pieces.some((piece) => piece.id === `workshop:turn-note:${i}` && piece.messages.length)
+              snapshot.pieces.some((piece) => piece.id === `workshop:turn-note:${i}` && piece.messages.length)
                 ? note.events
                 : []
             )
@@ -839,7 +651,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}), ...(decisionsOff.length ? { decisionsOff } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(decisionsOff.length ? { decisionsOff } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
                     {
                       mode: planned.mode,
                       contract: plan.contract,
@@ -853,8 +665,6 @@ export const layer = Layer.effect(
                 : decisionsOff.length
                   ? `${assembled.snapshot.slice(0, -1)},"decisionsOff":${JSON.stringify(decisionsOff)}}`
                   : assembled.snapshot,
-              ...(continuity?.parent ? { parentRolloutId: continuity.parent.rolloutId } : {}),
-              ...(seed ? { transcript: JSON.stringify(seed) } : {}),
               ...(agentic ? { mode: planned.mode } : {}),
               issues: generation.issues,
               variables: generation.variables,
@@ -906,10 +716,8 @@ export const layer = Layer.effect(
                   agent: {
                     plan,
                     ...(snapshot.sendNudge === undefined ? {} : { sendNudge: snapshot.sendNudge }),
-                    ...(seed ? { resume: { transcript: seed, historical: continuity?.historical ?? 0 } } : {}),
                     mode: planned.mode,
-                    checkpoints: continuity?.breakpoints ?? [],
-                    recentPrefix: (continuity?.prefix ?? snapshot).lcm?.measure?.recentNow,
+                    recentPrefix: snapshot.lcm?.measure?.recentNow,
                     allowsOutside: profile.allowsOutside,
                     tools: offer.tools,
                     offered: frozenTools,

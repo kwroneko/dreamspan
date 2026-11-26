@@ -733,12 +733,12 @@ describe("workshop setup effects", () => {
           expectedRowVersion: current.entry.rowVersion
         })
         yield* eventually(() => finished(events, swipe.version.id) !== undefined)
-        assert.lengthOf(yield* api.ListRolloutEffects({ chatId: chat.id }), 1)
+        assert.lengthOf(yield* api.ListRolloutEffects({ chatId: chat.id }), 2)
         const binnedVersion = yield* api.DeleteVersion({ versionId: resumed.version.id })
         yield* api.PurgeBinItem({ itemId: binnedVersion.id })
         assert.lengthOf(
           yield* api.ListRolloutEffects({ chatId: chat.id }),
-          1,
+          2,
           "A swipe's purge cannot undo or discard independent library effects"
         )
         const binnedChat = yield* api.DeleteChat({ chatId: chat.id })
@@ -756,7 +756,7 @@ describe("workshop setup effects", () => {
         assert.strictEqual(rows![0]!.n, 0)
         assert.lengthOf(
           (yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Resume keeper"),
-          1
+          2
         )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     }

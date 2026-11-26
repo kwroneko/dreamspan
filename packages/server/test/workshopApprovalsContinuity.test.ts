@@ -1,8 +1,4 @@
-// Approvals and undo with several messages and carried turns (spec/WORKSHOP.md §2.3–§2.4, §3.4,
-// §3.6; W4 on W5): a call waits in the message whose step it is and survives a reload, Stop and a
-// restart there; each change is recorded once and listed from the message that made it on; a
-// carried turn asks again rather than replaying an earlier answer; an undo makes the next turn
-// rebuild; turning a capability off rebuilds too. Synthetic data and a scripted provider only.
+// Approval receipts and effects belong to the current workshop rollout.
 import type { ServerResponse } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -155,19 +151,13 @@ const setup = (url?: string) =>
       })
     return api
   })
-const material = (api: Api, versionId: string) =>
-  Effect.gen(function* () {
-    const me = yield* api.Whoami()
-    const stored = yield* (yield* Reader).RolloutMaterial({ userId: me.id, versionId: versionId as VersionId })
-    return JSON.parse(stored.snapshot).continuity as { readonly parent?: unknown; readonly reason?: string }
-  })
 const provider = (handler: (request: Recorded, res: ServerResponse) => void) =>
   Effect.acquireRelease(
     Effect.promise(() => startMockProvider(handler)),
     (m) => Effect.promise(() => m.close())
   )
 
-describe("workshop approvals with several messages and carried turns", () => {
+describe("workshop approvals and fresh rollouts", () => {
   it.live(
     "a call waits in its own message; Stop cancels it there, Resume asks again, and each change is listed once from its message on",
     () => {
@@ -175,7 +165,6 @@ describe("workshop approvals with several messages and carried turns", () => {
       return Effect.gen(function* () {
         const handler = scripted([
           { name: "create_card", args: { name: "First keeper" }, id: "m1" },
-          { name: "send_message", args: { message: "Made the first keeper." }, id: "s1" },
           { name: "create_card", args: { name: "Second keeper" }, id: "m2" }
         ])
         const mock = yield* provider(handler)
@@ -187,9 +176,9 @@ describe("workshop approvals with several messages and carried turns", () => {
         const first = yield* awaitCall(events, "m1")
         assert.strictEqual(first.versionId, working)
         yield* answer(api, first.approval, "allow")
-        // The second call waits in the second message, not the first.
+        // Both calls belong to the same workshop message.
         const second = yield* awaitCall(events, "m2")
-        assert.notStrictEqual(second.versionId, working)
+        assert.strictEqual(second.versionId, working)
         const late = yield* watch(api, chat)
         const hello = late.find((e) => e._tag === "Hello")
         assert.isTrue(
@@ -223,9 +212,9 @@ describe("workshop approvals with several messages and carried turns", () => {
         assert.strictEqual(all.find((e) => e.toolCallId === "m2")!.rolloutId, again.approval.rolloutId)
         // The first message's own call is done there; the stopped run's unanswered call shows
         // as failed in that run's tail, so its change appears once, under the message that made it.
-        const replies = (yield* path(api, chat)).filter((e) => e.side === "assistant")
-        const firstMessage = replies.find((e) => e.version.id === working)!
-        const firstSteps = (yield* api.GetRolloutSteps({ versionId: firstMessage.version.id })).flatMap((s) =>
+        const me = yield* api.Whoami()
+        const firstMessage = yield* (yield* Reader).GetVersion({ userId: me.id, versionId: working })
+        const firstSteps = (yield* api.GetRolloutSteps({ versionId: firstMessage.id })).flatMap((s) =>
           s.kind === "tool" ? [[s.id, s.status]] : []
         )
         assert.deepStrictEqual(firstSteps[0], ["m1", "done"])
@@ -234,17 +223,12 @@ describe("workshop approvals with several messages and carried turns", () => {
           (yield* api.GetRolloutSteps({ versionId: resumed.version.id })).flatMap((s) =>
             s.kind === "tool" && s.status === "done" ? [s.id] : []
           ),
-          ["m2"]
+          ["m1", "m2"]
         )
         assert.deepStrictEqual(
           (yield* api.ListVersionEffects({ versionId: resumed.version.id })).map((e) => e.toolCallId),
-          ["m2"],
-          "the second message's warning leaves out the first message's change"
-        )
-        assert.deepStrictEqual(
-          (yield* api.ListVersionEffects({ versionId: firstMessage.version.id })).map((e) => e.toolCallId),
-          ["m1"],
-          "the first message lists its own change; the second call ran in a resumed run of the second message"
+          ["m2", "m1"],
+          "both changes belong to the resumed reply"
         )
         assert.strictEqual(yield* cards(api, "First keeper"), 1)
         assert.strictEqual(yield* cards(api, "Second keeper"), 1)
@@ -252,89 +236,37 @@ describe("workshop approvals with several messages and carried turns", () => {
     }
   )
 
-  it.live(
-    "a new version of the k-th message keeps its own calls, undoes nothing and makes later changes again only when asked",
-    () => {
-      const config = testConfig()
-      return Effect.gen(function* () {
-        const handler = scripted([
-          { name: "create_card", args: { name: "Earlier keeper" }, id: "k1" },
-          { name: "send_message", args: { message: "Made the earlier keeper." }, id: "ks" },
-          { name: "create_card", args: { name: "Later keeper" }, id: "k2" }
-        ])
-        const mock = yield* provider(handler)
-        const api = yield* setup(mock.url)
-        const chat = yield* api.CreateWorkshop({})
-        const events = yield* watch(api, chat)
-        const working = yield* task(api, chat, "make keepers")
-        yield* eventually(() =>
-          events.some((e) => e._tag === "Version" && e.version.content === "Done." && e.version.status === "complete")
-        )
-        const replies = (yield* path(api, chat)).filter((e) => e.side === "assistant")
-        const firstMessage = replies.find((e) => e.version.id === working)!
-        const last = replies.at(-1)!
-        assert.deepStrictEqual(
-          (yield* api.ListVersionEffects({ versionId: firstMessage.version.id })).map((e) => e.toolCallId),
-          ["k2", "k1"],
-          "the first message's changes and the run's later ones"
-        )
-        assert.deepStrictEqual(
-          (yield* api.ListVersionEffects({ versionId: last.version.id })).map((e) => e.toolCallId),
-          ["k2"]
-        )
-        const before = yield* api.ListRolloutEffects({ chatId: chat.id })
-        const user = yield* api.Whoami()
-        const reader = yield* Reader
-        const visibleAt = (leafSlotId: typeof last.slotId) =>
-          reader.LibraryAccess({
-            userId: user.id,
-            chatId: chat.id,
-            forkId: chat.currentForkId,
-            leafSlotId,
-            rolloutId: "next-reply",
-            entities: [],
-            refs: [],
-            card: null
-          })
-        const earlier = before.find((effect) => effect.toolCallId === "k1")!.targetId
-        const later = before.find((effect) => effect.toolCallId === "k2")!.targetId
-        assert.sameMembers([...(yield* visibleAt(firstMessage.slotId)).inView], [earlier])
-        assert.sameMembers([...(yield* visibleAt(last.slotId)).inView], [earlier, later])
+  it.live("a swipe runs the original task again without inheriting its effects", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* provider(
+        scripted([{ name: "create_card", args: { name: "Swipe keeper" }, id: "swipe-call" }])
+      )
+      const api = yield* setup(mock.url)
+      const chat = yield* api.CreateWorkshop({})
+      const events = yield* watch(api, chat)
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+      const first = yield* task(api, chat, "make a keeper")
+      const firstCall = yield* awaitCall(events, "swipe-call")
+      yield* answer(api, firstCall.approval, "allow")
+      yield* eventually(() => finished(events, first)?.status === "complete")
+      const entry = (yield* path(api, chat)).find((e) => e.version.id === first)!
+      const before = mock.requests().length
+      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      assert.strictEqual(swipe.version.origin, "generated")
+      assert.strictEqual(swipe.slotId, entry.slotId)
+      const again = yield* awaitCall(events, "swipe-call", firstCall.approval.rolloutId)
+      assert.strictEqual(again.versionId, swipe.version.id)
+      assert.notInclude(JSON.stringify(mock.requests()[before]!.body), '"tool_call_id":"swipe-call"')
+      yield* answer(api, again.approval, "deny")
+      yield* eventually(() => finished(events, swipe.version.id)?.status === "complete")
+      assert.strictEqual(yield* cards(api, "Swipe keeper"), 1)
+      assert.lengthOf(yield* api.ListVersionEffects({ versionId: swipe.version.id }), 0)
+      assert.lengthOf(yield* api.ListVersionEffects({ versionId: first }), 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
-        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
-        // The last message's new version keeps its own call (only the answer is written again).
-        const lastAgain = yield* api.Regenerate({ slotId: last.slotId, expectedRowVersion: last.rowVersion })
-        yield* eventually(() => finished(events, lastAgain.version.id) !== undefined)
-        assert.strictEqual(finished(events, lastAgain.version.id)!.status, "complete")
-        assert.isUndefined(waitingCall(events, "k2"), "its kept call didn't ask or run again")
-        assert.deepStrictEqual(yield* api.ListRolloutEffects({ chatId: chat.id }), before)
-        // The first message's new version keeps its own call; the run carries on after it and
-        // makes the later change again only if allowed. Nothing was undone.
-        const firstAgain = yield* api.Regenerate({
-          slotId: firstMessage.slotId,
-          expectedRowVersion: firstMessage.rowVersion
-        })
-        const asked = yield* awaitCall(events, "k2", before[0]!.rolloutId)
-        assert.notStrictEqual(asked.approval.rolloutId, before[0]!.rolloutId)
-        assert.deepStrictEqual(
-          (yield* api.ListRolloutEffects({ chatId: chat.id })).map((e) => e.undoneAt),
-          before.map(() => null)
-        )
-        yield* answer(api, asked.approval, "deny")
-        yield* eventually(() => finished(events, asked.versionId) !== undefined)
-        assert.deepStrictEqual(yield* api.ListRolloutEffects({ chatId: chat.id }), before)
-        assert.deepStrictEqual(
-          (yield* api.ListVersionEffects({ versionId: firstAgain.version.id })).map((e) => e.toolCallId),
-          ["k1"],
-          "the new first message kept the earlier change; the denied call made none"
-        )
-        assert.strictEqual(yield* cards(api, "Earlier keeper"), 1)
-        assert.strictEqual(yield* cards(api, "Later keeper"), 1)
-      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-    }
-  )
-
-  it.live("a call in a carried turn asks again rather than reusing an earlier answer, and survives a restart", () => {
+  it.live("a call in a new turn asks again rather than reusing an earlier answer, and survives a restart", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const handler = scripted([{ name: "create_card", args: { name: "Carried keeper" }, id: "c1" }])
@@ -348,11 +280,11 @@ describe("workshop approvals with several messages and carried turns", () => {
         const first = yield* awaitCall(events, "c1")
         yield* answer(api, first.approval, "allow")
         yield* eventually(() => finished(events, turn1 as VersionId) !== undefined)
-        // The next turn carries the first on and uses the same call id: it asks again.
+        // The historical call ID is still on the wire, but this rollout asks again.
         const turn2 = yield* task(api, chat, "make another keeper")
         const asked = yield* awaitCall(events, "c1", first.approval.rolloutId)
         assert.strictEqual(asked.versionId, turn2)
-        assert.isDefined((yield* material(api, turn2)).parent, "the second turn is carried")
+        assert.isUndefined((yield* api.GetRunContext({ versionId: turn2 })).continuity)
         return { chat, turn2: turn2 as VersionId }
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
       // A process that dies leaves the approval pending (a clean shutdown cancels it).
@@ -382,7 +314,7 @@ describe("workshop approvals with several messages and carried turns", () => {
     }).pipe(Effect.scoped)
   })
 
-  it.live("an undo from Changes and an Off choice each make the next turn rebuild; nothing is replayed", () => {
+  it.live("keeps history after undo and refreshes capability instructions for the new turn", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const handler = scripted([{ name: "create_card", args: { name: "Undone keeper" }, id: "u1" }])
@@ -397,7 +329,7 @@ describe("workshop approvals with several messages and carried turns", () => {
       yield* eventually(() => finished(events, turn1 as VersionId) !== undefined)
       const turn2 = yield* task(api, chat, "say hello")
       yield* eventually(() => finished(events, turn2 as VersionId) !== undefined)
-      assert.isDefined((yield* material(api, turn2)).parent, "a plain turn carries the first on")
+      assert.isUndefined((yield* api.GetRunContext({ versionId: turn2 })).continuity)
 
       // Undo from Changes: the next turn is put together again, and its call asks again.
       yield* api.UndoRolloutEffect((yield* api.ListRolloutEffects({ chatId: chat.id }))[0]!)
@@ -406,12 +338,9 @@ describe("workshop approvals with several messages and carried turns", () => {
       const turn3 = yield* task(api, chat, "make it again")
       const asked = yield* awaitCall(events, "u1", first.approval.rolloutId)
       assert.strictEqual(asked.versionId, turn3)
-      const rebuilt = yield* material(api, turn3)
-      assert.isUndefined(rebuilt.parent)
-      assert.match(rebuilt.reason ?? "", /undone/i)
       const body = JSON.stringify(mock.requests()[before]!.body)
       assert.include(body, "make it again", "the new message survives the rebuild")
-      assert.notInclude(body, '"tool_call_id":"u1"', "the undone call's result is not carried")
+      assert.include(body, '"tool_call_id":"u1"', "the historical result survives undo")
       yield* answer(api, asked.approval, "deny")
       yield* eventually(() => finished(events, turn3 as VersionId) !== undefined)
       assert.strictEqual(yield* cards(api, "Undone keeper"), 0)
@@ -422,7 +351,6 @@ describe("workshop approvals with several messages and carried turns", () => {
       const offAt = mock.requests().length
       const turn4 = yield* task(api, chat, "say hello again")
       yield* eventually(() => finished(events, turn4 as VersionId) !== undefined)
-      assert.match((yield* material(api, turn4)).reason ?? "", /may do here changed/)
       const off = mock.requests()[offAt]!.body as unknown as Body
       assert.notInclude(
         (off.tools ?? []).map((t) => t.function.name),
@@ -430,14 +358,13 @@ describe("workshop approvals with several messages and carried turns", () => {
       )
       assert.include(JSON.stringify(off.messages), "Turned off in this workshop: Create and edit library items.")
       assert.notInclude(JSON.stringify(off.messages), "Turned off in this workshop: nothing.")
+      assert.include(JSON.stringify(off.messages), '"tool_call_id":"u1"')
       // Back to the default: the next turn rebuilds once more, and the one after carries on.
       yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: null })
       const turn5 = yield* task(api, chat, "one more hello")
       yield* eventually(() => finished(events, turn5 as VersionId) !== undefined)
-      assert.match((yield* material(api, turn5)).reason ?? "", /may do here changed/)
       const turn6 = yield* task(api, chat, "and another")
       yield* eventually(() => finished(events, turn6 as VersionId) !== undefined)
-      assert.isDefined((yield* material(api, turn6)).parent)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

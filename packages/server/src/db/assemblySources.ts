@@ -1,3 +1,5 @@
+import { workshopHistory } from "../agent/workshopHistory.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
 import { refSourcePathSql } from "./library.ts"
 import { hasVersionPayload, libraryDocuments } from "./libraryAttachments.ts"
@@ -161,6 +163,7 @@ const historyMerge = (json: string): HistoryMerge => {
 }
 
 interface HistoryRow {
+  readonly workshop_transcript: string | null
   readonly images_json: string
   /** Its attachments saved in Files (§6.1), for the `<attachment>` lines. */
   readonly attachments_json: string
@@ -196,6 +199,7 @@ interface HistoryRow {
  * requested path (active by default), the request the cache-warmth estimate compares (DESIGN §5.5).
  */
 type Settings = {
+  readonly workshopHistory?: true
   readonly cut?: string
   readonly summaryBefore?: { readonly slot: string | null; readonly depth: number }
   readonly partialBatch?: boolean
@@ -678,7 +682,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                   floor: from === null ? 0 : from + 1
                 }
               })
-        const columns = sql`s.id AS slot_id, s.parent_slot_id, ${sql.literal(window === null ? "s.depth" : "path.position AS depth, s.inserted")}, ${contextExcludedIn(sql, fork)} AS context_excluded,
+        const workshopTranscript = settings.workshopHistory
+          ? sql`(SELECT p.transcript_json FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
+              WHERE p.rollout_id = v.rollout_id AND r.status NOT IN ('created', 'running')
+                AND json_extract(p.context_snapshot_json, '$.agentAssembly.workshop') = 1)`
+          : sql`NULL`
+        const columns = sql`${workshopTranscript} AS workshop_transcript, s.id AS slot_id, s.parent_slot_id, ${sql.literal(window === null ? "s.depth" : "path.position AS depth, s.inserted")}, ${contextExcludedIn(sql, fork)} AS context_excluded,
             ${slotDeletedIn(sql, fork, "s")} AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
@@ -741,6 +750,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             speaker: row.speaker_entity_id,
             side: row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant",
             content: row.content,
+            ...(row.workshop_transcript
+              ? {
+                  workshopHistory: workshopHistory(
+                    JSON.parse(row.workshop_transcript) as Array<AgentMessage>,
+                    row.version_id
+                  ),
+                  ...(row.amend_count > 0 ? { workshopEdited: true as const } : {})
+                }
+              : {}),
             ...sectionsOf(row.reply_sections),
             ...(row.hidden_thinking ? { thinkingHidden: hiddenParts(row.hidden_thinking) } : {}),
             ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
@@ -751,8 +769,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             written: row.written === 1,
             inContext:
               row.context_excluded === 0 &&
-              row.status !== "failed" &&
+              (row.status !== "failed" || row.workshop_transcript !== null) &&
               (row.content.length > 0 ||
+                row.workshop_transcript !== null ||
                 row.images_json !== "[]" ||
                 row.attachments_json !== "[]" ||
                 row.library_json !== "[]"),

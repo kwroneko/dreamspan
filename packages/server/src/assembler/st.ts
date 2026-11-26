@@ -1,3 +1,4 @@
+import { workshopMessageCost } from "../agent/workshopHistory.ts"
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "The one assembly path"; each function names the ST one it follows).
 import { speakerLabel } from "./contextMarkup.ts"
@@ -25,6 +26,8 @@ export interface StPrompt {
 
 /** A message being composed, before squashing and post-processing. */
 export interface StMessage {
+  readonly workshopHistory?: ReadonlyArray<import("../agent/workshopHistory.ts").WorkshopMessage>
+  readonly workshopMessage?: import("../agent/workshopHistory.ts").WorkshopMessage
   readonly summary?: boolean
   readonly role: Role
   readonly content: string
@@ -93,6 +96,7 @@ export interface Injection {
 
 /** A message of the path as ST builds it in setOpenAIMessages, newest last. */
 export interface ChatLine {
+  readonly workshopHistory?: NonNullable<StMessage["workshopHistory"]>
   readonly role: Role
   readonly content: string
   readonly name?: string
@@ -172,13 +176,18 @@ export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 export const tokensOf = (
   message: {
     readonly content: string
+    readonly workshopHistory?: NonNullable<StMessage["workshopHistory"]>
     readonly name?: string | undefined
     /** Images count what their estimate says (`image-tokens` stage); unsent ones count nothing. */
     readonly images?: ReadonlyArray<{ readonly estimate?: ImageEstimate | undefined }> | undefined
   },
   countText: (text: string) => number = estimateTokens
 ) =>
-  (message.content.length === 0 ? 0 : countText(message.content + (message.name ?? "")) + 3) +
+  (message.workshopHistory?.length
+    ? message.workshopHistory.reduce((n, m) => n + workshopMessageCost(m, countText), 0)
+    : message.content.length === 0
+      ? 0
+      : countText(message.content + (message.name ?? "")) + 3) +
   (message.images ?? []).reduce((n, image) => n + budgetTokens(image.estimate), 0)
 
 /** ST's parseExampleIntoIndividual: one example block into user and character lines. */
@@ -393,7 +402,7 @@ export const compose = (input: {
       const line = input.chat[i]!
       const message: StMessage = { ...line }
       if (budget - countMessage(message) < 0) break
-      if (message.content || message.kind === "volatile") history.unshift(message)
+      if (message.content || message.workshopHistory?.length || message.kind === "volatile") history.unshift(message)
       spend(countMessage(message))
       if (message.kind === "history") historySent++
     }

@@ -361,6 +361,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       }
       const sends = plan.contract !== "final_text"
       const several = plan.contract === "several"
+      const workshop =
+        !run.subagent &&
+        (plan.assembly?.workshop === true || generation.request.workshop === true || run.kind === "workshop")
+      const background = several || workshop
       let working = { slotId: request.slotId, versionId: request.versionId }
       const historical = run.resume?.historical ?? 0
       let sent: string | undefined
@@ -554,7 +558,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           offerTools ? piTools : undefined,
           {
             explicitTail: model.cacheBreakpoints === "explicit",
-            replayReasoning: several || plan.continuity === "resume_previous",
+            replayReasoning: background,
             reasoningTarget: target,
             ...(dispatch &&
             (model.kind === "deepseek" || (model.kind === "openrouter" && model.key.startsWith("deepseek/")))
@@ -616,7 +620,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     const sending = sends && (event.name === SEND_MESSAGE || event.name === NO_REPLY) && !last
                     // Thinking before the message is the message's reasoning; text before any
                     // call, or thinking before another tool, was a step.
-                    if (!called && body.text && (!sending || prose)) emit({ restart: true })
+                    const restart = !called && body.text && (!sending || prose)
                     called = true
                     // Kept on a turn cut off after it, so a resume resamples rather than continues it.
                     partial = {
@@ -625,11 +629,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                         ...partial.content,
                         {
                           type: "toolCall",
-                          id: `partial-${partial.content.length}`,
+                          id: event.id,
                           name: event.name,
                           arguments: (event.arguments ?? {}) as Record<string, never>
                         }
                       ]
+                    }
+                    if (restart) {
+                      showSteps(false, partial)
+                      emit({ restart: true })
                     }
                   } else if (event.type === "text" || event.type === "thinking") {
                     // Preserve the failed/aborted turn too; a stop must not replace its
@@ -804,7 +812,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 },
                 wait: (prompt: ApprovalPrompt | null) => waitingChanged(toolCallId, prompt),
                 // Only a run that can go on after its model ended a turn waits for reports (§3.2).
-                ...(several
+                ...(background
                   ? {
                       background: (
                         callId: string,
@@ -1298,6 +1306,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (tool && !admits(tool.effect))
             return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= cap) return { block: true, reason: "The last model request of this reply can't use tools." }
+          if (workshop && toolCall.name === SEND_MESSAGE && (mailbox.waitingFor > 0 || mailbox.hasMail))
+            return { block: true, reason: "Wait for your subagents to report before sending the reply." }
           if (!several && (sent !== undefined || passed))
             return { block: true, reason: "The reply has already been sent." }
           // A process kill after an effect commits must leave its call ID durable,
@@ -1314,6 +1324,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (sent !== undefined || passed || requests >= cap || signal?.aborted) return { action: "end" }
           const plain = !message.content.some((p) => p.type === "toolCall")
           const failed = message.stopReason === "error" || message.stopReason === "aborted"
+          if (workshop && plain && !failed && (mailbox.waitingFor > 0 || mailbox.hasMail)) return { action: "end" }
           if (plain && !failed && sendOnly) {
             if (body.text) emit({ restart: true })
             // The cap's "write now" takes precedence, even over running out: its answer is the reply (§3.5).
@@ -1429,7 +1440,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         )
       }
       const shown = new Map<string, string>()
-      const showSteps = (final: boolean) => {
+      const showSteps = (final: boolean, partial?: AssistantMessage, showLastPlain = false) => {
         if (final) stepsFinal = true
         const posted = several
           ? agent.state.messages
@@ -1447,7 +1458,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           : []
         for (const id of [...new Set([...posted, working.versionId])]) {
           // A call waiting for the user shows as waiting, with what it asks.
-          const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
+          const waits = id === working.versionId ? waitingFor : 0
+          const transcript = partial ? [...agent.state.messages, partial] : agent.state.messages
+          const steps = stepsOf(
+            transcript,
+            frozen,
+            final,
+            several ? id : undefined,
+            showLastPlain ||
+              waits > 0 ||
+              partial !== undefined ||
+              (workshop && (mailbox.hasMail || mailbox.waitingFor > 0))
+          ).map((step) => {
             const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
             const child = step.kind === "tool" ? children.get(step.id) : undefined
             const progress = step.kind === "tool" && step.status === "running" ? progressOf.get(step.id) : undefined
@@ -1458,7 +1480,6 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               : shown
           })
           // The working message says how many background subagents the run waits for (§3.2).
-          const waits = id === working.versionId && waitingFor > 0 ? waitingFor : 0
           const json = JSON.stringify([steps, waits])
           if (json === shown.get(id)) continue
           shown.set(id, json)
@@ -1468,7 +1489,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       agent.subscribe((event) => {
         if (event.type === "tool_execution_end") quoteRuntimeFailure(event.result, event.isError, event.toolCallId)
         if (event.type === "turn_end" || event.type === "agent_end")
-          void flush(event.type === "agent_end").then(() => showSteps(event.type === "agent_end"))
+          void flush(event.type === "agent_end").then(() =>
+            showSteps(event.type === "agent_end" && (!background || (mailbox.waitingFor === 0 && !mailbox.hasMail)))
+          )
         if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "turn_end")
           showSteps(false)
       })
@@ -1704,7 +1727,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               { role: "rpPosted", versionId: next.value.postedVersionId, timestamp: Date.now() }
             ]
             yield* Effect.promise(() => flush())
-          } else emit({ restart: true })
+          } else {
+            showSteps(false, undefined, true)
+            emit({ restart: true })
+          }
           body.text = false
         }
         // Waiting, with no request open: the working message says for how many.
@@ -1714,7 +1740,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           yield* Effect.promise(() => mailbox.next())
         }
         waitingFor = 0
-        if (!deliver()) break
+        if (!deliver()) {
+          showSteps(false)
+          break
+        }
         yield* Effect.promise(() => flush())
         showSteps(false)
       }

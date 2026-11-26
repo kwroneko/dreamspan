@@ -83,16 +83,14 @@ const path = (api: Api, chat: Chat) =>
     })).entries
   })
 
-it.live("keeps setup effects canonical across multi-message regeneration and message-local step edits", () => {
+it.live("keeps setup effects canonical across a fresh swipe and step edits", () => {
   const config = testConfig()
   return Effect.gen(function* () {
     let step = 0
     const calls = [
       ["create_card", { name: "Before" }],
-      ["send_message", { message: "First setup message." }],
       ["edit_card", { card: "Before", changes: [{ field: "description", text: "Changed before second post." }] }],
       ["create_card", { name: "Middle" }],
-      ["send_message", { message: "Second setup message." }],
       ["create_card", { name: "After" }]
     ] as const
     const mock = yield* Effect.acquireRelease(
@@ -119,13 +117,11 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
         (e) => e._tag === "Version" && e.version.status === "complete" && e.version.content === "Setup complete."
       )
     )
-    const replies = (yield* path(api, chat)).filter((e) =>
-      ["First setup message.", "Second setup message.", "Setup complete."].includes(e.version.content)
-    )
-    assert.lengthOf(replies, 3)
+    const replies = (yield* path(api, chat)).filter((e) => ["Setup complete."].includes(e.version.content))
+    assert.lengthOf(replies, 1)
     const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
     assert.lengthOf(effects, 4)
-    const expected = [["setup_1"], ["setup_3", "setup_4"], ["setup_6"]]
+    const expected = [["setup_1", "setup_2", "setup_3", "setup_4"]]
     for (const [i, reply] of replies.entries()) {
       const steps = yield* api.GetRolloutSteps({ versionId: reply.version.id })
       assert.deepStrictEqual(
@@ -142,8 +138,8 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
       )
     }
     const creation = effects.find((e) => e.toolCallId === "setup_1")!
-    const laterEdit = effects.find((e) => e.toolCallId === "setup_3")!
-    const middle = replies[1]!
+    const laterEdit = effects.find((e) => e.toolCallId === "setup_2")!
+    const middle = replies[0]!
     const regenerated = yield* api.Regenerate({ slotId: middle.slotId, expectedRowVersion: middle.rowVersion })
     yield* eventually(() => finished(events, regenerated.version.id) !== undefined)
     assert.deepStrictEqual(
@@ -151,13 +147,13 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
       effects,
       "regeneration retains all independent changes without duplicate undo records"
     )
-    assert.isTrue((yield* path(api, chat)).some((e) => e.version.id === replies[0]!.version.id))
+    assert.lengthOf(yield* api.GetRolloutSteps({ versionId: regenerated.version.id }), 0)
     const me = yield* api.Whoami()
     const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: middle.slotId })
     const edited = yield* api.ResumeFromStep({
       versionId: middle.version.id,
       expectedRowVersion: slot.entry.rowVersion,
-      step: 1,
+      step: 2,
       edit: { kind: "result", text: "Confirmed Middle exists." }
     })
     yield* eventually(() => finished(events, edited.version.id) !== undefined)
@@ -183,7 +179,7 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
 })
 
 for (const change of ["undo", "edit", "ancestor-undo", "ancestor-edit", "unchanged", "agent-edit"] as const) {
-  it.live(`rechecks setup effects before continuity: ${change}`, () => {
+  it.live(`keeps the historical tool result after a setup change: ${change}`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
       let creates = 0
@@ -234,26 +230,19 @@ for (const change of ["undo", "edit", "ancestor-undo", "ancestor-edit", "unchang
       const snapshot = JSON.parse(material.snapshot)
       const body = JSON.stringify(mock.requests()[before]!.body)
       assert.include(body, "New user message survives fallback")
-      if (change === "unchanged" || change === "agent-edit") {
-        assert.isDefined(snapshot.continuity.parent)
-        assert.include(body, "keeper_1")
-      } else {
-        assert.isUndefined(snapshot.continuity.parent)
-        assert.match(snapshot.continuity.reason, /undone|library|changed/i)
-        assert.notInclude(body, "keeper_1", "stale tool success is not carried")
-      }
+      assert.isUndefined(snapshot.continuity)
+      assert.include(body, "keeper_1")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 }
 
-it.live("resumes stopped multi-message setup work without repeating committed calls", () => {
+it.live("resumes stopped setup work without repeating committed calls", () => {
   const config = testConfig()
   return Effect.gen(function* () {
     let step = 0
     let held = false
     const calls = [
       ["create_card", { name: "Stopped first" }],
-      ["send_message", { message: "Created the first card." }],
       ["create_card", { name: "Stopped second" }]
     ] as const
     const mock = yield* Effect.acquireRelease(
@@ -261,7 +250,7 @@ it.live("resumes stopped multi-message setup work without repeating committed ca
         startMockProvider((request, res) => {
           if (!request.body?.tools) return sse(res, completionChunks(["Story."], {}))
           const next = calls[step++]
-          if (step === 4) {
+          if (step === 3) {
             held = true
             res.writeHead(200, { "content-type": "text/event-stream" })
             return
@@ -296,7 +285,7 @@ it.live("resumes stopped multi-message setup work without repeating committed ca
     assert.deepStrictEqual(yield* api.ListRolloutEffects({ chatId: chat.id }), effects)
     assert.deepStrictEqual(
       (yield* api.GetRolloutSteps({ versionId: resumed.version.id })).flatMap((s) => (s.kind === "tool" ? [s.id] : [])),
-      ["stopped_3"]
+      ["stopped_1", "stopped_2"]
     )
     assert.lengthOf(
       (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label.startsWith("Stopped ")),
@@ -310,7 +299,7 @@ it.live("resumes stopped multi-message setup work without repeating committed ca
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
-it.live("enforces the mutation and argument limits independently in a carried turn with reused call ids", () => {
+it.live("enforces the mutation and argument limits independently in a fresh turn with reused call ids", () => {
   const config = testConfig()
   return Effect.gen(function* () {
     let turn = 0
@@ -378,7 +367,7 @@ it.live("enforces the mutation and argument limits independently in a carried tu
     yield* eventually(() => finished(events, second.entry.version.id) !== undefined)
     const me = yield* api.Whoami()
     const material = yield* (yield* Reader).RolloutMaterial({ userId: me.id, versionId: second.entry.version.id })
-    assert.isDefined(JSON.parse(material.snapshot).continuity.parent)
+    assert.isUndefined(JSON.parse(material.snapshot).continuity)
     const effects = yield* api.ListRolloutEffects({ chatId: chat.id, limit: 200 })
     assert.lengthOf(effects, 33)
     const current = effects.filter((e) => e.rolloutId === material.rolloutId)

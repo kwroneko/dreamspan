@@ -24,6 +24,7 @@ import {
 
 export interface FixtureMessage {
   /** Synthetic version knowledge, null or absent when everyone knows it. */
+  readonly workshopHistory?: HistoryEntry["workshopHistory"]
   readonly knowers?: ReadonlyArray<string> | null
   readonly side: "user" | "assistant"
   readonly content: string
@@ -129,6 +130,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     written: m.written ?? false,
     inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
     ...(m.images === undefined ? {} : { images: m.images }),
+    ...(m.workshopHistory ? { workshopHistory: m.workshopHistory } : {}),
     ...(m.replySections === undefined ? {} : { replySections: m.replySections }),
     ...(m.merge === undefined ? {} : { merge: m.merge }),
     sentAt: 0,

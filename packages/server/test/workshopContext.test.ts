@@ -12,6 +12,7 @@ import { Effect, Stream } from "effect"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -109,7 +110,7 @@ const filler = (seed: number, words: number) =>
   Array.from({ length: words }, (_, i) => `w${((i + seed) * 7919) % 10007}`).join(" ")
 
 describe("workshop context", () => {
-  it.live("uses the model's window and a quarter-window reply reserve, carried into the next turn", () => {
+  it.live("uses the model's window and a quarter-window reply reserve with a reconstructed next turn", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -141,12 +142,14 @@ describe("workshop context", () => {
       assert.strictEqual(firstBodies[0]!.max_tokens ?? firstBodies[0]!.max_completion_tokens, 50_000)
       const second = yield* turn(api, chat, events, "Second request.")
       const run = yield* api.GetRunContext({ versionId: second.id })
-      assert.strictEqual(run.continuity?.parentVersionId, first.id, run.continuity?.reason)
+      assert.isUndefined(run.continuity)
       const before = firstBodies[1]!.messages as Array<Wire>
       const carried = mock.requests()[2]!.body!.messages as Array<Wire>
-      assert.deepStrictEqual(carried.slice(0, before.length), before)
-      assert.include(text(carried.at(-1)!.content), "Second request.")
-      // A smaller window and an explicit send limit must invalidate the frozen carry.
+      const end = before.findIndex((m) => text(m.content).includes("First request.")) + 1
+      assert.deepStrictEqual(carried.slice(0, end), before.slice(0, end))
+      assert.include(text(carried.at(-2)!.content), "Second request.")
+      assert.isTrue(carried.some((m) => m.role === "tool"))
+      // The next turn uses the newly configured context and response reserve.
       yield* api.EditModel({
         modelId: model.id,
         expectedRowVersion: model.rowVersion,
@@ -156,8 +159,7 @@ describe("workshop context", () => {
       const third = yield* turn(api, chat, events, "Third request.")
       assert.deepInclude(yield* budgetOf(api, third.id), { maximum: 16_384, responseReserve: 4_096 })
       const rebuilt = yield* api.GetRunContext({ versionId: third.id })
-      assert.isUndefined(rebuilt.continuity?.parentVersionId)
-      assert.include(rebuilt.continuity?.reason, "model or connection settings changed")
+      assert.isUndefined(rebuilt.continuity)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -233,47 +235,53 @@ describe("workshop context", () => {
         // Legacy elision remains available when the user explicitly turns LCM off.
         yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
         const events = yield* watch(api, chat)
-        yield* turn(api, chat, events, "Turn one.")
+        const first = yield* turn(api, chat, events, "Turn one.")
+        // Exercise assembly's elision independently of the tool's own per-result size limit.
+        const reader = yield* Reader
+        const me = yield* api.Whoami()
+        const original = yield* reader.RolloutMaterial({ userId: me.id, versionId: first.id })
+        const transcript = JSON.parse(original.transcript!) as Array<{ role: string; toolCallId?: string }>
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?",
+            params: [
+              JSON.stringify(
+                transcript.map((message) =>
+                  message.role === "toolResult" && message.toolCallId === "c1"
+                    ? {
+                        ...message,
+                        content: [{ type: "text", text: toolData("Marker Ledger one. " + filler(5, window)) }]
+                      }
+                    : message
+                )
+              ),
+              original.rolloutId
+            ]
+          }
+        ])
         const second = yield* turn(api, chat, events, "Turn two.")
-        const secondRun = yield* api.GetRunContext({ versionId: second.id })
-        if (window === 24_000) {
-          assert.isUndefined(secondRun.continuity?.parentVersionId)
-          assert.include(secondRun.continuity?.reason, "outgrew the context budget")
-          return
-        }
-        assert.isDefined(secondRun.continuity?.parentVersionId, secondRun.continuity?.reason)
-        assert.isUndefined(secondRun.continuity?.elided)
+        assert.isUndefined((yield* api.GetRunContext({ versionId: second.id })).continuity)
         const before = mock.requests().length
         const third = yield* turn(api, chat, events, "Turn three.")
-        const run = yield* api.GetRunContext({ versionId: third.id })
-        // Carried, not rebuilt: the oldest results were left out instead.
-        assert.strictEqual(run.continuity?.parentVersionId, second.id, run.continuity?.reason)
-        assert.isAtLeast(run.continuity?.elided ?? 0, 1)
         const opening = mock.requests()[before]!.body!.messages as Array<Wire>
         const tools = opening.filter((m) => m.role === "tool").map((m) => text(m.content))
         assert.include(tools[0], "[Result left out to save room. read_run with message")
         assert.notInclude(tools[0], "Marker Ledger one")
-        // The last turn's results stay as they were.
-        assert.include(tools.at(-1), "Marker Ledger three")
+        // The most recent historical result remains when eliding the oversized oldest one.
+        assert.isTrue(opening.some((message) => message.tool_call_id === "c3"))
         // read_run brings the left-out result back, from the run that made it.
         const closing = mock.requests().at(-1)!.body!.messages as Array<Wire>
         const reread = closing.findLast((m) => m.role === "tool")!
         assert.strictEqual(reread.tool_call_id, "c4")
         assert.include(text(reread.content), "&quot;call&quot;:&quot;c1&quot;")
         assert.include(text(reread.content), "Marker Ledger one")
-        // The next turn carries the shortened run as it was sent.
+        // The next assembly leaves the oversized result out again.
         const fourth = yield* turn(api, chat, events, "Turn four.")
-        const fourthRun = yield* api.GetRunContext({ versionId: fourth.id })
-        assert.strictEqual(fourthRun.continuity?.parentVersionId, third.id, fourthRun.continuity?.reason)
+        assert.isUndefined((yield* api.GetRunContext({ versionId: fourth.id })).continuity)
         const carried = mock.requests().at(-1)!.body!.messages as Array<Wire>
         // (Past the trigger again, it may leave out turn two's result as well, but nothing before it changes.)
-        const cut = closing.findIndex((m) => m.tool_call_id === "c3")
-        assert.isAbove(cut, 0)
-        assert.deepStrictEqual(carried.slice(0, cut), closing.slice(0, cut))
         assert.include(text(carried.find((m) => m.tool_call_id === "c1")!.content), "[Result left out")
         // Editing a step resumes the stored elision bytes instead of compacting them again.
-        const reader = yield* Reader
-        const me = yield* api.Whoami()
         const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: third.reply.entry.slotId })
         const editedAt = mock.requests().length
         const edited = yield* api.ResumeFromStep({

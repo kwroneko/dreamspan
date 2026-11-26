@@ -170,31 +170,34 @@ describe("the workshop's working folder", () => {
         assert.strictEqual((yield* json("/files/delete", { path: "/files/thesis" })).status, 200)
         yield* turn("FOLDER TURN three")
         assert.strictEqual(requests.length, 3)
-        // A workshop carries its run from turn to turn, so the note is told with the turn's own
-        // message, and again only on a turn after the folder changed.
+        // Only the current request includes its working-folder note.
         const told = requests.map((r) => r.messages.map(text).filter((t) => t.includes("Working folder:")))
-        assert.strictEqual(told[0]!.length, 1)
+        assert.deepStrictEqual(
+          told.map((lines) => lines.length),
+          [1, 1, 1]
+        )
         assert.match(told[0]![0]!, /Working folder: \/files$/m)
         assert.match(text(requests[0]!.messages.at(-1)!), /Working folder: \/files$/m)
-        assert.match(text(requests[1]!.messages.at(-1)!), /^FOLDER TURN two\nWorking folder: \/files\/thesis$/)
-        assert.include(
-          text(requests[2]!.messages.at(-1)!),
-          "FOLDER TURN three\nWorking folder: /files (/files/thesis wasn't found"
-        )
-        // Each request begins with the one before it: the earlier notes stay where they were told,
-        // so the cached prefix never changes, and the system prompt never names the folder.
+        assert.strictEqual(text(requests[1]!.messages.at(-2)!), "FOLDER TURN two")
+        assert.match(text(requests[1]!.messages.at(-1)!), /Working folder: \/files\/thesis$/)
+        assert.include(text(requests[2]!.messages.at(-1)!), "Working folder: /files (/files/thesis wasn't found")
+        // Each request reuses the previous prefix through the previous user's message.
         for (const [i, request] of requests.entries()) {
-          if (i > 0)
-            assert.deepStrictEqual(
-              request.messages.slice(0, requests[i - 1]!.messages.length).map(text),
-              requests[i - 1]!.messages.map(text)
-            )
+          if (i > 0) {
+            const previous = requests[i - 1]!.messages.slice(0, -1).map(text)
+            assert.deepStrictEqual(request.messages.slice(0, previous.length).map(text), previous)
+          }
           for (const message of request.messages.filter((m) => m.role === "system"))
             assert.notInclude(text(message), "Working folder:")
         }
-        // A turn whose folder didn't change says nothing more.
         yield* turn("FOLDER TURN four")
-        assert.strictEqual(text(requests[3]!.messages.at(-1)!), "FOLDER TURN four")
+        assert.strictEqual(text(requests[3]!.messages.at(-2)!), "FOLDER TURN four")
+        const fourth = requests[3]!.messages.map(text)
+        assert.include(fourth.at(-1)!, "Working folder: /files")
+        assert.lengthOf(
+          fourth.filter((line) => line.includes("Working folder:")),
+          1
+        )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
     120_000
   )

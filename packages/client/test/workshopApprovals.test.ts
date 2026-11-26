@@ -145,7 +145,13 @@ describe("the regenerate warning", () => {
     const own = effect({ toolCallId: "c8" })
     const steps = { ok: true as const, value: [tool("done")] }
     // c1 (the kept `agent` call) keeps its subagent's change; the later call's are listed.
-    expect(warningEffects(request(), { ok: true, value: [kept, later, own] }, steps)).toEqual({
+    expect(
+      warningEffects(
+        request({ action: "resume-step", fromStep: { index: 1, keepsCall: false } }),
+        { ok: true, value: [kept, later, own] },
+        steps
+      )
+    ).toEqual({
       ok: true,
       value: [later, own]
     })
@@ -168,8 +174,11 @@ describe("the regenerate warning", () => {
     const effects = { ok: true as const, value: [effect({})] }
     const steps = { ok: true as const, value: [tool("done")] }
     expect(warningEffects(request(), failure, steps)).toBe(failure)
-    expect(warningEffects(request(), effects, failure)).toBe(failure)
-    expect(warningEffects(request(), effects, steps)).toEqual({ ok: true, value: [] })
+    expect(warningEffects(request(), effects, failure)).toEqual(effects)
+    expect(warningEffects(request(), effects, steps)).toEqual(effects)
+    expect(
+      warningEffects(request({ action: "resume-step", fromStep: { index: 0, keepsCall: false } }), effects, failure)
+    ).toBe(failure)
   })
   it("is only for a reply that made tool calls, in a kind with changes", () => {
     const close = chatKindLooks.register(workshopLook)
@@ -198,20 +207,20 @@ describe("the regenerate warning", () => {
     }
   })
 
-  it("leaves out the calls a new version keeps: all the reply's own, or those before the step", () => {
+  it("keeps calls only when resuming from a step", () => {
     const steps: ReadonlyArray<RolloutStep> = [
       { ...tool("done"), id: "a" } as RolloutStep,
       { kind: "thinking", text: "x" },
       { ...tool("done"), id: "b" } as RolloutStep
     ]
-    expect([...keptCalls(steps, request())]).toEqual(["a", "b"])
+    expect([...keptCalls(steps, request())]).toEqual([])
     const from = (index: number, keepsCall: boolean) =>
       request({ action: "resume-step", fromStep: { index, keepsCall } })
     expect([...keptCalls(steps, from(2, false))]).toEqual(["a"])
     expect([...keptCalls(steps, from(2, true))]).toEqual(["a", "b"])
     expect([...keptCalls(steps, from(0, false))]).toEqual([])
     // The words say what the merged rules do: nothing is undone; the reply's own steps are kept.
-    expect(warningText("regenerate")).toMatch(/keeps this reply’s own steps and changes and undoes none/)
+    expect(warningText("regenerate")).toMatch(/again from the start/)
     expect(warningText("resume-step")).toMatch(/keeps the steps before it/)
   })
 

@@ -91,7 +91,14 @@ const activationText = (activation: SourceActivation): string => {
   return `Activated at step ${activation.step}: ${why}${notes}.`
 }
 
-const roleLabel = { system: "System", developer: "Developer", user: "User", assistant: "Assistant", model: "Model" }
+const roleLabel = {
+  system: "System",
+  developer: "Developer",
+  user: "User",
+  assistant: "Assistant",
+  model: "Model",
+  tool: "Tool result"
+}
 
 /** Sources this turn left out, shown under "Not sent" rather than with the text they're beside. */
 const unsent = (source: ContextSource) =>

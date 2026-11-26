@@ -784,7 +784,7 @@ describe("subagents after review", () => {
         [{ sql: "SELECT id FROM rollouts WHERE spawned_by_rollout_id IS NOT NULL" }],
         { readOnly: true }
       )
-      // The reply posted "Waiting." (it holds the call) and goes on in a new message meanwhile.
+      // The reply holds the call and stays on the same message while waiting.
       yield* (yield* Writer).ApplyRolloutEffect({
         userId: me.id,
         rolloutId: String(rows![0]!["id"]),

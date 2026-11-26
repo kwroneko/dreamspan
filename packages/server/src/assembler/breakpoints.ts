@@ -10,7 +10,24 @@ type Breakpoint = AssembledRequest["breakpoints"][number]
 export const cachePrefixDigests = (messages: ReadonlyArray<RequestMessage>): ReadonlyArray<string> => {
   const hash = createHash("sha256")
   return messages.map((m) => {
-    hash.update(JSON.stringify([m.role, m.name ?? null, m.content, m.images ?? []]) + "\n")
+    const native = m.workshopMessage
+    hash.update(
+      JSON.stringify([
+        m.role,
+        m.name ?? null,
+        m.content,
+        m.images ?? [],
+        ...(native
+          ? [
+              native.role === "assistant"
+                ? [native.api, native.provider, native.model, native.content]
+                : native.role === "toolResult"
+                  ? [native.toolCallId, native.toolName, native.content, native.isError]
+                  : native.content
+            ]
+          : [])
+      ]) + "\n"
+    )
     return hash.copy().digest("hex")
   })
 }

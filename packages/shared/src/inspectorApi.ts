@@ -119,7 +119,7 @@ export const ContextImage = Schema.Struct({
 export type ContextImage = typeof ContextImage.Type
 
 export const ContextMessage = Schema.Struct({
-  role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
+  role: Schema.Literals(["system", "developer", "user", "assistant", "model", "tool"]),
   name: Schema.NullOr(Schema.String),
   prefill: Schema.optionalKey(
     Schema.Struct({

@@ -209,6 +209,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           slotId,
           versionId,
           ...(partialBatch === undefined ? {} : { partialBatch }),
+          ...(agent?.workshop ? { workshopHistory: true } : {}),
           ...(model === undefined ? {} : { modelOverride: model })
         })
         return assembler

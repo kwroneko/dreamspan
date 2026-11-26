@@ -498,7 +498,7 @@ describe("side chat request", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("does not carry stale story reads after an edit at the same position", () => {
+  it.live("replays the original story read and fetches current text on a new call", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -525,7 +525,7 @@ describe("side chat request", () => {
           .filter((m) => m.role === "tool")
           .map(textOf)
           .join("\n")
-        assert.notInclude(reads, "The road flooded.")
+        assert.include(reads, "The road flooded.")
       }
       assert.include(results(mock.requests().at(-1)!.body as Body)[0]!, "The road is dry.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

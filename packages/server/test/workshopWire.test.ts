@@ -10,7 +10,7 @@ const reasoning = [
   { type: "reasoning.encrypted", id: "reason_1", data: "opaque-reasoning", format: "anthropic-claude-v1", index: 0 }
 ]
 for (const kind of ["openrouter", "openai-responses", "google"] as const)
-  it.live(`${kind}: preserves the whole carried wire prefix and signed tool reasoning`, () => {
+  it.live(`${kind}: preserves the user checkpoint and replays the previous tool trace`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
       let serial = 0
@@ -176,15 +176,20 @@ for (const kind of ["openrouter", "openai-responses", "google"] as const)
       const before = mock.requests().length
       const second = yield* send("New user request.")
       const next = mock.requests()[before]!.body!
-      const prefix = previous[key] as Array<unknown>
+      const old = previous[key] as Array<unknown>
+      const end = old.findIndex((m) => JSON.stringify(m).includes("First request.")) + 1
+      const prefix = old.slice(0, end)
+      const withoutMarker = (items: unknown) =>
+        JSON.stringify(items, (key, value) => (key === "cache_control" ? undefined : value))
       assert.strictEqual(
-        JSON.stringify((next[key] as Array<unknown>).slice(0, prefix.length)),
-        JSON.stringify(prefix),
+        withoutMarker((next[key] as Array<unknown>).slice(0, prefix.length)),
+        withoutMarker(prefix),
         "provider cache prefix bytes"
       )
       assert.include(JSON.stringify(next[key]), "New user request.")
       const run = yield* api.GetRunContext({ versionId: second.entry.version.id })
-      assert.isDefined(run.continuity?.parentVersionId)
+      assert.isUndefined(run.continuity?.parentVersionId)
+      assert.include(JSON.stringify(next[key]), "read_card")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

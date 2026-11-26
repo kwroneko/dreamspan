@@ -216,7 +216,7 @@ describe("subagents", () => {
         if (name !== "report_progress") assert.isTrue(parentTools.has(name), `${name} was the reply's`)
       assert.include(childTools, "report_progress")
       assert.isFalse(parentTools.has("report_progress"))
-      for (const name of ["agent", "message_agent", "create_card", "edit_card", "start_chat", "send_message"])
+      for (const name of ["agent", "message_agent", "create_card", "edit_card", "start_chat"])
         assert.notInclude(childTools, name)
 
       // The report comes back quoted: the notice, metadata outside, the fake close escaped.

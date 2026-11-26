@@ -13,7 +13,7 @@ const IN_VIEW =
 
 // What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
 const workshopInstructions = (off: ReadonlyArray<string>) =>
-  `Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. ${IN_VIEW} Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
+  `Use the tools to look things up and to make changes. Before a long piece of work, briefly tell {{user}} what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. ${IN_VIEW} Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
 
 /** A side chat beside a story (§4) says so, while its story tools are offered. */
 const SIDE_CHAT =
@@ -55,8 +55,8 @@ export const workshopMode: OrchestrationMode = {
       // A side chat reads its story (§4); nothing else offers these.
       ...(state.workshopAttached === undefined ? [] : STORY_TOOLS)
     ],
-    contract: state.outputContract ?? "several",
-    continuity: state.rolloutContinuity ?? "resume_previous",
+    contract:
+      state.outputContract === "send_message" || state.outputContract === "both" ? state.outputContract : "final_text",
     // No request cap (owner, 2026-11-17): the run goes on until the model ends it or the user
     // stops it; the long-run compaction and elision keep its context in bounds.
     assembly: {

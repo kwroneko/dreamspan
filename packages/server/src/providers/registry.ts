@@ -114,6 +114,12 @@ export interface RequestTarget {
  * are a tool loop's, which its next request repeats too.
  */
 export interface StableEndpoint {
+  readonly workshop?: {
+    readonly prefix: number
+    readonly previous: number
+    readonly summary: number
+    readonly previousTail?: number
+  }
   readonly message: number
   readonly end: number
 }
