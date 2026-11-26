@@ -44,13 +44,29 @@ export const readChunks = (bytes: Uint8Array, limits: Limits): Array<Chunk> => {
   }
 }
 
+const latin1 = (bytes: Uint8Array) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1")
+
+/** A `tEXt` chunk's Latin-1 keyword and a view of its text, without copying the payload. */
+export const splitText = (data: Uint8Array) => {
+  const nul = data.indexOf(0)
+  return nul === -1
+    ? { keyword: latin1(data), payload: data.subarray(data.byteLength) }
+    : { keyword: latin1(data.subarray(0, nul)), payload: data.subarray(nul + 1) }
+}
+
 /** A `tEXt` chunk's keyword and text, both Latin-1. */
 export const decodeText = (data: Uint8Array) => {
-  const nul = data.indexOf(0)
-  const latin1 = (part: Uint8Array) => Buffer.from(part).toString("latin1")
-  return nul === -1
-    ? { keyword: latin1(data), text: "" }
-    : { keyword: latin1(data.subarray(0, nul)), text: latin1(data.subarray(nul + 1)) }
+  const { keyword, payload } = splitText(data)
+  return { keyword, text: latin1(payload) }
+}
+
+/** Bound the encoded payload before converting it to a string or allocating decoded bytes. */
+export const decodeCardText = (payload: Uint8Array, limits: Limits) => {
+  const maxEncodedBytes = 4 * Math.ceil(limits.maxCardJsonBytes / 3)
+  if (payload.byteLength > maxEncodedBytes)
+    fail("png.card_too_large", `The encoded card is larger than ${formatByteSize(maxEncodedBytes)}.`)
+  // The last quartet can still decode to a byte or two over the limit. parseJson checks the result.
+  return Buffer.from(latin1(payload), "base64")
 }
 
 export const ASSET_KEYWORD = "chara-ext-asset_"
@@ -58,7 +74,7 @@ export const ASSET_KEYWORD = "chara-ext-asset_"
 /** A card's own text chunks: the card in either version, and V3's embedded assets. */
 const isCardChunk = (chunk: Chunk) => {
   if (chunk.type !== "tEXt") return false
-  const keyword = decodeText(chunk.data).keyword
+  const keyword = splitText(chunk.data).keyword
   return ["ccv3", "chara"].includes(keyword.toLowerCase()) || keyword.startsWith(ASSET_KEYWORD)
 }
 

@@ -7,7 +7,7 @@ import type { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { ReportBuilder } from "@dreamspan/shared/importReport.ts"
 import { Predicate } from "effect"
 import { cardFromJson } from "./card.ts"
-import { cardTextChunk, decodeText, isPng, readChunks } from "./png.ts"
+import { cardTextChunk, decodeCardText, isPng, readChunks, splitText } from "./png.ts"
 import { defaultLimits, FormatError, type Limits, parseJson } from "./safety.ts"
 import { extract, isZip, readZip, writeZip } from "./zip.ts"
 
@@ -71,10 +71,10 @@ const locate = (bytes: Uint8Array, limits: Limits): Located | null => {
     const chunks = readChunks(bytes, limits)
     const cards = chunks.flatMap((chunk, index) => {
       if (chunk.type !== "tEXt") return []
-      const { keyword, text } = decodeText(chunk.data)
+      const { keyword, payload } = splitText(chunk.data)
       const lower = keyword.toLowerCase()
       if (lower !== "chara" && lower !== "ccv3") return []
-      const root = parseJson(Buffer.from(text, "base64"), limits.maxCardJsonBytes, limits, issues)
+      const root = parseJson(decodeCardText(payload, limits), limits.maxCardJsonBytes, limits, issues)
       return Predicate.isObject(root) ? [{ index, keyword, root: root as Json }] : []
     })
     if (cards.length === 0) return null
