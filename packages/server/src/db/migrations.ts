@@ -1,4 +1,4 @@
-import { SqliteMigrator } from "@effect/sql-sqlite-node"
+import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Context, Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { baseline } from "./baseline.ts"
@@ -16,6 +16,7 @@ import { reasoningStatsMigration } from "./migrationReasoningStats.ts"
 import { nativeReasoningMigration } from "./migrationNativeReasoning.ts"
 import { pendingChatsMigration } from "./migrationPendingChats.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
+import { preMigrationBackup } from "./preMigrationBackup.ts"
 
 /**
  * A migration is data, so a recorded release can fingerprint exactly what it ran
@@ -449,13 +450,13 @@ const pad = (id: number) => String(id).padStart(4, "0")
  * rest on top of a schema it never made, so it is refused before the migrator starts, with
  * nothing changed. None of these messages ever tell anyone to empty the data folder.
  */
-const refuseUnknownLedger = (definitions: Readonly<Record<string, MigrationDefinition>>) =>
+const readMigrationLedger = (definitions: Readonly<Record<string, MigrationDefinition>>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [ledger] = yield* sql<{
       n: number
     }>`SELECT count(*) AS n FROM sqlite_master WHERE name = 'effect_sql_migrations'`
-    if (ledger!.n === 0) return
+    if (ledger!.n === 0) return { exists: false, latest: null }
     const keys = Object.keys(definitions)
     const known = new Set(keys.map(idOf))
     const newestKnown = Math.max(...known)
@@ -468,9 +469,9 @@ const refuseUnknownLedger = (definitions: Readonly<Record<string, MigrationDefin
     )
     // The migrator runs only ids above the newest recorded one, so a migration numbered below it
     // (one merged after a later number was applied, say 0003 after 0004) would be skipped silently.
-    const newest = Math.max(-1, ...rows.map((row) => row.migration_id))
+    const newest = rows.length === 0 ? null : Math.max(...rows.map((row) => row.migration_id))
     const recorded = new Set(rows.map((row) => row.migration_id))
-    const skipped = keys.filter((key) => idOf(key) < newest && !recorded.has(idOf(key)))
+    const skipped = keys.filter((key) => newest !== null && idOf(key) < newest && !recorded.has(idOf(key)))
     if (unknown.length === 0 && skipped.length > 0)
       return yield* Effect.die(
         new Error(
@@ -478,13 +479,13 @@ const refuseUnknownLedger = (definitions: Readonly<Record<string, MigrationDefin
             `Nothing was changed. This is a fault in the build, not in the data: renumber the change above the newest one.`
         )
       )
-    if (unknown.length === 0) return
+    if (unknown.length === 0) return { exists: true, latest: newest }
     const ids = unknown.map((row) => `${pad(row.migration_id)}_${row.name}`).join(", ")
     if (unknown.every((row) => row.migration_id > newestKnown))
       return yield* Effect.die(
         new Error(
           `This data was made by a newer version of Dreamspan (it has ${ids}, which this version doesn't know). Nothing was changed. ` +
-            `Update Dreamspan to the version that made it, or restore the backup taken before that version's update.`
+            `Update Dreamspan to the version that made it, or restore the backup taken before that version's update. Look in <dataDir>/backups/ for an automatic pre-migration backup.`
         )
       )
     return yield* Effect.die(
@@ -619,7 +620,10 @@ export const duplicateMigrationIds = (keys: ReadonlyArray<string>): ReadonlyArra
  * References already broken when the start began are logged as a warning and kept in the report:
  * the start goes on, so an old problem never stops the server for good.
  */
-export const migrate = (definitions: Readonly<Record<string, MigrationDefinition>>) =>
+export const migrate = (
+  definitions: Readonly<Record<string, MigrationDefinition>>,
+  startupClient?: SqliteClient.SqliteClient
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const duplicates = duplicateMigrationIds(Object.keys(definitions))
@@ -630,17 +634,13 @@ export const migrate = (definitions: Readonly<Record<string, MigrationDefinition
             `Nothing was changed. This is a fault in the build, not in the data.`
         )
       )
-    yield* refuseUnknownLedger(definitions)
-    const [ledger] = yield* sql<{
-      n: number
-    }>`SELECT count(*) AS n FROM sqlite_master WHERE name = 'effect_sql_migrations'`
-    const latest =
-      ledger!.n === 0
-        ? 0
-        : ((yield* sql<{ id: number | null }>`SELECT max(migration_id) AS id FROM effect_sql_migrations`)[0]?.id ?? 0)
+    const ledger = yield* readMigrationLedger(definitions)
     const pending = Object.keys(definitions)
-      .filter((key) => idOf(key) > latest)
+      .filter((key) => idOf(key) > (ledger.latest ?? 0))
       .sort((a, b) => idOf(a) - idOf(b))
+    const target = pending.at(-1)
+    if (startupClient !== undefined && ledger.latest !== null && target !== undefined)
+      yield* preMigrationBackup(startupClient, pad(ledger.latest), pad(idOf(target)))
 
     let broken = yield* brokenReferences
     if (broken.length > 0)
@@ -661,7 +661,7 @@ export const migrate = (definitions: Readonly<Record<string, MigrationDefinition
       else runs.push({ keys: [key] })
     }
     // The ledger an outside-transaction migration writes its row to (the migrator makes it itself).
-    if (ledger!.n === 0 && runs.some((run) => run.outside !== undefined))
+    if (!ledger.exists && runs.some((run) => run.outside !== undefined))
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({}) })
     const applied: Array<string> = []
     for (const run of runs) {
@@ -692,4 +692,7 @@ export const migrate = (definitions: Readonly<Record<string, MigrationDefinition
     return { applied, broken } satisfies MigrationReport
   })
 
-export const Migrations = Layer.effect(DatabaseStartup, migrate(migrationDefinitions))
+export const Migrations = Layer.effect(
+  DatabaseStartup,
+  Effect.flatMap(SqliteClient.SqliteClient, (sqlite) => migrate(migrationDefinitions, sqlite))
+)
