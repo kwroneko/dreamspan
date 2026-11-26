@@ -9,6 +9,7 @@ import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, startMockProvider } from "./support/mockProvider.ts"
 
 import { presetDoc } from "./support/docs.ts"
+import { startHttpProxy, testPublicAddress, withTestHost } from "./support/proxies.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 type Fixture = Effect.Success<ReturnType<typeof generateReply>>
@@ -74,7 +75,7 @@ const answer = (res: ServerResponse, read: boolean, kind: string, firstOnly = fa
   return finish
 }
 
-const fixture = (api: Api, kind = "anthropic") =>
+const fixture = (api: Api, kind = "anthropic", advertisePublic = false) =>
   Effect.gen(function* () {
     const cached = new Set<string>()
     const prefix = (body: Record<string, unknown> | null) =>
@@ -90,10 +91,11 @@ const fixture = (api: Api, kind = "anthropic") =>
       ),
       (m) => Effect.promise(() => m.close())
     )
+    const origin = advertisePublic ? new URL(withTestHost(mock.url, testPublicAddress)).origin : mock.url
     const setup = yield* generateReply(api, {
       connection: {
         kind,
-        baseUrl: kind === "anthropic" ? mock.url : `${mock.url}/v1`,
+        baseUrl: kind === "anthropic" ? origin : `${origin}/v1`,
         apiKey: "synthetic-key",
         cacheTtlS: 300
       },
@@ -346,8 +348,14 @@ describe("cold-cache stagger at the generation boundary", () => {
     Effect.gen(function* () {
       const alice = yield* client({ "Remote-User": "alice" })
       const bob = yield* client({ "Remote-User": "bob" })
-      const a = yield* fixture(alice)
-      const b = yield* fixture(bob)
+      const loopback = [127, 0, 0, 1].join(".")
+      const proxy = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpProxy((host) => (host === testPublicAddress ? loopback : host))),
+        (server) => Effect.promise(server.close)
+      )
+      yield* alice.SetNetworkSettings({ proxyUrl: proxy.url, bypass: [], forceProxy: false })
+      const a = yield* fixture(alice, "anthropic", true)
+      const b = yield* fixture(bob, "anthropic", true)
       yield* makeCold(alice, a)
       yield* makeCold(bob, b)
       const leaderA = yield* swipe(alice, a)
