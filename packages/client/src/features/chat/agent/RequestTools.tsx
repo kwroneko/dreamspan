@@ -79,9 +79,13 @@ export function RequestTools({ tools }: { tools: ReadonlyArray<Tool> }) {
                 <p className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap text-text [overflow-wrap:anywhere]">
                   {tool.description || <span className="font-sans text-muted italic">(empty)</span>}
                 </p>
-                <Disclosure title="Parameters" hint={`Show or hide the parameter schema sent for ${tool.name}.`} lazy>
+                <Disclosure
+                  title={tool.format === undefined ? "Parameters" : "Format"}
+                  hint={`Show or hide the ${tool.format === undefined ? "parameter schema" : "format constraint"} sent for ${tool.name}.`}
+                  lazy
+                >
                   <pre className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap text-text [overflow-wrap:anywhere]">
-                    {JSON.stringify(tool.parameters, null, 2)}
+                    {JSON.stringify(tool.format ?? tool.parameters, null, 2)}
                   </pre>
                 </Disclosure>
               </div>

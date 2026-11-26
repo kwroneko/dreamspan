@@ -15,7 +15,7 @@ import { defaultsAtom } from "../pickers/defaults.ts"
 export const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
 const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
 const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: "5 minutes" })
-const providersAtom = AppClient.query("ListProviders", undefined, { timeToLive: "5 minutes" })
+export const providersAtom = AppClient.query("ListProviders", undefined, { timeToLive: "5 minutes" })
 /** What the connection and key screens need, requested together. */
 export const providerSetupAtom = allOf({
   kinds: kindsAtom,

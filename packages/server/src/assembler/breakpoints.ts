@@ -66,7 +66,9 @@ export const placeBreakpoints = (
       ? at(previous, "history")
       : null
   const ordered = moved
-    ? [prefix, split, history, repeat, summary]
+    ? options.lookback === false
+      ? [prefix, history, repeat, split, summary]
+      : [prefix, split, history, summary]
     : options.lookback === false
       ? [history, repeat, split, prefix, summary]
       : [history, prefix, split, summary]

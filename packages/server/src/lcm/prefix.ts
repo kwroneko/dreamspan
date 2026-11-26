@@ -17,11 +17,12 @@ const boundary = (snapshot: Pick<ContextSnapshot, "pieces" | "request">) =>
 /** Keep the actual prefix decisions, including examples that only just fit. */
 export const takeSummaryPrefix = (snapshot: ContextSnapshot): SummaryPrefix => {
   const end = boundary(snapshot)
+  const { cacheHistoryCandidate: _history, ...request } = snapshot.request
   return {
     inputs: snapshot.inputs,
     frozen: snapshot.frozen,
     request: {
-      ...snapshot.request,
+      ...request,
       messages: snapshot.request.messages.slice(0, end),
       breakpoints: end > 0 ? [{ message: end - 1, reason: "prefix" }] : []
     },

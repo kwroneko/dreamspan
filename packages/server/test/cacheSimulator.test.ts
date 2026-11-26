@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { CacheSimulator, cacheClasses } from "./support/cacheSimulator.ts"
 import { studyFixture, studyModel, studyRequests, compareCaches } from "./support/cacheStudy.ts"
-import { assembleFixture } from "./support/assemblySources.ts"
+import { assembleFixture, historyAfterDispatch } from "./support/assemblySources.ts"
 import { placeBreakpoints, cachePrefixDigests } from "../src/assembler/breakpoints.ts"
-import { providerRequest } from "../src/assembler/wire.ts"
-import { applyBedrockBreakpoints } from "../src/providers/breakpoints.ts"
+import { markWireSources, providerRequest, sentWire, wireContext } from "../src/assembler/wire.ts"
+import { applyAnthropicBreakpoints, applyBedrockBreakpoints } from "../src/providers/breakpoints.ts"
+import { withHistoryCheckpoint } from "../src/db/historyStart.ts"
 
 const blocks = (n: number) => Array.from({ length: n }, (_, i) => ({ digest: `prefix-${i}`, tokens: 1024 }))
 describe("provider cache simulator", () => {
@@ -40,7 +41,7 @@ it("repeats only a byte-identical historical checkpoint through the real assembl
   const before = await Effect.runPromise(assembleFixture(fixture))
   const next = {
     ...fixture,
-    historyStart: before.historyStart,
+    historyStart: historyAfterDispatch(before),
     messages: [
       ...fixture.messages,
       { side: "assistant" as const, content: "Synthetic reply" },
@@ -53,7 +54,7 @@ it("repeats only a byte-identical historical checkpoint through the real assembl
       (b) => b.reason === "summary" && before.request.messages[b.message]!.content.includes('level="3"')
     )
   ).toBe(true)
-  const previous = before.historyStart!.state!.cacheHistory!
+  const previous = historyAfterDispatch(before)!.state!.cacheHistory!
   const digests = cachePrefixDigests(after.request.messages)
   const repeated = after.request.breakpoints.filter((b) => b.reason === "history")
   expect(repeated).toHaveLength(2)
@@ -73,6 +74,52 @@ it("repeats only a byte-identical historical checkpoint through the real assembl
   const lookback = await Effect.runPromise(assembleFixture(studyFixture()))
   expect(lookback.historyStart?.state?.cacheHistory).toBeUndefined()
 })
+it("spends exact-position markers on current and repeated history before splitting summary tiers", () => {
+  const messages = [
+    { kind: "prefix" },
+    { kind: "summary", summaryLevel: 3 },
+    { kind: "summary", summaryLevel: 1 },
+    { kind: "history" },
+    { kind: "history" },
+    { kind: "volatile" }
+  ] as const
+  expect(placeBreakpoints(messages, true, { lookback: false, summarySplit: true }).slice(0, 2)).toEqual([
+    { message: 0, reason: "prefix" },
+    { message: 4, reason: "history" }
+  ])
+  expect(
+    placeBreakpoints(messages, true, { lookback: false, summarySplit: true, previousHistory: 3 }).slice(0, 3)
+  ).toEqual([
+    { message: 0, reason: "prefix" },
+    { message: 4, reason: "history" },
+    { message: 3, reason: "history" }
+  ])
+})
+it("only advances the history checkpoint once the final payload includes its marker", async () => {
+  const model = { ...studyModel, cacheLayout: { lookback: false, summarySplit: true } }
+  const snapshot = await Effect.runPromise(assembleFixture({ ...studyFixture(), model }))
+  const state = snapshot.historyStart!.state!
+  const checkpoint = snapshot.request.cacheHistoryCandidate!
+  expect(state.cacheHistory).toBeUndefined()
+  const mapping = wireContext(snapshot.request, model)
+  const wire = providerRequest(snapshot.request, model)
+  const marker = { type: "ephemeral" }
+  for (const maxMarkers of [2, 4]) {
+    const payload = {
+      system: [{ type: "text", text: wire.context.systemPrompt, cache_control: marker }],
+      messages: mapping.messages.slice(1).map((message, i, all) => ({
+        role: message.role,
+        content: [{ type: "text", text: message.content, ...(i === all.length - 1 ? { cache_control: marker } : {}) }]
+      }))
+    }
+    markWireSources(payload, mapping)
+    applyAnthropicBreakpoints(payload, wire.context.messages, wire.breakpoints, { maxMarkers })
+    const sent = sentWire(payload, mapping, undefined, checkpoint)
+    const next = withHistoryCheckpoint(state, sent.historyCheckpointSent)
+    expect(next.cacheHistory).toBe(maxMarkers === 2 ? undefined : checkpoint.digest)
+  }
+})
+
 it("retains the older summary tier without marking pinned lore", () => {
   const messages = ["prefix", "pinned", "summary", "summary", "history", "volatile"].map((kind, i) => ({
     kind: kind as "prefix" | "pinned" | "summary" | "history" | "volatile",

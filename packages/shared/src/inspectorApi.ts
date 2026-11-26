@@ -403,7 +403,8 @@ const RequestTool = Schema.Struct({
   name: OfferedTool.fields.name,
   label: OfferedTool.fields.label,
   description: OfferedTool.fields.description,
-  parameters: OfferedTool.fields.parameters,
+  parameters: Schema.optionalKey(OfferedTool.fields.parameters),
+  format: Schema.optionalKey(Schema.Unknown),
   mcp: OfferedTool.fields.mcp,
   tokens: Schema.Int,
   loadedBy: Schema.optionalKey(Schema.String)

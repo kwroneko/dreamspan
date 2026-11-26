@@ -11,7 +11,8 @@ const objects = (value: unknown): Array<Json> => (Array.isArray(value) ? value.f
 interface Definition {
   readonly name: string
   readonly description: string
-  readonly parameters: unknown
+  readonly parameters?: unknown
+  readonly format?: unknown
 }
 
 export interface CapturedTool extends Definition {
@@ -26,17 +27,20 @@ export interface CapturedRequestTools {
 }
 
 const definition = (item: Json): Definition | undefined => {
-  const fn = object(item.function) ? item.function : item
+  const custom = item.type === "custom"
+  const fn = custom && object(item.custom) ? item.custom : object(item.function) ? item.function : item
   if (typeof fn.name !== "string") return undefined
   return {
     name: fn.name,
     description: typeof fn.description === "string" ? fn.description : "",
-    parameters: fn.parameters ?? fn.input_schema ?? fn.parametersJsonSchema ?? {}
+    ...(custom && fn.format !== undefined
+      ? { format: fn.format }
+      : { parameters: fn.parameters ?? fn.input_schema ?? fn.parametersJsonSchema ?? {} })
   }
 }
 
 export const toolText = (tool: Definition) =>
-  JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters })
+  JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters, format: tool.format })
 
 const clean = (value: unknown, scrub: (text: string) => string): unknown => {
   if (typeof value === "string") return scrub(value)
@@ -56,6 +60,7 @@ export function captureRequestTools(
   const items = objects(payload.tools ?? configured).flatMap((item) =>
     item.functionDeclarations === undefined ? [item] : objects(item.functionDeclarations)
   )
+  for (const item of objects(payload.input)) if (item.type === "additional_tools") items.push(...objects(item.tools))
   const messages = objects(payload.messages ?? payload.input ?? payload.contents)
   const itemsByCall = new Map(
     messages.flatMap((message) =>

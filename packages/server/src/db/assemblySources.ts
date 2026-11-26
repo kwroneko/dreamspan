@@ -75,7 +75,7 @@ import {
 import type { GenerationDefaults } from "@dreamspan/shared/generation.ts"
 import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { displayHistoryRevision, historyRevision } from "./historyChanges.ts"
-import { previousStartIn } from "./historyStart.ts"
+import { previousStartIn, withHistoryCheckpoint } from "./historyStart.ts"
 import {
   displayEnd,
   displayEndOf,
@@ -590,7 +590,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             ? {
                 slotId: row.slot_id,
                 depth: row.depth,
-                ...(row.state_json ? { state: JSON.parse(row.state_json) } : {})
+                ...(row.state_json
+                  ? {
+                      state: withHistoryCheckpoint(
+                        JSON.parse(row.state_json),
+                        row.checkpoint_sent ? JSON.parse(row.checkpoint_sent) : undefined
+                      )
+                    }
+                  : {})
               }
             : null
           return pins.historyStart
@@ -1092,18 +1099,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ),
           ...(providerSettings.toolLoading ? { toolLoading: providerSettings.toolLoading } : {}),
           cacheBreakpoints: effective.cacheBreakpoints.value,
-          cacheLayout: {
-            ...effective.cacheLayout.value,
-            ...(effective.cacheBreakpoints.value === "explicit" &&
-            effective.cacheLayout.value.summarySplit === undefined &&
-            (c.api === "anthropic-messages" ||
-              ((c.api === "openai-responses" ||
-                (c.api === "openai-completions" && (provider?.id ?? c.provider) !== "openai-bedrock")) &&
-                effective.cacheLayout.value.marker === "prompt_cache_breakpoint") ||
-              (c.kind === "openrouter" && m.key.startsWith("anthropic/claude")))
-              ? { summarySplit: true }
-              : {})
-          },
+          cacheLayout: effective.cacheLayout.value,
           vision: effective.vision.value,
           maxImages: effective.maxImages.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,

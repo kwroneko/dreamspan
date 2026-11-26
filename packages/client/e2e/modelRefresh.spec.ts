@@ -14,6 +14,7 @@ const alpha = [{ id: "alpha-one", name: "Alpha One", context_length: 8192 }]
 const beta = [{ id: "beta-one", name: "Beta One", context_length: 8192 }]
 let providers: Array<FakeProvider> = []
 let chatId = ""
+const connectionIds: string[] = []
 test.beforeAll(async () => {
   providers = [await startProvider({ models: alpha }), await startProvider({ models: beta })]
   chatId = await withCookie(server(), "", (api) =>
@@ -31,6 +32,7 @@ test.beforeAll(async () => {
           },
           apiKey: null
         })
+        connectionIds.push(connection.id)
         yield* api.RefreshModels({ connectionId: connection.id })
       }
       const chat = yield* api.CreateChat({ title: "Refresh synthetic" })
@@ -77,6 +79,53 @@ test("refresh reads every connection, or only the filtered one", async ({ page }
   await filterModels(page, "All connections")
   await expect(list(page).getByRole("radio", { name: /alpha-three/ })).toHaveCount(0)
   await expect(list(page).getByRole("radio", { name: /alpha-two/ })).toHaveCount(1)
+})
+
+test("refreshing a filtered list behind an older picker read shows the new models", async ({ page }) => {
+  let releaseAlpha: (() => void) | undefined
+  let alphaRead: string | undefined
+  let betaRead: string | undefined
+  let betaAnswered = false
+  let hold = false
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request =
+        typeof data === "string"
+          ? (JSON.parse(data) as { tag?: string; id?: string; payload?: { connectionId?: string } })
+          : null
+      if (hold && request?.tag === "ListModels") {
+        if (request.payload?.connectionId === connectionIds[0]) alphaRead ??= request.id
+        if (request.payload?.connectionId === connectionIds[1]) betaRead ??= request.id
+      }
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      const reply = typeof data === "string" ? (JSON.parse(data) as { _tag?: string; requestId?: string }) : null
+      if (hold && reply?._tag === "Exit") {
+        if (reply.requestId === betaRead) betaAnswered = true
+        if (reply.requestId === alphaRead) {
+          releaseAlpha = () => socket.send(data)
+          return
+        }
+      }
+      socket.send(data)
+    })
+  })
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await modelChip(page).click()
+  await expect(list(page).getByRole("radio", { name: /beta-one/ })).toBeVisible()
+  hold = true
+  await refresh(page).click()
+  await expect.poll(() => Boolean(releaseAlpha) && betaAnswered).toBe(true)
+  await filterModels(page, "Beta router")
+  const before = providers[1]!.listings
+  beta.push({ id: "beta-concurrent", name: "Beta Concurrent", context_length: 8192 })
+  await refresh(page).click()
+  await expect.poll(() => providers[1]!.listings).toBe(before + 1)
+  await expect(refresh(page)).toBeEnabled()
+  releaseAlpha!()
+  await expect(list(page).getByRole("radio", { name: /beta-concurrent/ })).toBeVisible()
 })
 
 if (process.env.SHOTS_DIR)

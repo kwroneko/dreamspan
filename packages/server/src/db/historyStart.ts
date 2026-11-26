@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import type { HistoryStart, WireContext } from "../assembler/types.ts"
 import { type PathPiece, positionOf, slotPlace } from "./displayPath.ts"
 
 export const previousHistoryStart = (
@@ -11,6 +12,7 @@ export const previousHistoryStart = (
   slot_id: string | null
   depth: number
   state_json: string | null
+  checkpoint_sent: string | null
   rollout_slot_id: string
 }>`
   WITH RECURSIVE candidates AS MATERIALIZED (
@@ -26,11 +28,23 @@ export const previousHistoryStart = (
     WHERE p.depth > (SELECT min(min(history_depth, history_start_depth)) FROM candidates)
   )
   SELECT r.history_start_slot_id AS slot_id, r.history_start_depth AS depth, r.slot_id AS rollout_slot_id,
-    (SELECT json_extract(context_snapshot_json, '$.historyStart.state') FROM rollout_payloads WHERE rollout_id = r.id) AS state_json
+    (SELECT json_extract(context_snapshot_json, '$.historyStart.state') FROM rollout_payloads WHERE rollout_id = r.id) AS state_json,
+    (SELECT json_extract(sent_context_json, '$.historyCheckpointSent') FROM rollout_payloads WHERE rollout_id = r.id) AS checkpoint_sent
   FROM candidates r
   WHERE r.slot_id IN (SELECT id FROM path)
     AND (r.history_start_slot_id IS NULL OR r.history_start_slot_id IN (SELECT id FROM path))
   ORDER BY r.history_depth DESC, r.id DESC LIMIT 1`
+
+/** The latest payload can advance its own view's checkpoint once the marker has been sent. */
+export const withHistoryCheckpoint = (
+  state: NonNullable<HistoryStart["state"]>,
+  checkpoint: WireContext["historyCheckpointSent"]
+): NonNullable<HistoryStart["state"]> =>
+  checkpoint === undefined
+    ? state
+    : checkpoint.viewer === null
+      ? { ...state, cacheHistory: checkpoint.digest }
+      : { ...state, cacheHistoryByView: { ...state.cacheHistoryByView, [checkpoint.viewer]: checkpoint.digest } }
 
 /**
  * The previous history start on the path to `leaf` (`previousHistoryStart`). In a fork with

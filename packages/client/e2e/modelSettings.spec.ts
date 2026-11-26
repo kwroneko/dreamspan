@@ -81,6 +81,50 @@ const open = async (page: Page, key: string) => {
   return dialog
 }
 
+test("an inherited summary marker can be saved Off and restored to the provider default", async ({ page }) => {
+  const key = "synthetic-sonnet"
+  const id = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "anthropic-bedrock",
+        settings: {
+          name: "Synthetic Bedrock",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "synthetic"
+      })
+      yield* api.AddUserModel({ connectionId: connection.id, key, overrides: {} })
+      return connection.id
+    })
+  )
+  const markerOverride = () =>
+    asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ListModels({ connectionId: id, includeHidden: true })
+    ).then((models) => models.find((model) => model.key === key)?.overrides.cacheLayout?.summarySplit)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/${id}`)
+  let dialog = await open(page, key)
+  await dialog.getByText("Advanced", { exact: true }).click()
+  const marker = () => dialog.getByRole("combobox", { name: "Split summary tiers", exact: true })
+  await expect(marker()).toHaveText("Provider default (On)")
+  await marker().click()
+  await page.getByRole("option", { name: "Off", exact: true }).click()
+  await dialog.getByRole("button", { name: "Save model settings", exact: true }).click()
+  await expect.poll(markerOverride).toBe(false)
+  await page.reload()
+  dialog = await open(page, key)
+  if (!(await marker().isVisible())) await dialog.getByText("Advanced", { exact: true }).click()
+  await expect(marker()).toHaveText("Off")
+  await marker().click()
+  await page.getByRole("option", { name: "Provider default (On)", exact: true }).click()
+  await dialog.getByRole("button", { name: "Save model settings", exact: true }).click()
+  await expect.poll(markerOverride).toBeUndefined()
+})
+
 for (const [width, height] of [
   [1440, 900],
   [390, 844]
