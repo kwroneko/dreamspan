@@ -69,23 +69,23 @@ describe("chat kind looks", () => {
     for (const close of dispose.reverse()) close()
   })
 
-  it("puts workshop capabilities and the working folder after context and before Cache", () => {
+  it("puts kind-specific chips after the shared chips", () => {
     dispose.push(...registerFiles())
     expect(strip("rp")).toEqual([
-      "composer.next",
       "composer.model",
       "composer.preset",
       "composer.context",
-      "composer.cache"
+      "composer.cache",
+      "composer.next"
     ])
     expect(strip("workshop")).toEqual([
       "composer.model",
       "workshop.subagent-models",
       "composer.preset",
       "composer.context",
+      "composer.cache",
       "workshop.capabilities",
-      "workshop.folder",
-      "composer.cache"
+      "workshop.folder"
     ])
   })
 
@@ -212,10 +212,10 @@ describe("chat kind looks", () => {
           })
           try {
             expect(strip("synthetic/assistant")).toEqual([
-              "composer.next",
               "composer.model",
               "composer.preset",
               "composer.context",
+              "composer.next",
               "workshop.capabilities"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)

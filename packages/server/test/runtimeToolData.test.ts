@@ -64,7 +64,11 @@ it.live("quotes engine failures and stacked send-presence refusals before storag
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      // Exercise the engine failures after a direct call, including the read_card lookup.
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: {}
+    })
     const registry = yield* ExecutionRegistry
     const workshop = registry.orchestrationModes.get("workshop")!
     // The built-in workshop does not request presence. A replaceable planner can opt

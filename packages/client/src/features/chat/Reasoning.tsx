@@ -16,7 +16,7 @@ import { useAtomValue } from "@effect/atom-react"
 import type { SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
 import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
 import { sectionsDisplay, sectionUnclosed } from "@dreamspan/shared/replySections.ts"
-import { useId, useRef, useState, useSyncExternalStore } from "react"
+import { useId, useState, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { MessageBody } from "../../ui/messageCopy.tsx"
@@ -176,12 +176,12 @@ function ReasoningBlock({
   }
   // Without a choice, it opens on its own only once the thinking has streamed a while, and folds a
   // while after the reply is done, so short thinking never flashes (autoOpen.ts).
-  // Thinking is live while it is the last thing written: the reply's text has not started after it.
-  const order = useRef({ seq: 0, text, textAt: 0, body, bodyAt: 0 })
-  const written = order.current
-  if (written.text !== text) [written.text, written.textAt] = [text, ++written.seq]
-  if (written.body !== body) [written.body, written.bodyAt] = [body, ++written.seq]
-  const auto = useAutoOpen(streaming, written.bodyAt <= written.textAt, preferred === "expanded")
+  // Thinking is live while it is the last thing written. If both arrive together, the body is newer.
+  const [written, setWritten] = useState({ text, body, live: true })
+  const changed = written.text !== text || written.body !== body
+  const live = changed ? written.body === body : written.live
+  if (changed) setWritten({ text, body, live })
+  const auto = useAutoOpen(streaming, live, preferred === "expanded")
   const open = editor !== undefined || (chosen !== null && chosen.streaming === streaming ? chosen.open : auto)
 
   // What a click does, on hover and focus (DESIGN: every action explains itself).

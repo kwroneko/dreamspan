@@ -19,12 +19,10 @@ export const attachmentName = (altText: string | undefined, speaker: string | nu
   return `Image${count > 1 ? ` ${index + 1}` : ""}${speaker === null ? "" : ` from ${speaker}`}`
 }
 
-export const attachmentPicture = (mediaId: string, name: string): Portrait => ({
-  id: `${PREFIX}${mediaId}:${encodeURIComponent(name)}`,
-  name,
-  mediaId,
-  image: true
-})
+export const attachmentPicture = (mediaId: string, name: string): Portrait => {
+  const caption = name.toWellFormed()
+  return { id: `${PREFIX}${mediaId}:${encodeURIComponent(caption)}`, name: caption, mediaId, image: true }
+}
 
 /** The attached image an id names, or null for any other picture's id. */
 export const attachmentOf = (id: string): Portrait | null => {

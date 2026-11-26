@@ -19,4 +19,10 @@ describe("attached images as pictures", () => {
     expect(attachmentOf("6d1f0c3e-0000-4000-8000-000000000000")).toBeNull()
     expect(attachmentOf("image:media:%E0%A4%A")).toBeNull()
   })
+
+  it("replaces lone surrogates and preserves paired ones in the caption", () => {
+    const picture = attachmentPicture("media", "A\uD800 and \uDC00 and 🦋")
+    expect(picture.name).toBe("A\uFFFD and \uFFFD and 🦋")
+    expect(attachmentOf(picture.id)).toEqual(picture)
+  })
 })

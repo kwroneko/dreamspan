@@ -59,7 +59,8 @@ it.live("keeps standalone workshop and character requests stable across story-po
     )
     const api = yield* client()
     const character = yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      // The mock distinguishes workshop requests by their direct rewrite_messages declaration.
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
       model: {},
       state: [{ key: "agent.enabled", value: { on: true } }]
     })
