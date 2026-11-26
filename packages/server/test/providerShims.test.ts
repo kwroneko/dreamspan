@@ -369,7 +369,7 @@ describe("route rules: shims for one OpenRouter upstream (liveapi2)", () => {
 
   it("unpinned, no route rule applies, and the notes name the upstreams that break it", () => {
     const open = routed(deepseek)
-    assert.strictEqual(open.prefill.value, "assistant")
+    assert.strictEqual(open.prefill.value, "none")
     assert.deepEqual(open.route.unpinned, ["Prefill fails on Together; pin a provider to be sure."])
     assert.deepEqual(routed(mimo).route.unpinned, [
       "Prefill fails on StreamLake; pin a provider to be sure.",
@@ -383,6 +383,30 @@ describe("route rules: shims for one OpenRouter upstream (liveapi2)", () => {
     assert.strictEqual(routed(mimo, { only: ["xiaomi"] }).prefill.value, "none")
     assert.strictEqual(routed(mimo, { only: ["streamlake"] }).prefill.value, "none")
     assert.strictEqual(routed(mimo, { only: ["deepinfra"] }).prefill.value, "assistant")
+  })
+
+  it("only infers assistant prefill when routing excludes all recorded refusals", () => {
+    const effective = (key: string, routing?: Record<string, unknown>, prefill?: "assistant") =>
+      resolveModel(
+        key,
+        shimmedUpstream(builtinShims, "openrouter", key, {}),
+        { ...(prefill ? { prefill } : {}), ...(routing ? { settings: { routing } } : {}) },
+        {},
+        {},
+        { kind: "openrouter", api: "openai-completions" }
+      ).prefill.value
+
+    assert.strictEqual(effective(deepseek), "none")
+    assert.strictEqual(effective(deepseek, { only: ["together/fp8", "deepinfra"] }), "none")
+    assert.strictEqual(effective(deepseek, { order: ["deepinfra"] }), "none")
+    assert.strictEqual(effective(deepseek, { only: ["together", "deepinfra"] }, "assistant"), "assistant")
+    assert.strictEqual(effective(deepseek, { only: ["together"] }, "assistant"), "none")
+    assert.strictEqual(effective(deepseek, { ignore: ["together"] }), "assistant")
+    assert.strictEqual(effective(deepseek, { order: ["deepinfra"], allow_fallbacks: false }), "assistant")
+    assert.strictEqual(effective(mimo), "none")
+    assert.strictEqual(effective(mimo, { only: ["xiaomi", "deepinfra"] }), "none")
+    assert.strictEqual(effective(mimo, { only: ["streamlake", "deepinfra"] }), "none")
+    assert.strictEqual(effective(mimo, { ignore: ["xiaomi", "streamlake"] }), "assistant")
   })
 
   it("lists route rules in the provider's advanced section by upstream", () => {

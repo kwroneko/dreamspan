@@ -376,6 +376,7 @@ export interface Assembly {
   previousHistoryStart?: HistoryStart | null
   historyRevision?: number
   historyStart?: HistoryStart
+  cacheHistoryCandidate?: AssembledRequest["cacheHistoryCandidate"]
   historyCut?: ContextSnapshot["historyCut"]
   historyMove?: ContextSnapshot["historyMove"]
   /** The path's images the request leaves out and why (`images` stage); later stages may add their own. */

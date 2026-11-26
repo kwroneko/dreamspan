@@ -558,7 +558,7 @@ const wireRows = (payload: Record<string, unknown>) => {
   const messages = payload.messages ?? payload.input ?? payload.contents
   if (Array.isArray(messages))
     for (const message of messages) {
-      if (!Predicate.isObject(message)) continue
+      if (!Predicate.isObject(message) || message.type === "additional_tools") continue
       const role = message.role
       if (role !== "system" && role !== "developer" && role !== "user" && role !== "assistant" && role !== "model")
         continue
@@ -619,11 +619,30 @@ export const markWireSources = (payload: Record<string, unknown>, sources: WireC
   }
 }
 
+/** The marker has to cover the entire mapped assembly message. */
+const markedHistory = (payload: Record<string, unknown>, index: number): boolean => {
+  const items = payload.messages ?? payload.input
+  if (!Array.isArray(items)) return false
+  return items.some((item) => {
+    if (!Predicate.isObject(item) || (item as Carrier)[provenance]?.at(-1) !== index || !Array.isArray(item.content))
+      return false
+    const block = item.content.findLast(
+      (entry) => Predicate.isObject(entry) && !String(entry.type).includes("thinking")
+    )
+    return (
+      Predicate.isObject(block) &&
+      (Predicate.isObject(block.cache_control) ||
+        (Predicate.isObject(block.prompt_cache_breakpoint) && block.prompt_cache_breakpoint.mode === "explicit"))
+    )
+  })
+}
+
 /** Extract text messages and numeric samplers from the final body. Tool capture is separate. */
 export const sentWire = (
   payload: Record<string, unknown>,
   sources: WireContext,
-  scrub = (text: string) => text
+  scrub = (text: string) => text,
+  historyCheckpoint?: AssembledRequest["cacheHistoryCandidate"]
 ): WireContext => {
   const config = Predicate.isObject(payload.config) ? payload.config : {}
   const samplers: Record<string, number> = {}
@@ -649,6 +668,9 @@ export const sentWire = (
     }
   return {
     mapping: sources.mapping,
+    ...(historyCheckpoint !== undefined && markedHistory(payload, historyCheckpoint.message)
+      ? { historyCheckpointSent: { digest: historyCheckpoint.digest, viewer: historyCheckpoint.viewer } }
+      : {}),
     samplers,
     messages: wireRows(payload).map(({ row: { images, ...row }, carrier, system }) => ({
       ...row,

@@ -28,7 +28,7 @@ import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { planStepResume, StepNotResumable } from "../src/agent/resume.ts"
 import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
-import { captureRequestTools } from "../src/providers/requestTools.ts"
+import { captureRequestTools, toolText } from "../src/providers/requestTools.ts"
 
 describe("inspector tool capture", () => {
   const immediate = { name: "load_skill", description: "Load a skill.", parameters: {} }
@@ -44,6 +44,31 @@ describe("inspector tool capture", () => {
     )
     return declarations.attempts.test!.map((key) => JSON.parse(declarations.definitions[key]!))
   }
+
+  it("captures and counts the scrubbed grammar format of a custom tool on both OpenAI wires", () => {
+    const format = { type: "grammar", grammar: { syntax: "lark", definition: 'start: "secret"' } }
+    const custom = { name: "write_line", description: "Write a line.", format }
+    const expected = {
+      ...custom,
+      format: { ...format, grammar: { ...format.grammar, definition: 'start: "[redacted]"' } }
+    }
+    for (const item of [
+      { type: "custom", custom },
+      { type: "custom", ...custom }
+    ]) {
+      const [tool] = toolsOf({ tools: [item] })
+      assert.deepStrictEqual(tool, expected)
+      assert.deepStrictEqual(JSON.parse(toolText(tool)), expected)
+    }
+  })
+
+  it("counts Responses declarations in transcript additions without requiring top-level tools", () => {
+    const item = { type: "additional_tools", role: "developer", tools: [{ type: "function", ...read }] }
+    const expected = { ...read, parameters: { default: null, title: "[redacted]" } }
+    const input = [{ type: "message", role: "user", content: "Start." }, item]
+    assert.deepStrictEqual(toolsOf({ input }), [expected])
+    assert.deepStrictEqual(toolsOf({ tools: [immediate], input }), [immediate, expected])
+  })
 
   it("lists native Anthropic declarations only from the request that references them", () => {
     const loading = { api: "anthropic-messages", deferred: [read, unused], loads: [] }

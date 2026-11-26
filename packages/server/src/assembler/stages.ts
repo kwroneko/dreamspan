@@ -3007,6 +3007,7 @@ const requestStage = sync("request", (assembly) => {
       : {}),
     useSystemPrompt: doc.use_sysprompt,
     breakpoints: assembly.breakpoints ?? [],
+    ...(assembly.cacheHistoryCandidate ? { cacheHistoryCandidate: assembly.cacheHistoryCandidate } : {}),
     names: assembly.postNames ?? { user: "", char: "", group: [] },
     ...(assembly.endsWithEnd ? { endMessage: true as const } : {})
   }
@@ -3089,16 +3090,16 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   )
   const history = assembly.breakpoints.find((b) => b.reason === "history")
   const start = assembly.historyStart
-  if (exact && start?.state && history) {
-    const digest = digests[history.message]!
-    const shared = viewer === null ? digest : previous?.state?.cacheHistory
-    const views = viewer === null ? byView : { ...byView, [viewer]: digest }
+  if (exact && start?.state) {
+    if (history && !assembly.request.summaryJob)
+      assembly.cacheHistoryCandidate = { message: history.message, digest: digests[history.message]!, viewer }
+    const shared = previous?.state?.cacheHistory
     assembly.historyStart = {
       ...start,
       state: {
         ...start.state,
         ...(shared === undefined ? {} : { cacheHistory: shared }),
-        ...(views === undefined ? {} : { cacheHistoryByView: views })
+        ...(byView === undefined ? {} : { cacheHistoryByView: byView })
       }
     }
   }

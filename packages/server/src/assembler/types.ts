@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@dreamspan/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 86
+export const ASSEMBLER_VERSION = 87
 
 export type Role = "system" | "user" | "assistant"
 
@@ -181,6 +181,8 @@ export interface AssembledRequest {
   readonly useSystemPrompt: boolean
   /** Cache breakpoints as indices into `messages`, most important first. */
   readonly breakpoints: ReadonlyArray<{ readonly message: number; readonly reason: BreakpointReason }>
+  /** The exact-position history candidate, confirmed against the final payload at dispatch. */
+  readonly cacheHistoryCandidate?: HistoryCheckpoint & { readonly message: number }
   /** The bindings in effect, which providers without a `name` field fold into the text, as ST does. */
   readonly names: { readonly user: string; readonly char: string; readonly group: ReadonlyArray<string> }
   /**
@@ -235,6 +237,8 @@ export interface SnapshotInputs {
 export interface WireContext {
   readonly toolDeclarations?: import("../providers/requestTools.ts").CapturedRequestTools
   readonly extraMessageText?: ReadonlyArray<string>
+  /** The current history checkpoint was present in the final payload. Server-only. */
+  readonly historyCheckpointSent?: HistoryCheckpoint
   /** Actual request cache policy after transforms; server-only. */
   readonly cache?: { readonly ttlS: number | null; readonly fixed: boolean; readonly source: string | null }
   /** Complete sanitized historical display, present only after final capture. */
@@ -256,6 +260,12 @@ export interface WireContext {
   readonly samplers: Readonly<Record<string, number>>
 }
 
+interface HistoryCheckpoint {
+  readonly digest: string
+  /** Null for a shared context. */
+  readonly viewer: string | null
+}
+
 export interface HistoryStart {
   readonly state?: {
     readonly configuration: string
@@ -265,7 +275,7 @@ export interface HistoryStart {
     readonly examples: number
     readonly noteBudget?: { readonly sizes: Readonly<Record<string, number>>; readonly allowance: number }
     readonly revision: number
-    /** Digest at the last assembled history marker, for exact-position cache reads. */
+    /** Digest at the history marker, for exact-position cache reads. */
     readonly cacheHistory?: string
     /** The same for each separate context's character, by card (unit C7); absent in a shared context. */
     readonly cacheHistoryByView?: Readonly<Record<string, string>>

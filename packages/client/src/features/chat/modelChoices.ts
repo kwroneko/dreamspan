@@ -2,7 +2,7 @@
 import { resolveModel, type Connection, type Model } from "@dreamspan/shared/providers.ts"
 import { supportedEfforts, type ReasoningEffort } from "@dreamspan/shared/modelSettings.ts"
 import { Cause, Effect, Exit } from "effect"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { type ActionResult, useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { describeCause } from "../../errors.ts"
@@ -142,7 +142,13 @@ export const modelListsChanged = () => {
   listVersion++
   for (const watcher of [...listWatchers]) watcher()
 }
-let reading: { readonly userId: string; readonly done: Promise<ActionResult<Read>> } | null = null
+const subscribeToLists = (watch: () => void) => {
+  listWatchers.add(watch)
+  return () => void listWatchers.delete(watch)
+}
+const readVersion = () => listVersion
+let reading: { readonly userId: string; readonly version: number; readonly done: Promise<ActionResult<Read>> } | null =
+  null
 
 export function useModelChoiceList(
   enabled: boolean,
@@ -161,27 +167,26 @@ export function useModelChoiceList(
   const [lookedFor, setLookedFor] = useState<string | null>(null)
   if (missing && lookedFor !== missing) setLookedFor(missing)
   const [attempt, setAttempt] = useState(0)
-  const [version, setVersion] = useState(listVersion)
-  useEffect(() => {
-    const watch = () => setVersion(listVersion)
-    listWatchers.add(watch)
-    return () => void listWatchers.delete(watch)
-  }, [])
+  const version = useSyncExternalStore(subscribeToLists, readVersion)
   useEffect(() => {
     if (!enabled) return
     let live = true
-    if (reading === null || reading.userId !== userId) {
-      const done = action.run((client) => readModelChoices(client))
-      reading = { userId, done }
-      void done.then((result) => {
-        if (reading?.done === done) reading = null
-        if (result.ok) lastReads.set(userId, result.value)
-      })
+    const readLatest = async () => {
+      if (reading?.userId === userId && reading.version < version) await reading.done
+      if (!live || version !== listVersion) return
+      if (reading === null || reading.userId !== userId) {
+        const done = action.run((client) => readModelChoices(client))
+        reading = { userId, version, done }
+        void done.then((result) => {
+          if (reading?.done === done) reading = null
+          if (result.ok && version === listVersion) lastReads.set(userId, result.value)
+        })
+      }
+      const result = await reading.done
+      if (live && version === listVersion)
+        setRead(result.ok ? result.value : { models: [], connections: 0, failed: [], error: result.error.message })
     }
-    void reading.done.then((result) => {
-      if (!live) return
-      setRead(result.ok ? result.value : { models: [], connections: 0, failed: [], error: result.error.message })
-    })
+    void readLatest()
     return () => {
       live = false
     }

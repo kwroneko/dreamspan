@@ -5,7 +5,12 @@ import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { importStPreset } from "../src/formats/preset.ts"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"
-import { assembleFixture, type AssemblyFixture, type FixtureMessage } from "./support/assemblySources.ts"
+import {
+  assembleFixture,
+  historyAfterDispatch,
+  type AssemblyFixture,
+  type FixtureMessage
+} from "./support/assemblySources.ts"
 import { cardDoc } from "./support/docs.ts"
 import { studyModel } from "./support/cacheStudy.ts"
 import { cachePrefixDigests } from "../src/assembler/breakpoints.ts"
@@ -152,24 +157,25 @@ describe("merge layouts", () => {
           model: { ...studyModel, cacheLayout: { lookback: false, summarySplit: true } }
         }
         const before = yield* assembleFixture(fx)
+        const previous = historyAfterDispatch(before)
         const after = yield* assembleFixture({
           ...fx,
-          historyStart: before.historyStart,
+          historyStart: previous,
           messages: [...fx.messages, { side: "user", content: "The next morning." }]
         })
         const digests = cachePrefixDigests(after.request.messages)
         const history = after.request.breakpoints.filter((b) => b.reason === "history")
-        assert.isTrue(history.some((b) => digests[b.message] === before.historyStart?.state?.cacheHistory))
+        assert.isTrue(history.some((b) => digests[b.message] === previous?.state?.cacheHistory))
         const changed = yield* assembleFixture({
           ...fx,
-          historyStart: before.historyStart,
+          historyStart: previous,
           messages: fx.messages.map((m) => (m.merge ? { ...m, content: "Kai: A different telling." } : m))
         })
         assert.isFalse(
           changed.request.breakpoints.some(
             (b) =>
               b.reason === "history" &&
-              cachePrefixDigests(changed.request.messages)[b.message] === before.historyStart?.state?.cacheHistory
+              cachePrefixDigests(changed.request.messages)[b.message] === previous?.state?.cacheHistory
           )
         )
       })

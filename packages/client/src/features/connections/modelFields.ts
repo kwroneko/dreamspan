@@ -124,7 +124,7 @@ export const MODEL_FIELDS = {
   maxMarkers: { label: "Most cache markers", paths: [["cacheLayout", "maxMarkers"]] },
   minTokens: { label: "Smallest cached size", paths: [["cacheLayout", "minTokens"]] },
   marker: { label: "Bedrock cache breakpoints", paths: [["cacheLayout", "marker"]] },
-  summarySplit: { label: "Marker after the summaries", paths: [["cacheLayout", "summarySplit"]] },
+  summarySplit: { label: "Split summary tiers", paths: [["cacheLayout", "summarySplit"]] },
   routing: { label: "Routing", paths: [settingsPath("routing")] },
   logit_bias: { label: "Word bias", paths: [settingsPath("logit_bias")] },
   sampling: { label: "Extra request parameters", paths: [["sampling"]] },

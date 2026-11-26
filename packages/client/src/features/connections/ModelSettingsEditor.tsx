@@ -17,6 +17,7 @@ import {
   routedPrice,
   routedUpstream
 } from "@dreamspan/shared/providers.ts"
+import { builtinProviders, findProvider, resolveProviderSettings } from "@dreamspan/shared/providerDefinitions.ts"
 import { SAMPLER_KEYS, samplersSent, takesVerbosity } from "@dreamspan/shared/samplerRules.ts"
 import { AsyncResult } from "effect/reactivity"
 import { Schema } from "effect"
@@ -33,7 +34,7 @@ import { Alert, Disclosure } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { CopySettingsButton } from "./CopySettings.tsx"
-import { connectionsAtom } from "./data.ts"
+import { connectionsAtom, providerOf, providersAtom } from "./data.ts"
 import { Group, type Limit, RangeField, RowsEditor } from "./modelControls.tsx"
 import {
   biasRowProblem,
@@ -456,17 +457,23 @@ export function ModelFields({
 
   // The connections' providers and APIs: which samplers and options they take. Unknown, all show.
   const connections = useAtomValue(connectionsAtom)
+  const providers = useAtomValue(providersAtom)
   const wires = models.map((model) => {
     const connection = AsyncResult.isSuccess(connections)
       ? connections.value.find((entry) => entry.id === model.connectionId)
       : undefined
     if (!connection) return null
+    const provider =
+      (AsyncResult.isSuccess(providers) ? providerOf(connection, providers.value) : undefined) ??
+      findProvider(builtinProviders, connection.provider, connection.kind, connection.baseUrl)
     const verbosity = resolveModel(model.key, model.upstream, model.overrides, connection.compat).compat
       .supportsVerbosity
     return {
       kind: connection.kind,
       api: connection.api,
-      provider: connection.provider,
+      provider: provider?.id ?? connection.provider,
+      providerSettings: resolveProviderSettings(provider, connection.providerSettings),
+      compat: connection.compat,
       key: model.key,
       ...(typeof verbosity === "boolean" ? { supported: verbosity } : {})
     }
@@ -635,6 +642,21 @@ export function ModelFields({
     Object.keys(rowsOf(settings.logit_bias)).length > 0
   const effort = sampler("reasoning_effort")
   const cacheLayout = (values.overrides.cacheLayout ?? {}) as Record<string, unknown>
+  const summarySplit = cacheLayout.summarySplit
+  const summaryWire = one ? wires[0] : null
+  const defaultSummarySplit =
+    one && summaryWire
+      ? resolveModel(
+          one.key,
+          one.upstream,
+          setAt(values.overrides, ["cacheLayout", "summarySplit"], undefined) as ModelOverrides,
+          summaryWire.compat,
+          summaryWire.providerSettings,
+          summaryWire
+        ).cacheLayout.value.summarySplit === true
+      : null
+  const summaryDefaultLabel =
+    defaultSummarySplit === null ? "Provider default" : `Provider default (${defaultSummarySplit ? "On" : "Off"})`
   /** For many models: a value over one's limit is brought down to it there. */
   const eachLimit = many
     ? { text: "each within its limit", hint: "A value over a model’s limit is brought down to that limit on it." }
@@ -1205,13 +1227,20 @@ export function ModelFields({
                 )}
                 {wrap(
                   "summarySplit",
-                  <Switch
-                    checked={cacheLayout.summarySplit === true}
-                    onCheckedChange={(on) => set("overrides", ["cacheLayout", "summarySplit"], on ? true : undefined)}
-                    about="Puts a cache marker between the summaries and the recent history."
+                  <Field
+                    label="Split summary tiers"
+                    about="Adds a cache marker after the older summary tier so it can be reused when newer summaries change."
                   >
-                    Marker after the summaries
-                  </Switch>
+                    <Select
+                      items={[
+                        { value: "auto", label: summaryDefaultLabel },
+                        { value: "yes", label: "On" },
+                        { value: "no", label: "Off" }
+                      ]}
+                      value={summarySplit === undefined ? "auto" : summarySplit ? "yes" : "no"}
+                      onValueChange={(next: Tri) => set("overrides", ["cacheLayout", "summarySplit"], flagOf(next))}
+                    />
+                  </Field>
                 )}
               </AdvancedPart>
 

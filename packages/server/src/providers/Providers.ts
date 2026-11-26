@@ -2361,7 +2361,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                       prepared.scrub
                     )
                     const wire = {
-                      ...sentWire(final, sources, prepared.scrub),
+                      ...sentWire(final, sources, prepared.scrub, request.inspection?.request.cacheHistoryCandidate),
                       cache: state.cachePolicy,
                       toolDeclarations: declarations,
                       ...(extraMessageText.length > 0 ? { extraMessageText } : {})

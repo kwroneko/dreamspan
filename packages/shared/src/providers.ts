@@ -447,6 +447,11 @@ const routeCandidates = (routing: Readonly<Record<string, unknown>> | undefined)
   }
 }
 
+const reachableUpstream = (routing: Readonly<Record<string, unknown>> | undefined) => {
+  const { candidates, ignore } = routeCandidates(routing)
+  return (slug: string) => (candidates === null ? !ignore.has(slug) : candidates.includes(slug))
+}
+
 /**
  * The one upstream a routing pins (`only` with one entry, or `order` with one and fallbacks
  * off), or null when the router may choose among several.
@@ -560,8 +565,7 @@ export const routedUpstream = (
   if (rules.length === 0) return { upstream, route: null, applied: [], unpinned: [] }
   const route = pinnedRoute(routing)
   if (route === null) {
-    const { candidates, ignore } = routeCandidates(routing)
-    const reachable = (slug: string) => (candidates === null ? !ignore.has(slug) : candidates.includes(slug))
+    const reachable = reachableUpstream(routing)
     const byFailure = new Map<string, Array<string>>()
     for (const rule of rules) {
       const names = rule.upstreams.filter((u) => reachable(u.slug)).map((u) => u.name)
@@ -706,8 +710,26 @@ export const resolveModel = (
     ...(provider.maxMarkers !== undefined ? { maxMarkers: provider.maxMarkers } : {}),
     ...(provider.minTokens !== undefined ? { minTokens: provider.minTokens } : {})
   }
-  const breakpoints = pick("cacheBreakpoints", "auto" as const)
-  const cacheLayout = pick("cacheLayout", {})
+  const pickedBreakpoints = pick("cacheBreakpoints", "auto" as const)
+  const breakpoints =
+    pickedBreakpoints.source === "user" || provider.cacheBreakpoints === undefined
+      ? pickedBreakpoints
+      : { value: provider.cacheBreakpoints, source: "provider" as const }
+  const pickedLayout = pick("cacheLayout", {})
+  const cacheLayout: Resolved<CacheLayout> =
+    pickedLayout.source === "user"
+      ? { value: { ...upstream.cacheLayout, ...layout, ...pickedLayout.value }, source: "user" }
+      : Object.keys(layout).length === 0
+        ? pickedLayout
+        : { value: { ...pickedLayout.value, ...layout }, source: "provider" }
+  const splitDefault =
+    breakpoints.value === "explicit" &&
+    cacheLayout.value.summarySplit === undefined &&
+    (connection?.api === "anthropic-messages" ||
+      ((connection?.api === "openai-responses" ||
+        (connection?.api === "openai-completions" && connection.provider !== "openai-bedrock")) &&
+        cacheLayout.value.marker === "prompt_cache_breakpoint") ||
+      (connection?.kind === "openrouter" && key.startsWith("anthropic/claude")))
   // Reasoning nobody reports is assumed on (owner, 2026-11-23: "Every model today has thinking"),
   // so a chosen effort is sent. Assumed, it changes nothing else: no effort sends no "off" value
   // (the model's own default stands), and system messages keep the system role.
@@ -715,8 +737,17 @@ export const resolveModel = (
   const assumed = reasoning.source === "unknown"
   const levels = pick("thinkingLevels", null)
   const vision = pick("vision", true)
-  const prefill = pick("prefill", "none" as const)
-  const defaultPrefill = prefill.source === "unknown" ? providerPrefill(connection, key) : undefined
+  const pickedPrefill = pick("prefill", "none" as const)
+  const defaultPrefill = pickedPrefill.source === "unknown" ? providerPrefill(connection, key) : undefined
+  const prefill = defaultPrefill === undefined ? pickedPrefill : { value: defaultPrefill, source: "provider" as const }
+  const reachable = reachableUpstream(routing)
+  const routeRefusesPrefill =
+    prefill.source !== "user" &&
+    prefill.value === "assistant" &&
+    route.route === null &&
+    upstream.routes?.some(
+      (rule) => rule.capabilities?.prefill === "none" && rule.upstreams.some((u) => reachable(u.slug))
+    )
   return {
     name: pick("name", key),
     context: pick("context", ASSUMED_CONTEXT),
@@ -729,18 +760,10 @@ export const resolveModel = (
     thinkingLevels:
       assumed && levels.value?.off === undefined ? { ...levels, value: { ...levels.value, off: null } } : levels,
     tools: pick("tools", false),
-    prefill: defaultPrefill === undefined ? prefill : { value: defaultPrefill, source: "provider" },
+    prefill: routeRefusesPrefill ? { value: "none", source: "upstream" } : prefill,
     cacheTtlS: pick("cacheTtlS", null),
-    cacheBreakpoints:
-      breakpoints.source === "user" || provider.cacheBreakpoints === undefined
-        ? breakpoints
-        : { value: provider.cacheBreakpoints, source: "provider" },
-    cacheLayout:
-      cacheLayout.source === "user"
-        ? { value: { ...upstream.cacheLayout, ...layout, ...cacheLayout.value }, source: "user" }
-        : Object.keys(layout).length === 0
-          ? cacheLayout
-          : { value: { ...cacheLayout.value, ...layout }, source: "provider" },
+    cacheBreakpoints: breakpoints,
+    cacheLayout: splitDefault ? { ...cacheLayout, value: { ...cacheLayout.value, summarySplit: true } } : cacheLayout,
     compat: {
       ...(assumed ? { supportsDeveloperRole: false } : {}),
       ...connectionCompat,

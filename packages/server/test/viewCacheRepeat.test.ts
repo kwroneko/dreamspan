@@ -8,7 +8,12 @@ import { Effect } from "effect"
 import { cachePrefixDigests } from "../src/assembler/breakpoints.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { importStPreset } from "../src/formats/preset.ts"
-import { assembleFixture, type AssemblyFixture, type FixtureMessage } from "./support/assemblySources.ts"
+import {
+  assembleFixture,
+  historyAfterDispatch,
+  type AssemblyFixture,
+  type FixtureMessage
+} from "./support/assemblySources.ts"
 import { studyModel } from "./support/cacheStudy.ts"
 import { cardDoc } from "./support/docs.ts"
 
@@ -59,16 +64,17 @@ it.effect("each character in a separate context repeats its own last cache posit
       ...Array.from({ length: 6 }, (_, n) => both(14 + n))
     ]
     const wren1 = yield* assembleFixture(fixture(path, "wren", null))
-    const wrenDigest = wren1.historyStart?.state?.cacheHistoryByView?.["wren"]
+    const wrenDigest = historyAfterDispatch(wren1)?.state?.cacheHistoryByView?.["wren"]
     assert.isString(wrenDigest)
     assert.include(marked(wren1), wrenDigest)
     // Mira speaks next; her history holds what Wren missed, so her positions are her own.
     const grown = [...path, both(20), both(21)]
-    const mira = yield* assembleFixture(fixture(grown, "mira", wren1.historyStart))
+    const mira = yield* assembleFixture(fixture(grown, "mira", historyAfterDispatch(wren1)))
     assert.strictEqual(mira.historyStart?.state?.cacheHistoryByView?.["wren"], wrenDigest, "Wren's is carried")
-    assert.notStrictEqual(mira.historyStart?.state?.cacheHistoryByView?.["mira"], wrenDigest)
+    assert.isString(mira.request.cacheHistoryCandidate?.digest)
+    assert.notStrictEqual(mira.request.cacheHistoryCandidate?.digest, wrenDigest)
     // Wren again, after Mira's request: she marks the position her own last request wrote.
-    const wren2 = yield* assembleFixture(fixture([...grown, both(22), both(23)], "wren", mira.historyStart))
+    const wren2 = yield* assembleFixture(fixture([...grown, both(22), both(23)], "wren", historyAfterDispatch(mira)))
     assert.include(marked(wren2), wrenDigest)
   })
 )
@@ -77,10 +83,11 @@ it.effect("a shared context records the repeat as before, with no per-view entry
   Effect.gen(function* () {
     const path = Array.from({ length: 16 }, (_, n) => both(n))
     const first = yield* assembleFixture(fixture(path, "wren", null, "shared"))
-    assert.isString(first.historyStart?.state?.cacheHistory)
+    const confirmed = historyAfterDispatch(first)
+    assert.isString(confirmed?.state?.cacheHistory)
     assert.notProperty(first.historyStart?.state ?? {}, "cacheHistoryByView")
-    const next = yield* assembleFixture(fixture([...path, both(16), both(17)], "mira", first.historyStart, "shared"))
-    assert.include(marked(next), first.historyStart!.state!.cacheHistory!)
+    const next = yield* assembleFixture(fixture([...path, both(16), both(17)], "mira", confirmed, "shared"))
+    assert.include(marked(next), confirmed!.state!.cacheHistory!)
     assert.notProperty(next.historyStart?.state ?? {}, "cacheHistoryByView")
   })
 )
@@ -102,11 +109,11 @@ it.effect("resolved join stretches keep each character's exact cache position", 
         stretches: [{ chain: "fixture", lo: 10, hi: 13 }]
       })
     const first = yield* build(path, "wren", null)
-    const digest = first.historyStart?.state?.cacheHistoryByView?.["wren"]
+    const digest = historyAfterDispatch(first)?.state?.cacheHistoryByView?.["wren"]
     assert.isString(digest)
-    const mira = yield* build([...path, both(20)], "mira", first.historyStart)
+    const mira = yield* build([...path, both(20)], "mira", historyAfterDispatch(first))
     assert.strictEqual(mira.historyStart?.state?.cacheHistoryByView?.["wren"], digest)
-    const next = yield* build([...path, both(20), both(21)], "wren", mira.historyStart)
+    const next = yield* build([...path, both(20), both(21)], "wren", historyAfterDispatch(mira))
     assert.include(marked(next), digest)
   })
 )

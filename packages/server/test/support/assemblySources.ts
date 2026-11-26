@@ -11,6 +11,7 @@ import type { ModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../../src/assembler/pipeline.ts"
+import { withHistoryCheckpoint } from "../../src/db/historyStart.ts"
 import {
   type AgentAssembly,
   type ContextSnapshot,
@@ -288,3 +289,11 @@ export const rewriteFixture = (
       items
     )
     .pipe(Effect.provide(fixtureSources(fixture)))
+
+/** A fixture's provider accepted the candidate marker. Wire-budget tests use the real payload. */
+export const historyAfterDispatch = (snapshot: ContextSnapshot): ContextSnapshot["historyStart"] => {
+  const start = snapshot.historyStart
+  return start?.state
+    ? { ...start, state: withHistoryCheckpoint(start.state, snapshot.request.cacheHistoryCandidate) }
+    : start
+}
