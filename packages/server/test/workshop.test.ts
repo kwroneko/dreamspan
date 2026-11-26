@@ -822,3 +822,162 @@ describe("workshop", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+it.live("saves joined workshop prose, amends its cloned transcript, and replays the edits", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const messages = request.body?.messages as Array<{ role: string; content?: unknown }>
+          const done = messages
+            .slice(messages.findLastIndex((message) => message.role === "user"))
+            .filter((message) => message.role === "tool").length
+          sse(
+            res,
+            done >= 2
+              ? completionChunks(["Final prose."], {})
+              : [
+                  ...completionChunks([done === 0 ? "First prose." : "Second prose."], {}).slice(0, 1),
+                  ...call("read_card", { card: "Assistant" }, `read_${done}`)
+                ]
+          )
+        })
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    yield* generateReply(api, { connection: everyToolConnection(mock.url), model: {} })
+    const chat = yield* api.CreateWorkshop({})
+    const events = yield* watch(api, chat)
+    const version = yield* answer(api, chat, events)
+    assert.deepStrictEqual(
+      version.blocks?.map((block) => block.kind),
+      ["text", "trace", "text", "trace", "text"]
+    )
+    assert.strictEqual(version.content, "First prose.\n\nSecond prose.\n\nFinal prose.")
+    const entry = yield* api.SelectVersion({
+      slotId: version.slotId,
+      versionId: version.id,
+      expectedVersionId: version.id
+    })
+    const first = version.blocks?.[0]
+    assert(first?.kind === "text")
+    const edited = yield* api.EditVersion({
+      slotId: version.slotId,
+      sourceVersionId: version.id,
+      expectedRowVersion: entry.rowVersion,
+      blockEdits: [{ message: first.message, part: first.part, text: "Edited first." }]
+    })
+    assert.strictEqual(edited.version.content, "Edited first.\n\nSecond prose.\n\nFinal prose.")
+    assert.strictEqual(edited.version.blocks?.[0]?.kind, "text")
+    const amend = yield* api.AmendVersion({
+      versionId: edited.version.id,
+      expectedRowVersion: edited.version.rowVersion,
+      blockEdits: [{ message: first.message, part: first.part, text: "Amended first." }]
+    })
+    assert.strictEqual(amend.id, edited.version.id)
+    assert.strictEqual(amend.content, "Amended first.\n\nSecond prose.\n\nFinal prose.")
+    const before = mock.requests().length
+    yield* answer(api, { ...chat, activeLeafSlotId: edited.slotId } as Chat, events)
+    const request = mock
+      .requests()
+      .slice(before)
+      .find((request) => request.path === "/v1/chat/completions")
+    assert.include(JSON.stringify(request?.body?.messages), "Amended first.")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+for (const failure of [false, true])
+  it.live(
+    `clean-head workshop swipe ${failure ? "restores its predecessor on failure" : "starts with pre-swipe cards"}`,
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        let retry = false
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const messages = request.body?.messages as Array<{ role: string }>
+              const done = messages.filter((m) => m.role === "tool").length
+              if (retry && failure) {
+                res.writeHead(500).end("Synthetic failure")
+                return
+              }
+              sse(
+                res,
+                done === 0
+                  ? call(
+                      "edit_card",
+                      {
+                        card: "Swipe subject",
+                        changes: [{ field: "description", text: retry ? "Second revision." : "First revision." }]
+                      },
+                      "edit"
+                    )
+                  : done === 1
+                    ? call(
+                        "create_card",
+                        {
+                          name: retry ? "Second created card" : "First created card",
+                          description: "Synthetic"
+                        },
+                        "create"
+                      )
+                    : completionChunks(["Changes finished."], {})
+              )
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        yield* generateReply(api, { connection: everyToolConnection(mock.url), model: {} })
+        const card = yield* api.CreateCard({
+          label: "Swipe subject",
+          name: "Swipe subject",
+          description: "Starting revision."
+        })
+        const chat = yield* api.CreateWorkshop({ card: card.entityId })
+        const events = yield* watch(api, chat)
+        const first = yield* answer(api, chat, events)
+        const effects = yield* api.ListVersionEffects({ versionId: first.id })
+        assert.deepStrictEqual(
+          effects.map((effect) => effect.swipe?.clean),
+          [true, true]
+        )
+        const entry = yield* api.SelectVersion({
+          slotId: first.slotId,
+          versionId: first.id,
+          expectedVersionId: first.id
+        })
+        retry = true
+        const second = yield* api.Regenerate({
+          slotId: first.slotId,
+          expectedRowVersion: entry.rowVersion,
+          autoRevert: first.id
+        })
+        yield* eventually(() => finished(events, second.version.id) !== undefined)
+        assert.strictEqual(finished(events, second.version.id)?.status, failure ? "failed" : "complete")
+        const editor = yield* api.OpenEditor({ refId: card.id })
+        assert.strictEqual(editor.doc.description, failure ? "First revision." : "Second revision.")
+        const library = yield* api.ListLibrary({ kind: "card" })
+        assert.strictEqual(
+          library.some((ref) => ref.label === "First created card"),
+          failure
+        )
+        if (!failure) {
+          assert.include(
+            JSON.stringify(
+              mock
+                .requests()
+                .filter((request) => request.path === "/v1/chat/completions")
+                .at(-3)?.body
+            ),
+            "Starting revision."
+          )
+          const previous = yield* api.ListVersionEffects({ versionId: first.id })
+          assert.isString(previous.find((effect) => effect.kind === "library.create")?.swipe?.binItemId)
+        }
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )

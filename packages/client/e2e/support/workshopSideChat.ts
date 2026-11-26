@@ -48,7 +48,8 @@ export const sideChatId = async (side: ReturnType<Page["locator"]>) => (await si
 /** Sets up the scripted provider as the account's default model. */
 export const useSideChatProvider = (
   server: () => Parameters<typeof asUser>[0],
-  options: Parameters<typeof startWorkshopProvider>[0] = {}
+  options: Parameters<typeof startWorkshopProvider>[0] = {},
+  toolLoading: "auto" | "every" = "auto"
 ) => {
   const state: { provider: Awaited<ReturnType<typeof startWorkshopProvider>> | null } = { provider: null }
   test.beforeAll(async () => {
@@ -60,6 +61,7 @@ export const useSideChatProvider = (
         const connection = yield* api.CreateConnection({
           kind: "openai-chat",
           settings: {
+            providerSettings: { toolLoading },
             name: "Synthetic side chat",
             baseUrl: provider.baseUrl,
             compat: {},

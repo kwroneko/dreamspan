@@ -1,3 +1,6 @@
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { EffectUndoRefused } from "@dreamspan/shared/errors.ts"
+import { GenerationFailed } from "../chat/Generator.ts"
 import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
 import { OperationCall } from "../agent/operations.ts"
 // Chat RPC handlers (@dreamspan/shared/chatApi.ts). Every handler acts as the authenticated user;
@@ -93,6 +96,7 @@ const extendScriptRecord = <T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T
 export const makeChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
+  const files = yield* WorkshopFiles
   const sendAttachments = yield* makeAttachmentSend
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
@@ -514,10 +518,11 @@ export const makeChatHandlers = Effect.gen(function* () {
         return outcome.queue
       }).pipe(Effect.uninterruptible, internal("Round")),
 
-    Regenerate: ({ slotId, forkId, expectedRowVersion, model: named, direction }) =>
+    Regenerate: ({ slotId, forkId, expectedRowVersion, model: named, direction, autoRevert }) =>
       Effect.gen(function* () {
         yield* needGenerator
-        const id = yield* userId
+        const actor = yield* CurrentUser
+        const id = actor.id
         // A swipe keeps the speaker and the direction of the version it replaces (DESIGN §2.2,
         // guidance on swipes), unless a direction is given now: an empty one is none.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
@@ -526,7 +531,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         if (!model && Option.isSome(generator) && generator.value.requiresModel === true)
           return yield* new GenerationUnavailable({ message: "No model is chosen for this chat. Choose one first." })
         const guidance = direction ?? before.version.direction
-        const added = yield* writer.AddSelectedVersion({
+        const newVersion = {
           userId: id,
           slotId,
           forkId: forkId ?? null,
@@ -540,16 +545,60 @@ export const makeChatHandlers = Effect.gen(function* () {
               before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before))
             ),
             ...(guidance?.trim() ? { direction: guidance } : {})
-          },
+          } satisfies NewVersion,
           expectedRowVersion,
           ...(model ? { model } : {})
-        })
+        }
+        const fileEffects =
+          autoRevert === undefined
+            ? []
+            : (yield* files.inspectSwipeFiles(
+                actor,
+                yield* reader.VersionEffects({ userId: id, versionId: autoRevert })
+              )).filter(
+                (effect) =>
+                  effect.kind.startsWith("file.") &&
+                  effect.undo !== null &&
+                  effect.undoneAt === null &&
+                  !effect.reversion?.of.every((field) => effect.reversion!.fields.includes(field))
+              )
+        if (fileEffects.some((effect) => !effect.swipe?.clean))
+          return yield* new EffectUndoRefused({ message: "A file changed since this reply. Try the swipe again." })
+        const added =
+          autoRevert === undefined
+            ? { ...(yield* writer.AddSelectedVersion(newVersion)), reverted: 0 }
+            : yield* writer.RegenerateWorkshop({
+                ...newVersion,
+                sourceVersionId: autoRevert,
+                fileKeys: fileEffects.map(({ rolloutId, toolCallId, seq }) => ({ rolloutId, toolCallId, seq }))
+              })
+        const prepare = added.reverted
+          ? files.revertSwipeFiles(actor, added.version.id, fileEffects).pipe(
+              Effect.mapError(
+                () =>
+                  new GenerationFailed({
+                    class: "server",
+                    message: "The previous swipe’s file changes could not be reverted."
+                  })
+              ),
+              Effect.tap(() =>
+                Effect.sync(() =>
+                  hub.publish(added.chatId, {
+                    _tag: "WorkshopSwipe",
+                    message:
+                      "Reverted the previous swipe’s changes for this retry. They’re still available on that swipe."
+                  })
+                )
+              )
+            )
+          : undefined
         yield* generations.start({
           userId: id,
           chatId: added.chatId,
           slotId,
           versionId: added.version.id,
           forkId: added.forkId,
+          ...(prepare ? { workshopSwipe: prepare } : {}),
           ...(model ? { model } : {})
         })
         const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: added.forkId })
@@ -704,6 +753,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       forkId,
       sourceVersionId,
       content,
+      blockEdits,
       reasoning,
       expectedRowVersion,
       draft,
@@ -734,6 +784,8 @@ export const makeChatHandlers = Effect.gen(function* () {
             ...(written.rewrite ? { rewrite: written.rewrite } : {})
           },
           expectedRowVersion,
+          ...(blockEdits === undefined ? {} : { blockEdits }),
+          ...(content === undefined ? { cloneWorkshop: true } : {}),
           commitDraft: draft ?? null,
           commitReasoningDraft: reasoningDraft
             ? { ...reasoningDraft, text: reasoning ?? editableThinking(source) }
@@ -925,7 +977,17 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An amend another fork shows gives this fork a copy in its place: its message changed
     // here only, and tabs on other forks read it again as theirs shows it.
-    AmendVersion: ({ versionId, forkId, content, images, reasoning, expectedRowVersion, draft, reasoningDraft }) =>
+    AmendVersion: ({
+      versionId,
+      forkId,
+      content,
+      blockEdits,
+      images,
+      reasoning,
+      expectedRowVersion,
+      draft,
+      reasoningDraft
+    }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const amended = yield* reader.GetVersion({ userId: id, versionId })
@@ -937,6 +999,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId,
           forkId: forkId ?? null,
           content: written.content,
+          ...(blockEdits === undefined ? {} : { blockEdits }),
           ...(content === undefined ? { keepContent: true } : {}),
           ...(written.rewrite ? { rewrite: written.rewrite } : {}),
           ...(images === undefined ? {} : { images }),

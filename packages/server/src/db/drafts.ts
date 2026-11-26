@@ -1,3 +1,5 @@
+import { blockField } from "@dreamspan/shared/chat.ts"
+import { type VersionRow, versionExtras, versionSteps } from "./rows.ts"
 import type { EditingOrigin } from "@dreamspan/shared/drafts.ts"
 // Draft storage shared by the writer and the readers (DESIGN §6.2). See
 // @dreamspan/shared/drafts.ts for the patch model.
@@ -378,8 +380,14 @@ export const makeDraftStore = (
                   : null
               )
             )
-          : sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${key.targetId}`.pipe(
-              Effect.map(([row]) => row?.content ?? null)
+          : sql<VersionRow>`SELECT v.*, ${sql.literal(versionExtras("v"))}
+              FROM version_records v WHERE id = ${key.targetId}`.pipe(
+              Effect.map(([row]) => {
+                if (!row) return null
+                const blocks = versionSteps(row).blocks?.filter((block) => block.kind === "text")
+                if (key.field === "") return blocks?.at(-1)?.text ?? row.content
+                return blocks?.find((block) => blockField(block) === key.field)?.text ?? null
+              })
             )
       default:
         return Effect.succeed(null)
@@ -392,7 +400,7 @@ export const makeDraftStore = (
     readonly targetId: string
     readonly field?: string
   }) =>
-    key.targetKind === "version_edit" && key.field !== EDIT_THINKING_FIELD
+    key.targetKind === "version_edit" && !key.field
       ? sql<{ attachment: string }>`
           SELECT ${sql.literal(attachmentJson("a"))} AS attachment FROM version_attachments a
           WHERE a.version_id = ${key.targetId} ORDER BY a.ordinal`.pipe(
@@ -456,7 +464,9 @@ export const makeDraftStore = (
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
       FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL OR d.target_kind = 'queue_edit'
         -- An edit's thinking emptied is its thinking removed, still to be saved.
-        OR (d.target_kind = 'version_edit' AND d.field = ${EDIT_THINKING_FIELD})) AND (
+        OR (d.target_kind = 'version_edit' AND (d.field = ${EDIT_THINKING_FIELD} OR d.field LIKE 'block:%' OR EXISTS (
+          SELECT 1 FROM versions v JOIN rollouts r ON r.id=v.rollout_id WHERE v.id=d.target_id AND r.kind='workshop'
+        )))) AND (
         (d.target_kind = 'version_edit' AND d.target_id IN (SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s

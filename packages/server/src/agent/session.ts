@@ -1,3 +1,5 @@
+import { workshopBlocks } from "./workshopBlocks.ts"
+import { placedSteps } from "./steps.ts"
 import { toolData, toolDataPage, toolDataParts, TOOL_RESULT_CHARS } from "./toolData.ts"
 import { admitsEffect, outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
@@ -1460,16 +1462,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // A call waiting for the user shows as waiting, with what it asks.
           const waits = id === working.versionId ? waitingFor : 0
           const transcript = partial ? [...agent.state.messages, partial] : agent.state.messages
-          const steps = stepsOf(
+          const placed = placedSteps(
             transcript,
             frozen,
             final,
-            several ? id : undefined,
+            workshop || several ? id : undefined,
             showLastPlain ||
               waits > 0 ||
               partial !== undefined ||
               (workshop && (mailbox.hasMail || mailbox.waitingFor > 0))
-          ).map((step) => {
+          )
+          const blocks = workshop ? workshopBlocks(transcript, frozen, false, id, placed) : undefined
+          const steps = placed.map(({ step }) => {
             const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
             const child = step.kind === "tool" ? children.get(step.id) : undefined
             const progress = step.kind === "tool" && step.status === "running" ? progressOf.get(step.id) : undefined
@@ -1480,10 +1484,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               : shown
           })
           // The working message says how many background subagents the run waits for (§3.2).
-          const json = JSON.stringify([steps, waits])
+          const json = JSON.stringify([steps, waits, blocks, partial !== undefined])
           if (json === shown.get(id)) continue
           shown.set(id, json)
-          emit({ steps, ...(several ? { versionId: id } : {}), ...(waits > 0 ? { waitingFor: waits } : {}) })
+          emit({
+            steps,
+            ...(blocks === undefined ? {} : { blocks, ...(partial ? { blockBoundary: true } : {}) }),
+            ...(several ? { versionId: id } : {}),
+            ...(waits > 0 ? { waitingFor: waits } : {})
+          })
         }
       }
       agent.subscribe((event) => {

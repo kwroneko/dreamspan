@@ -60,7 +60,9 @@ const until = (check: () => boolean) =>
 
 /** The reply's last message, written after its subagent's report, is done. */
 const summedUp = (events: ReadonlyArray<ChatEvent>) =>
-  events.some((e) => e._tag === "Version" && e.version.status === "complete" && e.version.content === "Summed up.")
+  events.some(
+    (e) => e._tag === "Version" && e.version.status === "complete" && e.version.content.endsWith("Summed up.")
+  )
 
 /** Waits for the call's step to ask the user (on any message), then returns what it asks. */
 const prompted = (events: ReadonlyArray<ChatEvent>, callId: string, which: (p: ApprovalPrompt) => boolean) =>
@@ -194,7 +196,7 @@ describe("subagents after review", () => {
       assert.lengthOf(children(mock.requests()), sent, "nothing is sent before the user answers")
       yield* answer(api, asked, "allow")
       yield* eventually(() => finished(events, resumed)?.status === "complete")
-      assert.strictEqual(finished(events, resumed)!.content, "Summed up.")
+      assert.strictEqual(finished(events, resumed)!.content, "Waiting.\n\nSummed up.")
       assert.lengthOf(children(mock.requests()), sent + 1)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

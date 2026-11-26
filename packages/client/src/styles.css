@@ -1192,3 +1192,10 @@ main:has(> [data-fill]) {
     grid-row: 1 / 3;
   }
 }
+
+/* Leave the rendered glyphs in place until the editor has a different value. */
+[data-preserve-reading] .cm-content,
+[data-preserve-reading] .cm-content * {
+  color: transparent !important;
+  text-decoration-color: transparent !important;
+}

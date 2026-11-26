@@ -17,7 +17,7 @@ import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { showActions } from "./message.ts"
 import { capabilityChip, capabilityCounts, nextReply } from "./strip.ts"
-import { startWorkshopProvider, WORKSHOP_ANSWER, WORKSHOP_FIRST } from "./workshopProvider.ts"
+import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 const CREATED = "Created the card Mara Quill"
@@ -31,20 +31,19 @@ export function workshopApprovalTests() {
     const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
       asUser(server(), ADMIN.handle, ADMIN.password, use)
     test.beforeAll(async () => {
-      // Each task: a first message, then the card made in the answer (two messages of one run).
       provider = await startWorkshopProvider({
         perTask: true,
-        calls: [
-          { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
-          { name: "create_card", arguments: { name: "Mara Quill", description: DESCRIPTION } }
-        ]
+        calls: [{ name: "create_card", arguments: { name: "Mara Quill", description: DESCRIPTION } }]
       })
       await admin((api) =>
         Effect.gen(function* () {
           yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
           const connection = yield* api.CreateConnection({
             kind: "openai-chat",
+
             settings: {
+              providerSettings: { toolLoading: "every" },
+
               name: "Synthetic workshop",
               baseUrl: provider.baseUrl,
               compat: {},
@@ -183,40 +182,16 @@ export function workshopApprovalTests() {
             scope: "article:last-of-type"
           })
 
-          // A new version of the answer keeps its own call, so it doesn't warn. A new version of
-          // the run's first message does: the answer's change after it stands, and may be made
-          // again. Cancel leaves everything as it was.
-          const opening = page.getByRole("article").filter({ hasText: WORKSHOP_FIRST }).last()
-          const regenerate = async () => {
-            await showActions(opening)
-            await opening
-              .getByRole("group", { name: "Swipes", exact: true })
-              .getByRole("button", { name: "Generate another swipe", exact: true })
-              .click()
-          }
+          // A clean tip swipe bins the card without a dialog and makes a fresh card.
           const before = provider.bodies.length
-          await regenerate()
-          const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
-          await expect(warning).toContainText(CREATED)
-          await expect(warning).toContainText(
-            "A new swipe keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
-          )
-          await shot("warning")
-          await expectLayout(page, info, `workshop-approvals-warning-${width}-${theme}`, { scope: '[role="dialog"]' })
-          await warning.getByRole("button", { name: "Cancel", exact: true }).click()
-          await expect(warning).toHaveCount(0)
-          expect(provider.bodies.length).toBe(before)
-
-          // Undo them, then make a new version: the card is undone, and the run carries on from
-          // the new first message without asking (allowed in this workshop now).
-          await regenerate()
-          await warning.getByRole("button", { name: "Undo them, then make a new swipe", exact: true }).click()
-          await expect.poll(async () => (await effects()).filter((e) => e.undoneAt !== null).length).toBe(1)
+          await showActions(latest)
+          await latest.getByRole("button", { name: "Generate another swipe", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "This reply changed things outside the chat" })).toHaveCount(0)
+          await expect.poll(() => provider.bodies.length).toBeGreaterThan(before)
           await expect.poll(async () => (await effects()).length, { timeout: 30_000 }).toBe(3)
           await expect(page.getByRole("article").last().getByText(WORKSHOP_ANSWER)).toBeVisible({ timeout: 30_000 })
 
-          // An edit by hand to the first card: its undo asks first instead of refusing
-          // (spec/WORKSHOP-CARDS.md §8.1, Created items); Cancel leaves it as it is, with Open.
+          // An edit by hand to the first card asks before moving it to the bin.
           const oldest = (await effects()).at(-1)!
           await admin((api) =>
             Effect.gen(function* () {
@@ -243,7 +218,6 @@ export function workshopApprovalTests() {
           const changes = await openPanel(page, "Changes")
           const rows = changes.locator("[data-effect]")
           await expect(rows).toHaveCount(3)
-          await expect(rows.nth(1)).toContainText("Undone")
           const edited = rows.nth(2)
           await edited.getByRole("button", { name: "Undo", exact: true }).click()
           const binIt = page.getByRole("alertdialog", { name: "Move it to the bin?" })

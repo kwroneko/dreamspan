@@ -7,7 +7,7 @@
 // open, and the badge says so; what a step offers under its row is registered (`stepActions`).
 import { useAtom, useAtomValue } from "@effect/atom-react"
 import type { RolloutStep } from "@dreamspan/shared/agent.ts"
-import type { PathEntry, Version } from "@dreamspan/shared/chat.ts"
+import type { PathEntry, Version, VersionBlock } from "@dreamspan/shared/chat.ts"
 import type { ReasoningDisplay } from "@dreamspan/shared/chatApi.ts"
 import { displayToolData } from "@dreamspan/shared/toolData.ts"
 import { Link } from "@tanstack/react-router"
@@ -17,7 +17,7 @@ import { Spinner } from "../../../ui/Spinner.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../../ui/viewPrefs.ts"
 import { useAutoOpen } from "../autoOpen.ts"
-import { liveSteps, liveWaitingFor, type ChatSession } from "../session.ts"
+import { liveBlocks, liveSteps, liveWaitingFor, type ChatSession } from "../session.ts"
 import {
   excerpt,
   isOpen,
@@ -40,6 +40,7 @@ const effectIcon: Record<Extract<RolloutStep, { kind: "tool" }>["effect"], IconN
 
 interface Stored {
   readonly id: string
+  readonly versionId: string
   readonly steps: ReadonlyArray<RolloutStep> | null
   readonly error: string | null
 }
@@ -51,26 +52,33 @@ const reads = storedStepReads as Map<string, Promise<Stored>>
 function useStoredSteps(session: ChatSession, version: Version, wanted: boolean) {
   const [stored, setStored] = useState<Stored | null>(null)
   const id = version.id
+  const key = version.blocks === undefined ? id : `${id}:${version.rowVersion}`
   useEffect(() => {
     if (!wanted) return
     let active = true
-    let read = reads.get(id)
+    let read = reads.get(key)
     if (!read) {
       read = session
         .call((client) => client("GetRolloutSteps", { versionId: id }))
         .then((result) =>
           result.ok
-            ? { id, steps: result.value, error: null }
-            : (reads.delete(id), { id, steps: null, error: `The steps couldn't be read: ${result.error.message}` })
+            ? { id: key, versionId: id, steps: result.value, error: null }
+            : (reads.delete(key),
+              { id: key, versionId: id, steps: null, error: `The steps couldn't be read: ${result.error.message}` })
         )
-      reads.set(id, read)
+      reads.set(key, read)
     }
     void read.then((value) => active && setStored(value))
     return () => {
       active = false
     }
-  }, [wanted, id, session])
-  return stored?.id === id ? stored : null
+  }, [wanted, id, key, session])
+  // An expanded trace in an edited reply keeps its rows while its new version is read.
+  return stored &&
+    (stored.id === key ||
+      (version.blocks && stored.steps && (stored.versionId === id || stored.versionId === version.sourceVersionId)))
+    ? stored
+    : null
 }
 
 export function StepRow({
@@ -160,25 +168,53 @@ export function StepRow({
 }
 
 export function Steps({ version, session }: { version: Version; session: ChatSession }) {
+  if (session.snapshot().chat?.kind === "workshop") return null
+  return <StepPanel version={version} session={session} />
+}
+
+export function StepPanel({
+  version,
+  session,
+  trace,
+  active = false
+}: {
+  version: Version
+  session: ChatSession
+  trace?: Extract<VersionBlock, { kind: "trace" }>
+  active?: boolean
+}) {
   const live = useAtomValue(liveSteps(version.id))
   const waitingFor = useAtomValue(liveWaitingFor(version.id))
   const posted = useAtomValue(postedSteps(version.id))
   const generating = version.status === "generating"
-  const view = stepsView(live, version.steps, generating, waitingFor)
+  const view = trace
+    ? {
+        running: active,
+        count: trace.count,
+        ms: null,
+        live: generating ? (live?.slice(trace.start, trace.end) ?? []) : null,
+        waitingFor: active ? waitingFor : 0
+      }
+    : stepsView(live, version.steps, generating, waitingFor)
   // The last steps streamed, shown at once if the element is opened right after the reply ends.
   const [lastLive, setLastLive] = useState<{ id: string; steps: ReadonlyArray<RolloutStep> } | null>(null)
   if (live !== null && live.length > 0 && (lastLive?.id !== version.id || lastLive.steps !== live))
     setLastLive({ id: version.id, steps: live })
   const viewer = useViewPrefs()
   const preferred: ReasoningDisplay = viewer.prefs.steps
-  const [chosen, setChosen] = useAtom(stepsChoice(version.id))
+  const [all, setAll] = useAtom(stepsChoice(version.id))
+  const [choice, setChoice] = useState<{ all: typeof all; open: boolean; streaming: boolean } | null>(null)
+  const chosen = trace && choice?.all === all ? choice : all
   const streaming = view?.running ?? false
+  const phase = trace ? generating : streaming
   // A call waiting for the user stays in sight: the answer is in its row.
   const waiting = waitsForUser(view?.live)
   // Open on its own only after it has streamed a while, and folded a while after the reply (autoOpen.ts).
-  const auto = useAutoOpen(streaming, streaming, preferred === "expanded", useAtom(stepsAutoOpen(version.id)))
-  const open = view !== null && (waiting || isOpen(chosen, streaming, auto))
-  const stored = useStoredSteps(session, version, open && view !== null && !view.running)
+  const sharedAuto = useAtom(stepsAutoOpen(version.id))
+  const traceAuto = useState(false)
+  const auto = useAutoOpen(streaming, streaming, preferred === "expanded", trace ? traceAuto : sharedAuto)
+  const open = view !== null && (waiting || isOpen(chosen, phase, auto))
+  const stored = useStoredSteps(session, version, open && view !== null && !generating)
   const id = useId()
   const hintId = useId()
   if (view === null) return null
@@ -196,17 +232,23 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
           : "Click to show the steps behind this reply"
   const toggle = () => {
     if (waiting) return
-    setChosen({ open: !open, streaming })
+    if (trace) setChoice({ all, open: !open, streaming: phase })
+    else setAll({ open: !open, streaming })
     // During a run the choice sticks: later replies show their steps that way too (DESIGN §7.4).
     if (streaming) {
       const steps: ReasoningDisplay = open ? "collapsed" : "expanded"
       if (steps !== preferred) void viewer.change({ steps })
     }
   }
-  const steps = view.live ?? posted ?? stored?.steps ?? (lastLive?.id === version.id ? lastLive.steps : null)
+  const saved = posted ?? stored?.steps ?? (lastLive?.id === version.id ? lastLive.steps : null)
+  const steps = view.live ?? (trace ? (saved?.slice(trace.start, trace.end) ?? null) : saved)
 
   return (
-    <div className="flex flex-col gap-1" data-steps-panel={streaming ? "running" : "done"}>
+    <div
+      className="flex flex-col gap-1"
+      data-workshop-trace={trace?.id}
+      data-steps-panel={streaming ? "running" : "done"}
+    >
       <div className="flex flex-wrap items-center gap-x-2">
         <Tooltip label={hint}>
           <button
@@ -277,7 +319,7 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
                 <StepRow
                   key={step.kind === "tool" ? step.id : `${step.kind}-${i}`}
                   step={step}
-                  index={i}
+                  index={(trace?.start ?? 0) + i}
                   version={version}
                   session={session}
                 />
@@ -312,19 +354,26 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
  * "3 steps · 14 s" in the message header (spec/AGENTIC.md §5.1), for a reply whose run made tool
  * calls; nothing for a plain one. A click opens or folds the steps in the message.
  */
-export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; generating: boolean }) {
+export function StepsBadge({ entry, session }: { entry: PathEntry; session: ChatSession; generating: boolean }) {
   const version = entry.version
   const live = useAtomValue(liveSteps(version.id))
   const waitingFor = useAtomValue(liveWaitingFor(version.id))
   const generating = version.status === "generating"
-  const view = stepsView(live, version.steps, generating, waitingFor)
+  const liveLayout = useAtomValue(liveBlocks(version.id))
+  const layout = liveLayout ?? version.blocks
+  const traceCount = layout?.reduce((count, block) => count + (block.kind === "trace" ? block.count : 0), 0)
+  const workshop = session.snapshot().chat?.kind === "workshop"
+  const view =
+    workshop && traceCount !== undefined
+      ? { running: generating, count: traceCount, ms: null, live, waitingFor }
+      : stepsView(live, version.steps, generating, waitingFor)
   const viewer = useViewPrefs()
   const [chosen, setChosen] = useAtom(stepsChoice(version.id))
   const auto = useAtomValue(stepsAutoOpen(version.id))
   if (view === null || (view.count === 0 && view.waitingFor === 0)) return null
   const streaming = view.running
   const waiting = waitsForUser(view.live)
-  const open = waiting || isOpen(chosen, streaming, auto)
+  const open = waiting || isOpen(chosen, streaming, workshop ? false : auto)
   return (
     <Tooltip
       label={

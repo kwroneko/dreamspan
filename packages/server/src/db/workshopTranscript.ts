@@ -1,3 +1,5 @@
+import { visibleBlockText } from "@dreamspan/shared/chat.ts"
+import { workshopBlocks } from "../agent/workshopBlocks.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
@@ -39,9 +41,15 @@ export const workshopTranscript = Effect.fnUntraced(function* (
       }
     }
   }
-  const rows = yield* sql<{ id: string; transcript: string | null; snapshot: string | null; rollout: string }>`
-    SELECT v.id,p.transcript_json AS transcript,p.context_snapshot_json AS snapshot,r.id AS rollout
-    FROM json_each(${JSON.stringify(versions)}) wanted CROSS JOIN versions v ON v.id=wanted.value
+  const rows = yield* sql<{
+    id: string
+    transcript: string | null
+    snapshot: string | null
+    rollout: string
+    content: string
+  }>`
+    SELECT v.id,v.content,p.transcript_json AS transcript,p.context_snapshot_json AS snapshot,r.id AS rollout
+    FROM json_each(${JSON.stringify(versions)}) wanted CROSS JOIN version_records v ON v.id=wanted.value
     JOIN slots s ON s.id=v.slot_id JOIN rollouts r ON r.id=v.rollout_id JOIN rollout_payloads p ON p.rollout_id=r.id
     WHERE s.chat_id=${chatId} AND r.chat_id=${chatId} AND r.kind='workshop'`
   for (const row of rows) {
@@ -57,7 +65,14 @@ export const workshopTranscript = Effect.fnUntraced(function* (
         s.through <= bounds.through + 1 &&
         steps.some((p) => p.message >= s.from && p.message < s.through)
     )
-    const material = steps.flatMap(({ step, message }) => {
+    const blocks = workshopBlocks(messages, tools, true, row.id)
+    const visible = new Set(
+      row.content === visibleBlockText(blocks)
+        ? blocks.flatMap((block) => (block.kind === "text" ? [block.id] : []))
+        : []
+    )
+    const material = steps.flatMap(({ step, message, part }) => {
+      if (step.kind === "text" && visible.has(`text:${message}:${part}`)) return []
       if (summaries.some((s) => message >= s.from && message < s.through)) return []
       return step.kind === "thinking"
         ? []

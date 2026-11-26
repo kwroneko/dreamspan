@@ -26,7 +26,7 @@ export type MessageEditorKey =
 
 export const editorKey = (target: MessageDraftTarget): MessageEditorKey =>
   target._tag === "Edit"
-    ? `edit:${target.versionId}`
+    ? `edit:${target.versionId}${target.field ? `:${target.field}` : ""}`
     : target._tag === "EditThinking"
       ? `think:${target.versionId}`
       : target._tag === "Write"
@@ -43,7 +43,11 @@ export const targetOf = (draft: Draft): MessageDraftTarget | null =>
   draft.key.targetKind === "version_edit"
     ? draft.key.field === EDIT_THINKING_FIELD
       ? { _tag: "EditThinking", versionId: draft.key.targetId as VersionId }
-      : { _tag: "Edit", versionId: draft.key.targetId as VersionId }
+      : {
+          _tag: "Edit",
+          versionId: draft.key.targetId as VersionId,
+          ...(draft.key.field ? { field: draft.key.field } : {})
+        }
     : draft.key.targetKind === "scratchpad"
       ? { _tag: "Write", slotId: draft.key.targetId as SlotId }
       : draft.key.targetKind === "queue_edit"

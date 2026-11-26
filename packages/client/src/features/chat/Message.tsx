@@ -1,3 +1,6 @@
+import { blockField, visibleBlockText } from "@dreamspan/shared/chat.ts"
+import type { BlockEdits } from "@dreamspan/shared/chatApi.ts"
+import { StepPanel } from "./agent/Steps.tsx"
 import { useMediaPermit } from "./externalMedia.tsx"
 import { messageTextEditor } from "./editorHistory.tsx"
 import {
@@ -21,10 +24,11 @@ import {
 import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@dreamspan/shared/bin.ts"
-import type { ForkId, PathEntry, SlotId, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
+import type { ForkId, PathEntry, SlotId, TextBlock, ThinkingPart, Version } from "@dreamspan/shared/chat.ts"
 import { editableThinking } from "@dreamspan/shared/replySections.ts"
 import {
   memo,
+  Fragment,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -61,7 +65,16 @@ import { OFF, usePanelPermit } from "./panelPermits.ts"
 import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
-import { type ChatSession, liveText, type Outcome, resumeKind, waitingCache } from "./session.ts"
+import {
+  type ChatSession,
+  liveBlocks,
+  liveSteps,
+  liveWaitingFor,
+  liveText,
+  type Outcome,
+  resumeKind,
+  waitingCache
+} from "./session.ts"
 import { stepVersion } from "./versionNavigation.ts"
 import {
   messageDirections,
@@ -193,6 +206,88 @@ interface BodyEdit {
   readonly text: ((height: number | null, onShown: () => void) => ReactNode) | null
 }
 
+type BlockEditor = (block: TextBlock) => MessageDraft | undefined
+
+function WorkshopText({
+  block,
+  draft,
+  focus,
+  caret,
+  selection,
+  focusScope,
+  onCaretTaken,
+  children
+}: {
+  block: TextBlock
+  draft: MessageDraft | undefined
+  focus: boolean
+  caret: EditCaret | undefined
+  selection: ReturnType<typeof editSelection>
+  focusScope: boolean
+  onCaretTaken: () => void
+  children: ReactNode
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  const [height, holdHeight] = useState<number | null>(null)
+  const [shown, setShown] = useState(false)
+  const ready = useDraftLoaded(draft)
+  const text = useSyncExternalStore(draft?.subscribe ?? noDraftSubscription, () => draft?.snapshot().text)
+  const editorShown = useCallback(() => setShown(true), [])
+  if (!draft && height !== null) {
+    holdHeight(null)
+    setShown(false)
+  }
+  useLayoutEffect(() => {
+    if (draft && height === null && box.current) holdHeight(box.current.getBoundingClientRect().height)
+  }, [draft, height])
+  const editing = !!draft && ready && height !== null
+  const preserveReading = text === block.text
+  return (
+    <div
+      data-workshop-text={block.id}
+      data-reply-text
+      className={editing ? "grid *:min-w-0 *:[grid-area:1/1]" : undefined}
+      style={draft && height !== null ? { height } : undefined}
+    >
+      <div ref={box} className={editing && shown && !preserveReading ? "invisible" : undefined}>
+        {children}
+      </div>
+      {editing && (
+        <div className={shown ? "relative min-h-0" : "pointer-events-none opacity-0"}>
+          <InPlaceText
+            draft={draft}
+            base={block.text}
+            height={height}
+            caret={focus ? caret : undefined}
+            focus={focus}
+            lockHeight
+            preserveReading={preserveReading}
+            onCaretTaken={onCaretTaken}
+            onCaretPlaced={doNothing}
+            onFirstFocus={doNothing}
+            onShown={editorShown}
+            selection={selection}
+            selectionScopeFocused={focusScope}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+const doNothing = () => {}
+const noDraftSubscription = () => doNothing
+const readOnlySelection = editSelection()
+
+interface WorkshopEdit {
+  readonly draftFor: BlockEditor
+  readonly focus: string | undefined
+  readonly caret: EditCaret | undefined
+  readonly selection: ReturnType<typeof editSelection>
+  readonly focusScope: boolean
+  readonly onCaretTaken: () => void
+}
+
 function VersionBody({
   version,
   session,
@@ -202,12 +297,14 @@ function VersionBody({
   placement,
   speakerName,
   onResume,
-  edit
+  edit,
+  workshopEdit
 }: {
   version: Version
   session: ChatSession
   /** An edit open in its text's place (InPlaceEdit.tsx). */
   edit?: BodyEdit | undefined
+  workshopEdit?: WorkshopEdit | undefined
   /** Who wrote it, for a pass's line ("Mira stays silent"). */
   speakerName: string
   /** Its thinking the user hid from the model here (SetThinkingHidden). */
@@ -220,10 +317,27 @@ function VersionBody({
 }) {
   const live = useAtomValue(liveText(version.id))
   const waiting = useAtomValue(waitingCache(version.id))
+  const liveLayout = useAtomValue(liveBlocks(version.id))
+  const steps = useAtomValue(liveSteps(version.id))
+  const waitingFor = useAtomValue(liveWaitingFor(version.id))
   useRenderCount("bodyRenders", live !== null ? "liveBodyRenders" : undefined)
   useMountedTracking(version.id)
   const generating = version.status === "generating"
+  const workshop = session.snapshot().chat?.kind === "workshop"
+  const blocks = workshop ? (generating ? (liveLayout ?? version.blocks) : version.blocks) : undefined
   const text = live ?? version.content
+  const last = blocks?.at(-1)
+  const active =
+    generating &&
+    blocks !== undefined &&
+    (waitingFor > 0 ||
+      (last?.kind === "trace" && text === "") ||
+      steps?.some((step) => step.kind === "tool" && (step.status === "running" || step.status === "waiting")))
+  const finalBlock = blocks?.findLast((block) => block.kind === "text")
+  const layer = (text: string, streaming: boolean) => (
+    <BodyText {...{ version, session, parentSlotId, depth, placement, text, streaming }} />
+  )
+  const reasoning = <ReasoningPanels {...{ version, session, hiddenThinking, parentSlotId, depth }} />
   // An edit in the text's place (InPlaceEdit.tsx) is as tall as the text was when it opened: its
   // height is read in the layout of the render that opens it, before the edit is drawn, and
   // the text stays mounted under it, hidden, to show again as it was when the edit closes.
@@ -248,45 +362,94 @@ function VersionBody({
   return (
     <div className="flex flex-col gap-2 compact:gap-1">
       {/* Its thinking panels stay as they are in an edit: the thinking is edited on its own (editThinking.tsx). */}
-      <ReasoningPanels
-        version={version}
-        session={session}
-        hiddenThinking={hiddenThinking}
-        parentSlotId={parentSlotId}
-        depth={depth}
-      />
-      {/* One cell holding both while the edit's box is being drawn (above). */}
-      <div className={editText !== null && !shown ? "grid *:min-w-0 *:[grid-area:1/1]" : "contents"}>
-        {editText !== null && <div className={shown ? "contents" : "pointer-events-none opacity-0"}>{editText}</div>}
-        {/* The reply's text: the only part of a message besides its thinking a double-click edits (editFrom). */}
-        <div
-          ref={textBox}
-          data-reply-text
-          className="flex flex-col gap-2 compact:gap-1"
-          hidden={editText !== null && shown}
-        >
-          {text === "" && generating ? (
-            <p className="text-sm text-muted" aria-live="polite">
-              {waiting ? "Waiting for the cache…" : "Writing…"}
-            </p>
-          ) : version.mark === "silent" && text === "" ? (
-            // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
-            <p data-silent className="text-sm text-muted italic">
-              {speakerName} stays silent
-            </p>
-          ) : (
-            <BodyText
+      {blocks !== undefined ? (
+        <>
+          {blocks.map((block) =>
+            block.kind === "trace" ? (
+              <StepPanel
+                key={block.id}
+                version={version}
+                session={session}
+                trace={block}
+                active={!!active && block === last}
+              />
+            ) : (
+              <Fragment key={block.id}>
+                {!generating && block === finalBlock && reasoning}
+                <WorkshopText
+                  block={block}
+                  draft={workshopEdit?.draftFor(block)}
+                  focus={block.id === workshopEdit?.focus}
+                  caret={workshopEdit?.caret}
+                  selection={workshopEdit?.selection ?? readOnlySelection}
+                  focusScope={workshopEdit?.focusScope ?? false}
+                  onCaretTaken={workshopEdit?.onCaretTaken ?? doNothing}
+                >
+                  {layer(block.text, false)}
+                </WorkshopText>
+              </Fragment>
+            )
+          )}
+          {generating && waitingFor > 0 && last?.kind !== "trace" && (
+            <StepPanel
               version={version}
               session={session}
-              parentSlotId={parentSlotId}
-              depth={depth}
-              placement={placement}
-              text={text}
-              streaming={generating}
+              active
+              trace={{ kind: "trace", id: "waiting", start: steps?.length ?? 0, end: steps?.length ?? 0, count: 0 }}
             />
           )}
-        </div>
-      </div>
+          {generating && (text !== "" || !active) && (
+            <>
+              {!active && reasoning}
+              {text !== "" ? (
+                layer(text, true)
+              ) : blocks.length === 0 ? (
+                <p className="text-sm text-muted" aria-live="polite">
+                  {waiting ? "Waiting for the cache…" : "Writing…"}
+                </p>
+              ) : null}
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          {reasoning}
+          {/* One cell holding both while the edit's box is being drawn (above). */}
+          <div className={editText !== null && !shown ? "grid *:min-w-0 *:[grid-area:1/1]" : "contents"}>
+            {editText !== null && (
+              <div className={shown ? "contents" : "pointer-events-none opacity-0"}>{editText}</div>
+            )}
+            {/* The reply's text: the only part of a message besides its thinking a double-click edits (editFrom). */}
+            <div
+              ref={textBox}
+              data-reply-text
+              className="flex flex-col gap-2 compact:gap-1"
+              hidden={editText !== null && shown}
+            >
+              {text === "" && generating ? (
+                <p className="text-sm text-muted" aria-live="polite">
+                  {waiting ? "Waiting for the cache…" : "Writing…"}
+                </p>
+              ) : version.mark === "silent" && text === "" ? (
+                // A pass (spec/REPLY-CONTRACT.md §3.1): never invisible, and another version is a reply.
+                <p data-silent className="text-sm text-muted italic">
+                  {speakerName} stays silent
+                </p>
+              ) : (
+                <BodyText
+                  version={version}
+                  session={session}
+                  parentSlotId={parentSlotId}
+                  depth={depth}
+                  placement={placement}
+                  text={text}
+                  streaming={generating}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
           {version.status === "failed"
@@ -673,6 +836,14 @@ export const Message = memo(function Message({
   const inPlace = editing === "edit" ? editEditor : undefined
   const { source: editSource, base: editBase } = useEditSource(session, entry, inPlace, [version, ...(versions ?? [])])
   const editLoaded = useDraftLoaded(inPlace)
+  const blockSource = editSource?.blocks?.filter((block) => block.kind === "text")
+  const lastBlock = blockSource?.at(-1)
+  const draftFor: BlockEditor = (block) =>
+    editSource && session.editor(`edit:${editSource.id}${block.id === lastBlock?.id ? "" : `:${blockField(block)}`}`)
+  useEffect(() => {
+    if (inPlace && editSource?.blocks?.some((block) => block.kind === "text"))
+      session.openMessageEdit({ ...entry, version: editSource })
+  }, [inPlace, editSource, entry, session])
   // A fresh one per edit, so an edit never starts with the last one's selection.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const selection = useMemo(() => editSelection(), [inPlace])
@@ -734,6 +905,7 @@ export const Message = memo(function Message({
   // A double-click opens Edit, with the caret where it landed. It waits out a triple-click,
   // which selects a paragraph, and a double-click drag, which selects words, to copy them.
   const pendingEdit = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [focusBlock, setFocusBlock] = useState<string>()
   const [caretAt, setCaretAt] = useState<EditCaret | undefined>(undefined)
   // Only the edit it opened starts there: a later Edit opens with the caret at the end.
   const caretTaken = useCallback(() => setCaretAt(undefined), [])
@@ -758,11 +930,16 @@ export const Message = memo(function Message({
   } | null>(null)
   // Any press after the double-click (a triple-click's third, or another action begun within
   // the wait) is the user doing something else.
+  const blockAt = (target: EventTarget | null) => {
+    const id =
+      target instanceof Element ? target.closest<HTMLElement>("[data-workshop-text]")?.dataset.workshopText : null
+    return version.blocks?.find((block): block is TextBlock => block.kind === "text" && block.id === id)
+  }
   const onMouseDown = (event: MouseEvent) => {
     // A press in the thinking places its own editor's caret, in the thinking (editThinking.tsx).
     const thinking = thinkingAt(event.target)
     if (event.detail <= 1 && (thinking || !editing)) {
-      const source = thinking ? editableThinking(version) : version.content
+      const source = thinking ? editableThinking(version) : (blockAt(event.target)?.text ?? version.content)
       const caret = locateSpot(caretSpotAt(event.clientX, event.clientY), source)
       pressed.current = { x: event.clientX, y: event.clientY, versionId: version.id, source, caret, thinking }
     }
@@ -783,8 +960,9 @@ export const Message = memo(function Message({
       if (messageActions.get("message.edit")?.available?.(context) === false) return
     }
     // The caret where it landed in the stored text (ui/editCaret.ts), else at the end.
+    const block = blockAt(event.target)
     const first = pressed.current
-    const source = thinking ? editableThinking(version) : version.content
+    const source = thinking ? editableThinking(version) : (blockAt(event.target)?.text ?? version.content)
     const caret =
       (first?.caret &&
       first.versionId === version.id &&
@@ -806,6 +984,7 @@ export const Message = memo(function Message({
         return openThinking(session, entry, caret)
       }
       if (current.editing) return
+      setFocusBlock(block?.id)
       setCaretAt(caret)
       const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
       void invokeMessageAction("message.edit", context, "button")
@@ -933,6 +1112,18 @@ export const Message = memo(function Message({
       version={version}
       session={session}
       edit={bodyEdit || undefined}
+      workshopEdit={
+        inPlace && editSource?.id === version.id && lastBlock
+          ? {
+              draftFor,
+              focus: focusBlock ?? lastBlock.id,
+              caret: caretAt,
+              selection,
+              focusScope: editFocus.focused,
+              onCaretTaken: caretTaken
+            }
+          : undefined
+      }
       hiddenThinking={entry.hiddenThinking}
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
@@ -975,6 +1166,33 @@ export const Message = memo(function Message({
       target._tag === "Edit" ? (await load(true))?.find((candidate) => candidate.id === target.versionId) : undefined
     if (target._tag === "Edit" && source === undefined) return
     // The text only: its thinking stays as it is (it's edited on its own, editThinking.tsx).
+    if (source?.blocks && lastBlock && blockSource) {
+      const submissions = await Promise.all(
+        blockSource.flatMap((block) => {
+          const editor = draftFor(block)
+          return editor ? [editor.ready().then((submitted) => ({ block, editor, submitted }))] : []
+        })
+      )
+      if (submissions.length !== blockSource.length) return
+      const edits: BlockEdits = submissions.map(({ block, submitted }) => ({
+        message: block.message,
+        part: block.part,
+        text: submitted.text,
+        ...(submitted.draft ? { draft: submitted.draft } : {})
+      }))
+      const images = submissions.at(-1)?.submitted.images
+      const outcome = await session.edit({ ...entry, version: source }, undefined, null, images, undefined, edits)
+      report(outcome)
+      if (!outcome.ok) return
+      await after?.(visibleBlockText(edits.map((edit, i) => ({ ...submissions[i]!.block, text: edit.text }))))
+      const settled = submissions.filter(({ editor, submitted }) => editor.committed(submitted))
+      await Promise.all(
+        settled.filter(({ submitted }) => submitted.draft === null).map(({ editor }) => editor.discard())
+      )
+      for (const { editor } of settled) session.closeEditor(editor)
+      setFocusBlock(undefined)
+      return
+    }
     const submitted = await editor.ready()
     const { text, draft, images } = submitted
     const outcome =
@@ -998,10 +1216,17 @@ export const Message = memo(function Message({
   const cancelEdit = async () => {
     if (editor === undefined) return
     // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
-    const outcome = await editor.discard()
-    report(outcome)
-    if (!outcome.ok) return
-    session.closeEditor(editor)
+    const open = blockSource?.flatMap((block) => {
+      const draft = draftFor(block)
+      return draft ? [draft] : []
+    })
+    const drafts = open?.length ? open : [editor]
+    const outcomes = await Promise.all(drafts.map((draft) => draft.discard()))
+    const problem = outcomes.find((outcome) => !outcome.ok)
+    if (problem) return report(problem)
+    report(outcomes[0]!)
+    for (const draft of drafts) session.closeEditor(draft)
+    setFocusBlock(undefined)
   }
   const onSave = () => void saveEdit()
   const onCancel = () => void cancelEdit()
@@ -1037,7 +1262,8 @@ export const Message = memo(function Message({
   )
 
   // In a compact list an edit's footer stays where the footer lies (over the message's corner), taking no room.
-  const keepFooter = latest || generating || revealed || editing === "write" || savedAs !== null
+  const keepFooter =
+    version.blocks !== undefined || latest || generating || revealed || editing === "write" || savedAs !== null
 
   return (
     <article
@@ -1182,7 +1408,7 @@ export const Message = memo(function Message({
         ) : (
           versionBody
         )}
-        {inPlace && <EditStatus draft={inPlace} base={editBase} />}
+        {inPlace && !lastBlock && <EditStatus draft={inPlace} base={editBase} />}
         {version.context !== null && version.context.issues.length > 0 && (
           // What the user should know about the context it was generated from (ARCHITECTURE §15).
           <details className="text-xs text-warning">

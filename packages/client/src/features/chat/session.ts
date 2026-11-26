@@ -1,3 +1,5 @@
+import { blockField, type VersionBlock } from "@dreamspan/shared/chat.ts"
+import type { BlockEdits } from "@dreamspan/shared/chatApi.ts"
 import { forksChanged } from "./forks.ts"
 import { refreshTokenCounts } from "../editor/tokenCounts.ts"
 import type { ForkNoteSelection } from "@dreamspan/shared/chatApi.ts"
@@ -53,7 +55,7 @@ import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 import { guardReply } from "./replyGuards.ts"
 import { notifyEntriesChanged } from "../../libraryChanges.ts"
-import { postedSteps, storedStepReads } from "./agent/steps.ts"
+import { postedSteps, stepsChoice, storedStepReads } from "./agent/steps.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -80,6 +82,7 @@ export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | 
 /** A generating version's reply-section panel text so far (spec/REPLY-SECTIONS.md); null when not streaming. */
 export const liveSections = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 /** A generating agent reply's steps as they stand (spec/AGENTIC.md §5.1); null when it isn't generating or has none yet. */
+export const liveBlocks = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<VersionBlock> | null>(null))
 export const liveSteps = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<RolloutStep> | null>(null))
 /** How many background subagents a generating reply waits for (spec/SUBAGENTS.md §3.2); 0: none. */
 export const liveWaitingFor = Atom.family((_id: VersionId) => Atom.make(0))
@@ -952,6 +955,15 @@ export class ChatSession {
     }
   }
 
+  openMessageEdit(entry: PathEntry) {
+    const { version, slotId } = entry
+    const blocks = version.blocks?.filter((block) => block.kind === "text") ?? []
+    const final = blocks.at(-1)
+    this.openEditor({ _tag: "Edit", versionId: version.id }, final?.text ?? version.content, slotId)
+    for (const block of blocks.slice(0, -1))
+      this.openEditor({ _tag: "Edit", versionId: version.id, field: blockField(block) }, block.text, slotId)
+  }
+
   /** Opens an editor, or the one already open there, with its text. */
   openEditor(target: MessageDraftTarget, initial: string, slotId?: SlotId): MessageDraft {
     if (target._tag === "Edit" && slotId !== undefined) this.editSlots.set(target.versionId, slotId)
@@ -1192,13 +1204,25 @@ export class ChatSession {
       return
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, sequence, waitingCache: waiting, reasoning, sections, steps } of event.live) {
+        for (const {
+          versionId,
+          text,
+          sequence,
+          waitingCache: waiting,
+          reasoning,
+          sections,
+          steps,
+          blocks,
+          waitingFor
+        } of event.live) {
           this.keepLive(versionId)
           this.registry.set(waitingCache(versionId), waiting ?? false)
           this.liveSnapshot(liveText(versionId), text, sequence)
           this.liveSnapshot(liveReasoning(versionId), reasoning, sequence)
           this.liveSnapshot(liveSections(versionId), sections, sequence)
           if (steps) this.setLiveSteps(versionId, steps)
+          if (blocks) this.registry.set(liveBlocks(versionId), blocks)
+          if (waitingFor) this.registry.set(liveWaitingFor(versionId), waitingFor)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
@@ -1260,7 +1284,16 @@ export class ChatSession {
           return
         }
         this.setLiveSteps(event.versionId, event.steps)
+        if (event.blocks) this.registry.set(liveBlocks(event.versionId), event.blocks)
+        if (event.blockBoundary) {
+          this.registry.set(liveText(event.versionId), "")
+          this.registry.set(liveReasoning(event.versionId), "")
+        }
         this.registry.set(liveWaitingFor(event.versionId), event.waitingFor ?? 0)
+        return
+      case "WorkshopSwipe":
+        this.invalidate(["rollout-effects", "library", "chats", "chat-lists", "bin"])
+        this.notice(event.message)
         return
       case "RequestNotice":
         if (this.view.entries.some((e) => e.version.id === event.versionId)) this.notice(event.message)
@@ -1380,6 +1413,8 @@ export class ChatSession {
     if (index >= 0) {
       const current = entries[index]!
       if (current.rowVersion > entry.rowVersion) return true
+      if (entry.version.blocks && entry.version.sourceVersionId === current.version.id)
+        this.registry.set(stepsChoice(entry.version.id), this.registry.get(stepsChoice(current.version.id)))
       const next = entries.slice()
       // A finished version may arrive before the slot event that started it.
       const finished = current.version.id === entry.version.id && current.version.status !== "generating"
@@ -1527,6 +1562,7 @@ export class ChatSession {
     const reasoning = this.registry.mount(liveReasoning(id))
     const sections = this.registry.mount(liveSections(id))
     const steps = this.registry.mount(liveSteps(id))
+    const blocks = this.registry.mount(liveBlocks(id))
     const waitingFor = this.registry.mount(liveWaitingFor(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
@@ -1539,12 +1575,14 @@ export class ChatSession {
         this.registry.set(liveReasoning(id), null)
         this.registry.set(liveSections(id), null)
         this.registry.set(liveSteps(id), null)
+        this.registry.set(liveBlocks(id), null)
         this.registry.set(liveWaitingFor(id), 0)
       }
       text()
       reasoning()
       sections()
       steps()
+      blocks()
       waitingFor()
       waiting()
     }
@@ -1590,6 +1628,7 @@ export class ChatSession {
     this.registry.set(liveReasoning(id), null)
     this.registry.set(liveSections(id), null)
     this.registry.set(liveSteps(id), null)
+    this.registry.set(liveBlocks(id), null)
     this.registry.set(liveWaitingFor(id), 0)
     this.live.get(id)?.()
     this.live.delete(id)
@@ -1871,13 +1910,19 @@ export class ChatSession {
    */
   async regenerate(entry: PathEntry): Promise<Outcome<unknown>> {
     // A guard may hold it back (a reply that changed things outside the chat warns first).
+    let autoRevert = false
     const go = await guardReply({
       chatId: this.chatId,
       kind: this.view.chat?.kind,
       versionId: entry.version.id,
       // A message of a several-message run without steps of its own may still have later ones'.
       hasSteps: (entry.version.steps?.count ?? 0) > 0 || entry.version.agent === true,
-      action: "regenerate"
+      action: "regenerate",
+      tip: entry.slotId === this.view.leafSlotId,
+      report: (message) => this.notice(message),
+      autoRevert: () => {
+        autoRevert = true
+      }
     })
     if (!go) return { ok: true, value: null }
     await beforeReply()
@@ -1887,6 +1932,7 @@ export class ChatSession {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
+        ...(autoRevert ? { autoRevert: entry.version.id } : {}),
         ...(direction === undefined ? {} : { direction })
       })
     )
@@ -2005,10 +2051,12 @@ export class ChatSession {
     content: string | undefined,
     draft: DraftCommit | null = null,
     images?: import("@dreamspan/shared/chat.ts").MessageImages,
-    thinking?: { readonly text: string; readonly draft: DraftCommit | null }
+    thinking?: { readonly text: string; readonly draft: DraftCommit | null },
+    blockEdits?: BlockEdits
   ): Promise<Outcome<unknown>> {
     const { version } = entry
     const commit = {
+      ...(blockEdits === undefined ? {} : { blockEdits }),
       ...(content === undefined ? {} : { content }),
       ...(draft === null ? {} : { draft }),
       ...(images === undefined ? {} : { images }),

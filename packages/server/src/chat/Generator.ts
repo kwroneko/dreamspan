@@ -1,3 +1,5 @@
+import type { Effect } from "effect"
+import type { VersionBlock } from "@dreamspan/shared/chat.ts"
 // What produces a version's text. The real one will be the context assembler in front of
 // the provider layer (PLAN phase 2); until it exists, only tests, the development server
 // and the performance harness have one: the fake (fakeGenerator.ts).
@@ -30,6 +32,7 @@ export interface GenerationRequest {
   readonly autoGuard?: string
   readonly outputBudget?: { remaining: number }
   readonly replyOnly?: boolean
+  readonly workshopSwipe?: Effect.Effect<void, GenerationFailed>
   /**
    * A side chat's request (spec/WORKSHOP.md §4): where its story tools read the story, as the
    * browser tab it was sent from showed it. Absent: the story can't be read for this reply.
@@ -109,6 +112,8 @@ export type GenerationChunk =
   | { readonly restart: true }
   /** An agent reply's steps so far, all of them (spec/AGENTIC.md §5.1). */
   | {
+      readonly blocks?: ReadonlyArray<VersionBlock>
+      readonly blockBoundary?: boolean
       readonly steps: ReadonlyArray<RolloutStep>
       readonly versionId?: VersionId
       /** Background subagents the run waits for (spec/SUBAGENTS.md §3.2); absent: none. */

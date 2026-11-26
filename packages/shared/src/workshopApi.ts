@@ -2,7 +2,7 @@ import { EntityId, ForkId, MessageLibrary, SlotId } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
-import { Forbidden, NotFound, ServerError } from "./errors.ts"
+import { EffectUndoRefused, Forbidden, NotFound, ServerError } from "./errors.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 
 /** What the assistant may do with a capability in one workshop (spec/WORKSHOP.md §3.4). */
@@ -82,11 +82,7 @@ export class GrantRefused extends Schema.TaggedError<GrantRefused>()("GrantRefus
 export const ApprovalAnswer = Schema.Literals(["allow", "allow_chat", "allow_card", "allow_always", "deny"])
 export type ApprovalAnswer = typeof ApprovalAnswer.Type
 
-export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {
-  message: Schema.String,
-  /** The unconfirmed creation Undo can be retried with binAnyway. */
-  binConfirmation: Schema.optionalKey(Schema.Struct({ changed: Schema.Boolean, chats: Schema.Int }))
-}) {}
+export { EffectUndoRefused } from "./errors.ts"
 
 export const RolloutEffectRecord = Schema.Struct({
   kind: Schema.String,
@@ -116,6 +112,17 @@ export const RolloutEffect = Schema.Struct({
    * change that stand reverted, all the fields it changed, and the reverts holding them, newest
    * first (Redo takes those back). Fields are `changeReversal.ts` `unitKey`s.
    */
+  swipe: Schema.optionalKey(
+    Schema.Struct({
+      clean: Schema.Boolean,
+      reason: Schema.optionalKey(Schema.String),
+      head: Schema.optionalKey(Schema.String),
+      rowVersion: Schema.optionalKey(Schema.Int),
+      manualSince: Schema.optionalKey(Schema.Boolean),
+      binItemId: Schema.optionalKey(Schema.String),
+      autoBinned: Schema.optionalKey(Schema.Boolean)
+    })
+  ),
   reversion: Schema.optionalKey(
     Schema.Struct({
       fields: Schema.Array(Schema.String),

@@ -47,7 +47,7 @@ export const registerMessageActions = () => [
     pinned: true,
     disabled: ({ generating }) => (generating ? "Wait for this reply to finish before editing it." : null),
     run: ({ session, entry }) => {
-      session.openEditor({ _tag: "Edit", versionId: entry.version.id }, entry.version.content, entry.slotId)
+      session.openMessageEdit(entry)
     },
     describe: viewOf((context) => ({
       label: "Edit",

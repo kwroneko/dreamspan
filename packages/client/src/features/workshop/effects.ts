@@ -63,14 +63,15 @@ export const revertable = (effect: RolloutEffect) =>
 
 /** It can still be undone (or reverted) from here: the app kept how, and it isn't taken back yet. */
 export const undoable = (effect: RolloutEffect) =>
-  effect.undo !== null && effect.undoneAt === null && !fullyReverted(effect)
+  effect.undo !== null && effect.undoneAt === null && !effect.swipe?.autoBinned && !fullyReverted(effect)
 
 /** Changes still standing: what a new version of the reply wouldn't undo. */
-export const outstanding = (effects: ReadonlyArray<RolloutEffect>) => effects.filter((e) => e.undoneAt === null)
+export const outstanding = (effects: ReadonlyArray<RolloutEffect>) =>
+  effects.filter((e) => e.undoneAt === null && !e.swipe?.autoBinned)
 
 /** "Undone" or "Reverted", or nothing while it stands. */
 export const effectState = (effect: RolloutEffect) =>
-  effect.undoneAt !== null ? "Undone" : fullyReverted(effect) ? "Reverted" : null
+  effect.undoneAt !== null || effect.swipe?.autoBinned ? "Undone" : fullyReverted(effect) ? "Reverted" : null
 
 /** Undo's hover: what it does to this kind of change. */
 export const undoHint = (effect: RolloutEffect) =>

@@ -29,6 +29,7 @@ describe("Generations and the send queue", () => {
         Layer.succeed(RefusalJudge)({ judge: () => Effect.succeed("unjudged") }),
         Layer.succeed(Writer)({
           InterruptGenerations: () => Effect.succeed({ interrupted: 0, queued: 0 }),
+          SettleWorkshopSwipe: () => Effect.succeed({ restored: 0, files: [] }),
           // The posted reply ends, and the queue behind it is empty now.
           FinishGeneration: () =>
             Effect.succeed({

@@ -204,7 +204,7 @@ const creations: Readonly<Record<string, string>> = {
 
 // A reverse-order undo restores content through new revisions. Only those known restores
 // may advance a previous effect's expected head; a user's intervening edit still refuses.
-const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
+const checkedRef = (ctx: Pick<UndoContext, "sql" | "userId" | "creationEdits">, effect: RolloutEffect) =>
   Effect.gen(function* () {
     const undo = effect.undo!
     const ref = yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(undo.refId))
@@ -247,7 +247,7 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     return ref
   })
 
-const checkedCreation = (ctx: UndoContext, effect: RolloutEffect) =>
+const checkedCreation = (ctx: Pick<UndoContext, "sql" | "userId" | "creationEdits">, effect: RolloutEffect) =>
   Effect.gen(function* () {
     const ref = yield* checkedRef(ctx, effect)
     const undo = effect.undo!
@@ -283,6 +283,100 @@ const libraryUnchanged: NonNullable<Undoer["unchanged"]> = Effect.fnUntraced(fun
     WHERE r.id = ${String(undo.refId)} AND e.id = ${effect.targetId} AND e.owner_user_id = ${userId}
       AND e.deleted_at IS NULL AND r.head_revision_id = ${String(head)} AND r.row_version = ${Number(version)}`
   return !!ref
+})
+
+export const standingForSwipe = (effect: RolloutEffect) =>
+  effect.undo !== null &&
+  effect.undoneAt === null &&
+  !effect.swipe?.autoBinned &&
+  !(effect.reversion && effect.reversion.of.every((field) => effect.reversion!.fields.includes(field)))
+
+/** Read the live heads with the effects, so the warning and Restore use the same provenance. */
+export const withSwipeState = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  effects: ReadonlyArray<RolloutEffect>
+) {
+  const lib = makeLibraryQueries(sql)
+  return yield* Effect.forEach(effects, (effect) =>
+    Effect.gen(function* () {
+      if (!effect.undo) return effect
+      if (effect.kind !== "library.revise" && effect.kind !== "library.create")
+        return { ...effect, swipe: { clean: false, reason: "Its current state needs review." } }
+      const refId = String(effect.undo.refId)
+      const [entry] = yield* sql<{
+        bin: string | null
+        deleted: number | null
+        auto_binned: number
+      }>`SELECT e.deleted_at AS deleted,
+      (SELECT b.id FROM bin_items b WHERE b.id=e.bin_item_id AND b.user_id=${userId}) AS bin,
+      EXISTS(SELECT 1 FROM bin_items b WHERE b.id=e.bin_item_id AND b.user_id=${userId}
+        AND json_extract(b.origin_json,'$.workshopSwipe')=1) AS auto_binned
+      FROM entities e WHERE e.id=${effect.targetId} AND e.owner_user_id=${userId} AND e.purged_at IS NULL`
+      if (!entry || entry.deleted !== null)
+        return {
+          ...effect,
+          swipe: {
+            clean: false,
+            ...(entry?.bin
+              ? { binItemId: entry.bin, autoBinned: !!entry.auto_binned, reason: "Moved to the bin." }
+              : { reason: "The item is no longer available." })
+          }
+        }
+      const ref = yield* lib.ownedRef(userId, refId).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+      if (!ref) return { ...effect, swipe: { clean: false, reason: "The item is no longer available." } }
+      const [provenance] = yield* sql<{ manual: number; chat: string | null; fork: string | null; origin: string }>`
+      SELECT h.origin, r.chat_id AS chat, r.fork_id AS fork,
+        EXISTS(SELECT 1 FROM entity_revisions newer JOIN entity_revisions earlier ON earlier.id=${String(effect.undo.head)}
+          WHERE newer.entity_id=h.entity_id AND newer.seq > earlier.seq AND newer.seq <= h.seq
+            AND newer.origin='user'
+            AND NOT EXISTS(SELECT 1 FROM change_reversals c WHERE c.head_after=newer.id AND c.head_before IS NOT c.head_after)
+            AND NOT EXISTS(SELECT 1 FROM rollout_effects e WHERE json_extract(e.undo_result_json,'$.restoredHead')=newer.id)
+        ) AS manual
+      FROM entity_revisions h LEFT JOIN rollouts r ON r.id=CASE WHEN json_valid(h.origin_ref)
+        THEN json_extract(h.origin_ref,'$.rollout') ELSE substr(h.origin_ref, 1, instr(h.origin_ref || ':', ':') - 1) END
+      WHERE h.id=${ref.head_revision_id}`
+      const [source] = yield* sql<{ chat: string; fork: string | null }>`
+      SELECT chat_id AS chat, fork_id AS fork FROM rollouts WHERE id=${effect.rolloutId}`
+      const remaining = effects.filter(standingForSwipe)
+      const sameHead = yield* libraryUnchanged(sql, userId, effect, remaining)
+      const editedBy = provenance?.manual
+        ? "You edited this item since this reply."
+        : provenance?.chat && provenance.chat !== source?.chat
+          ? "Another chat's assistant edited this item."
+          : provenance?.fork && provenance.fork !== source?.fork
+            ? "An assistant on another branch edited this item."
+            : provenance?.origin === "agent"
+              ? "A later reply edited this item."
+              : "This item changed since this reply."
+      let reason = sameHead ? undefined : editedBy
+      if (sameHead && effect.kind === "library.create") {
+        const chats = yield* lib.usedByChats(userId, ref)
+        if (chats > 0) reason = "A chat now uses this item."
+        else {
+          const checked = yield* checkedCreation(
+            {
+              sql,
+              userId,
+              creationEdits: remaining.filter((e) => e.kind === "library.revise" && e.targetId === effect.targetId)
+            },
+            effect
+          ).pipe(Effect.catchTag(["EffectUndoRefused", "NotFound"], () => Effect.succeed(null)))
+          if (!checked) reason = "The new item's properties or drafts changed since this reply."
+        }
+      }
+      return {
+        ...effect,
+        swipe: {
+          clean: reason === undefined,
+          ...(reason === undefined ? {} : { reason }),
+          head: ref.head_revision_id,
+          rowVersion: ref.row_version,
+          manualSince: !!provenance?.manual
+        }
+      }
+    })
+  )
 })
 
 const createUndoer: Undoer = {
@@ -355,8 +449,7 @@ const createUndoer: Undoer = {
           .pipe(Effect.catchTag("DraftTooLarge", () => Effect.fail(refuse())))
       }
       // Use the bin's ordinary delete, without capacity eviction: undo never purges history.
-      yield* ctx.bin.deleteEntity(ctx.userId, ref.entity_id)
-      return {}
+      return { binItemId: yield* ctx.bin.deleteEntity(ctx.userId, ref.entity_id) }
     })
 }
 // Older assistant revert recipes predate a flag that distinguishes them from other card edits.
@@ -564,7 +657,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         return row
       })
     /** One effect's undo, inside the caller's transaction; one already undone stays as it is. */
-    const undoRow = (userId: UserId, row: EffectRow, binAnyway = false) =>
+    const undoRow = (userId: UserId, row: EffectRow, binAnyway = false, recordUndo = true) =>
       Effect.gen(function* () {
         if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
         // Files are on disk, outside SQLite: the files host puts them back (agent/tools/files.ts).
@@ -592,6 +685,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             toRolloutEffect(row)
           )
           .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
+        if (!recordUndo) return [{ ...toRolloutEffect(row), undoResult }]
         const at = Math.max(Date.now(), row.created_at)
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
         const done = [toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })]
@@ -773,7 +867,17 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           }
         }
       })
-    return {
+    const binForSwipe = Effect.fnUntraced(function* (userId: UserId, effect: RolloutEffect) {
+      const [row] = yield* sql<EffectRow>`SELECT * FROM rollout_effects WHERE rollout_id=${effect.rolloutId}
+        AND tool_call_id=${effect.toolCallId} AND seq=${effect.seq} AND kind='library.create' AND undone_at IS NULL`
+      if (!row) return yield* refuse("The created item is no longer available.")
+      const [done] = yield* undoRow(userId, row, false, false)
+      const id = done?.undoResult?.binItemId
+      if (typeof id !== "string") return yield* refuse("The new item could not be moved to the bin.")
+      yield* sql`UPDATE bin_items SET origin_json=json_set(origin_json,'$.workshopSwipe',1) WHERE id=${id}`
+      return id
+    })
+    const handlers = {
       RunWorkshopOperation: (input) =>
         Effect.gen(function* () {
           const policy = operationPolicies.get(input.operation)
@@ -1623,4 +1727,5 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       | "UndoRolloutEffect"
       | "UndoRolloutEffects"
     >
+    return { handlers, binForSwipe }
   })

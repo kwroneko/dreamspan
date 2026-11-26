@@ -254,6 +254,30 @@ export const SpeakerPick = Schema.Union([
 ])
 export type SpeakerPick = typeof SpeakerPick.Type
 
+export const VersionBlock = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("text"),
+    id: Schema.String,
+    message: Schema.Int,
+    part: Schema.Int,
+    text: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("trace"),
+    id: Schema.String,
+    start: Schema.Int,
+    end: Schema.Int,
+    count: Schema.Int
+  })
+])
+export type VersionBlock = typeof VersionBlock.Type
+export type TextBlock = Extract<VersionBlock, { kind: "text" }>
+
+export const blockField = (block: Pick<TextBlock, "message" | "part">) => `block:${block.message}:${block.part}`
+
+export const visibleBlockText = (blocks: ReadonlyArray<VersionBlock>) =>
+  blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join("\n\n")
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
@@ -263,6 +287,7 @@ export class Version extends Schema.Class<Version>("Version")({
   speakerPick: Schema.optionalKey(SpeakerPick),
   writer: Writer,
   content: Schema.String,
+  blocks: Schema.optionalKey(Schema.Array(VersionBlock)),
   images: Schema.optionalKey(MessageImages),
   /** The cards, lorebooks and presets a workshop message carries (spec/WORKSHOP-CARDS.md §4.2). */
   library: Schema.optionalKey(VersionLibrary),

@@ -45,6 +45,87 @@ const call = (name: string, args: unknown, id: string) => [
 
 const commands = (await linuxBwrap.available()).ok
 
+it.live("restores clean file changes when a retry fails before its first tool", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    let retry = false
+    let beforeRequest: Promise<ReadonlyArray<string>> | undefined
+    let paths: [string, string] = ["", ""]
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const body = request.body as unknown as Body
+          if (!JSON.stringify(body.messages).includes("FILE SWIPE FIXTURE"))
+            return sse(res, completionChunks(["Ready."], {}))
+          if (retry) {
+            beforeRequest ??= Promise.all(paths.map((path) => readFile(path, "utf8").catch(() => "missing")))
+            res.writeHead(500).end("Synthetic retry failure")
+            return
+          }
+          const round = body.messages.filter((message) => message.role === "tool").length
+          if (round === 0) return sse(res, call("read_file", { path: "edited.txt" }, "read"))
+          if (round === 1) return sse(res, call("write_file", { path: "edited.txt", content: "Edited" }, "edit"))
+          if (round === 2) return sse(res, call("write_file", { path: "created.txt", content: "Created" }, "create"))
+          sse(res, completionChunks(["Files changed."], {}))
+        })
+      ),
+      (provider) => Effect.promise(() => provider.close())
+    )
+    const api = yield* client()
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+      model: {}
+    })
+    const user = yield* api.Whoami()
+    const files = yield* WorkshopFiles
+    yield* files.folderAt(user.id, "/files")
+    paths = [
+      join(config.dataDir, "files", user.id, "edited.txt"),
+      join(config.dataDir, "files", user.id, "created.txt")
+    ]
+    yield* Effect.promise(() => writeFile(paths[0], "Before"))
+    const chat = yield* api.CreateWorkshop({})
+    const events: Array<ChatEvent> = []
+    yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+      Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+      Effect.forkScoped
+    )
+    yield* eventually(() => events.length > 0)
+    const sent = yield* posted(
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "FILE SWIPE FIXTURE"
+      })
+    )
+    const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+    yield* eventually(() => finished(events, entry.version.id)?.status === "complete")
+    const effects = yield* api.ListVersionEffects({ versionId: entry.version.id })
+    assert.deepStrictEqual(
+      effects.map((effect) => effect.swipe?.clean),
+      [true, true]
+    )
+    const selected = yield* api.SelectVersion({
+      slotId: entry.slotId,
+      versionId: entry.version.id,
+      expectedVersionId: entry.version.id
+    })
+    retry = true
+    const next = yield* api.Regenerate({
+      slotId: entry.slotId,
+      expectedRowVersion: selected.rowVersion,
+      autoRevert: entry.version.id
+    })
+    yield* eventually(() => finished(events, next.version.id)?.status === "failed")
+    assert.deepStrictEqual(yield* Effect.promise(() => beforeRequest!), ["Before", "missing"])
+    assert.deepStrictEqual(yield* Effect.promise(() => Promise.all(paths.map((path) => readFile(path, "utf8")))), [
+      "Edited",
+      "Created"
+    ])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
 it.live("a file tool can replace a file when its retained version and smaller contents fit", () => {
   const config = testConfig()
   return Effect.gen(function* () {

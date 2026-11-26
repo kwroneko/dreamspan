@@ -1,3 +1,5 @@
+import type { VersionId } from "@dreamspan/shared/chat.ts"
+import type { SwipeFile } from "../../db/ops.ts"
 // The workshop's file tools and commands (spec/FILES-AND-ENVIRONMENT.md §5.1, §5.2): registered
 // by the files host (files/WorkshopFiles.ts), offered in standalone workshops. The file tools run
 // in the app through the no-follow walk (files/safePath.ts) and reach /files only; `bash` runs in
@@ -2168,6 +2170,163 @@ export const makeFileTools = (deps: FileToolDeps) => {
       }
     })
 
+  const swipeFileGroups = (effects: ReadonlyArray<RolloutEffect>) => {
+    const groups = new Map<string, Array<RolloutEffect>>()
+    for (const effect of effects) {
+      if (!effect.kind.startsWith("file.") || !effect.undo || effect.undoneAt !== null) continue
+      if (effect.reversion?.of.every((field) => effect.reversion!.fields.includes(field))) continue
+      const key = JSON.stringify([effect.targetId, effect.undo.host === true])
+      const group = groups.get(key)
+      if (group) group.push(effect)
+      else groups.set(key, [effect])
+    }
+    return [...groups.values()]
+  }
+  const fileChanged = () => new EffectUndoRefused({ message: "The file changed since this reply." })
+  const readSwipeFile = Effect.fnUntraced(function* (place: { top: string; segments: ReadonlyArray<string> }) {
+    const info = yield* attempt(() => statPath(place.top, place.segments))
+    if (!info) return null
+    const read = yield* attempt(() => readRegularFile(place.top, place.segments, VERSION_MAX_BYTES + 1))
+    if (read.truncated) return yield* fileChanged()
+    return { ...read, sha256: sha256(read.bytes), byteSize: read.bytes.byteLength }
+  })
+  const fileStamp = (info: Stats) => JSON.stringify([info.dev, info.ino, info.mtimeMs, info.ctimeMs, info.size])
+  const readFileVersion = (version: { mediaPath: string | null }) =>
+    version.mediaPath && isMediaPath(version.mediaPath)
+      ? attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
+      : Effect.fail(new EffectUndoRefused({ message: "Its earlier content is gone." }))
+
+  const fileBeforeSwipe = Effect.fnUntraced(function* (actor: User, effects: ReadonlyArray<RolloutEffect>) {
+    const first = effects[0]!
+    const { targetId: path } = first
+    const host = first.undo?.host === true
+    const place = yield* recordedFilePlace(actor, path, host)
+    const current = yield* readSwipeFile(place)
+    if (!current) return yield* fileChanged()
+    const remaining = [...effects]
+    let expected: string | null = current.sha256
+    let before: { mediaPath: string | null; sha256: string | null } | null = null
+    // Follow the version chain, including several writes in one tool round.
+    while (remaining.length) {
+      const index = remaining.findIndex((effect) => effect.undo?.after === expected && effect.undo?.path === path)
+      if (index < 0) return yield* fileChanged()
+      const effect = remaining.splice(index, 1)[0]!
+      if (
+        remaining.length === effects.length - 1 &&
+        typeof effect.undo?.inode === "number" &&
+        effect.undo.inode !== current.info.ino
+      )
+        return yield* fileChanged()
+      const previous = effect.undo?.before
+      before = typeof previous === "string" ? yield* deps.reader.FileVersion({ userId: actor.id, id: previous }) : null
+      if (before && (!before.mediaPath || !isMediaPath(before.mediaPath))) return yield* fileChanged()
+      if (before && "path" in before && before.path !== path) return yield* fileChanged()
+      expected = before?.sha256 ?? null
+    }
+    return { path, host, place, current, before }
+  })
+
+  const inspectSwipeFiles = Effect.fnUntraced(function* (actor: User, effects: ReadonlyArray<RolloutEffect>) {
+    const clean = new Map<RolloutEffect, boolean>()
+    for (const group of swipeFileGroups(effects)) {
+      const safe = yield* withFileTree(actor.id, fileBeforeSwipe(actor, group)).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false)
+      )
+      for (const effect of group) clean.set(effect, safe)
+    }
+    return effects.map((effect) =>
+      clean.has(effect)
+        ? {
+            ...effect,
+            swipe: clean.get(effect)
+              ? { clean: true }
+              : {
+                  clean: false,
+                  reason: "The file changed since this reply or an earlier version is unavailable."
+                }
+          }
+        : effect
+    )
+  })
+
+  const revertSwipeFiles = (actor: User, versionId: VersionId, effects: ReadonlyArray<RolloutEffect>) =>
+    withFileTree(
+      actor.id,
+      Effect.gen(function* () {
+        // Check all paths before putting any back. Keep the original bytes before each change.
+        const changes = yield* Effect.forEach(swipeFileGroups(effects), (group) => fileBeforeSwipe(actor, group))
+        for (const { path, host, place, current, before } of changes) {
+          const original = before ? yield* readFileVersion(before) : null
+          const actual = yield* readSwipeFile(place)
+          if (!actual || fileStamp(actual.info) !== fileStamp(current.info)) return yield* fileChanged()
+          const saved = yield* keepVersion(
+            null,
+            actor.id,
+            path,
+            { bytes: current.bytes, inode: current.info.ino },
+            "restore"
+          )
+          if (!saved) return yield* fileChanged()
+          const quota = host ? undefined : deps.quota
+          quota?.wrote(actor.id, current.byteSize)
+          const file: SwipeFile = { path, host, saved, expected: original ? sha256(original) : null }
+          yield* deps.writer.RecordWorkshopSwipeFile({ userId: actor.id, versionId, file })
+          if (original) {
+            const { written } = yield* writeWithVersion(
+              actor.id,
+              path,
+              place.top,
+              place.segments,
+              host,
+              current,
+              original,
+              "restore",
+              null
+            )
+            yield* deps.writer.RecordWorkshopSwipeFile({
+              userId: actor.id,
+              versionId,
+              file: { ...file, stamp: fileStamp(written) }
+            })
+          } else {
+            yield* attempt(() => removeFile(place.top, place.segments))
+            if (current.info.nlink === 1) quota?.freed(actor.id, current.byteSize)
+            deps.onChanged?.(actor.id, [path])
+          }
+        }
+      })
+    ).pipe(Effect.uninterruptible)
+
+  const restoreSwipeFile = (actor: User, file: SwipeFile) =>
+    withFileTree(
+      actor.id,
+      Effect.gen(function* () {
+        const place = yield* recordedFilePlace(actor, file.path, file.host)
+        const current = yield* readSwipeFile(place)
+        if (
+          (current?.sha256 ?? null) !== file.expected ||
+          (current && file.stamp !== undefined && fileStamp(current.info) !== file.stamp)
+        )
+          return false
+        const saved = yield* deps.reader.FileVersion({ userId: actor.id, id: file.saved })
+        if (!saved.mediaPath || !isMediaPath(saved.mediaPath) || saved.path !== file.path) return false
+        const original = yield* readFileVersion(saved)
+        yield* writeWithVersion(
+          actor.id,
+          file.path,
+          place.top,
+          place.segments,
+          file.host,
+          current,
+          original,
+          "restore",
+          null
+        )
+        return true
+      })
+    ).pipe(Effect.uninterruptible)
+
   /** Puts a file back as it was before the agent's write or edit (§7.1), if it's still as the agent left it. */
   const undoEffect = (actor: User, effect: RolloutEffect) =>
     Effect.gen(function* () {
@@ -2205,9 +2364,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
                   Effect.fail(new EffectUndoRefused({ message: "Its earlier content is gone." }))
                 )
               )
-            if (!version.mediaPath || !isMediaPath(version.mediaPath))
-              return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
-            restored = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
+            restored = yield* readFileVersion(version)
           }
           // The live bytes go away only when this path held the inode's last link.
           yield* attempt(async () => {
@@ -2779,6 +2936,9 @@ export const makeFileTools = (deps: FileToolDeps) => {
     ] as unknown as ReadonlyArray<RolloutTool<never>>,
     portraits,
     undoEffect,
+    inspectSwipeFiles,
+    revertSwipeFiles,
+    restoreSwipeFile,
     reverseCardFile,
     commandsUnavailable,
     commandsNote

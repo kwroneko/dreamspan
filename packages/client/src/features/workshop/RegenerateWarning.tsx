@@ -11,7 +11,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { useCaller } from "../editor/caller.ts"
-import { EFFECTS_KEY, effectId, effectKey, outstanding, type RolloutEffect } from "./effects.ts"
+import { EFFECTS_KEY, effectId, effectKey, outstanding, undoable, revertable, type RolloutEffect } from "./effects.ts"
 import {
   subagentLine,
   warningEffects,
@@ -23,6 +23,7 @@ import {
 
 function Warning({ asked }: { asked: WarningRequest }) {
   const call = useCaller()
+  const swipe = asked.request.action === "regenerate"
   const [standing, setStanding] = useState<ReadonlyArray<RolloutEffect> | null>(null)
   const [pending, setPending] = useState<"undo" | "keep" | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -40,12 +41,20 @@ function Warning({ asked }: { asked: WarningRequest }) {
           : { ok: true as const, value: [] }
       const selected = warningEffects(asked.request, read, steps)
       if (!selected.ok) {
+        if (swipe) {
+          asked.request.report?.("The reply’s changes couldn’t be checked. Try the swipe again.")
+          return asked.settle(false)
+        }
         setReadFailed(true)
         setError(selected.error)
         setStanding([])
         return
       }
-      const left = selected.value
+      const left = swipe ? selected.value.filter(undoable) : selected.value
+      if (swipe && left.length > 0 && asked.request.tip && left.every((effect) => effect.swipe?.clean)) {
+        asked.request.autoRevert?.()
+        return asked.settle(true)
+      }
       if (left.length === 0) return asked.settle(true)
       setStanding(left)
     })()
@@ -55,7 +64,35 @@ function Warning({ asked }: { asked: WarningRequest }) {
   const undoAll = async () => {
     setPending("undo")
     setError(null)
+    const handled = new Set<string>()
     for (const effect of standing) {
+      if (swipe && handled.has(effect.targetId)) continue
+      if (swipe && revertable(effect)) {
+        const group = standing.filter((other) => other.targetId === effect.targetId && revertable(other))
+        // A newly created item and its edits are binned together when it is safe.
+        if (standing.some((other) => other.targetId === effect.targetId && other.kind === "library.create")) continue
+        handled.add(effect.targetId)
+        const result = await call(
+          (client) => client("RevertChange", { effects: group.map(effectKey) }),
+          [EFFECTS_KEY, "library", "chats", "chat-lists", "bin"]
+        )
+        if (!result.ok || result.value.conflicts.length > 0) {
+          setPending(null)
+          setError(
+            result.ok
+              ? {
+                  tag: "EffectUndoRefused",
+                  message: `“${effect.title}” has conflicting edits. Open its change view to resolve them.`,
+                  reason: null,
+                  problems: []
+                }
+              : result.error
+          )
+          return
+        }
+        continue
+      }
+      if (swipe && effect.kind === "library.create" && effect.swipe?.clean === false) continue
       if (effect.undo === null) continue
       const undone = await call(
         (client) => client("UndoRolloutEffect", effectKey(effect)),
@@ -76,7 +113,13 @@ function Warning({ asked }: { asked: WarningRequest }) {
       open
       onOpenChange={(open) => !open && pending === null && asked.settle(false)}
       title="This reply changed things outside the chat"
-      description={warningText(asked.request.action)}
+      description={
+        swipe
+          ? asked.request.tip
+            ? "Some changes need review before this reply runs again."
+            : "This reply is earlier in the chat. Choose whether to keep its changes before asking for another swipe."
+          : warningText(asked.request.action)
+      }
     >
       <div className="flex max-h-60 flex-col gap-2 overflow-y-auto text-sm">
         {warningGroups(standing).map((group) => (
@@ -93,6 +136,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
               {group.effects.map((effect) => (
                 <li key={effectId(effect)} className="[overflow-wrap:anywhere]" data-warning-effect={effect.kind}>
                   {effect.title}
+                  {swipe && effect.swipe?.reason && <span className="text-muted"> {effect.swipe.reason}</span>}
                   {effect.undo === null && <span className="text-muted"> (can’t be undone here)</span>}
                 </li>
               ))}
@@ -116,6 +160,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
           Cancel
         </Button>
         <Button
+          variant={swipe ? "primary" : "secondary"}
           disabled={readFailed || pending === "undo"}
           pending={pending === "keep"}
           hint="Leaves these changes as they are and asks for a new swipe."
@@ -124,11 +169,16 @@ function Warning({ asked }: { asked: WarningRequest }) {
             asked.settle(true)
           }}
         >
-          Keep them and make a new swipe
+          {swipe ? "Keep & swipe" : "Keep them and make a new swipe"}
         </Button>
         <Button
-          variant="primary"
-          disabled={readFailed || pending === "keep" || fixed === standing.length}
+          variant={swipe ? "secondary" : "primary"}
+          disabled={
+            readFailed ||
+            pending === "keep" ||
+            fixed === standing.length ||
+            (swipe && standing.every((effect) => effect.kind === "library.create" && effect.swipe?.clean === false))
+          }
           pending={pending === "undo"}
           hint={
             fixed > 0
@@ -137,7 +187,11 @@ function Warning({ asked }: { asked: WarningRequest }) {
           }
           onClick={() => void undoAll()}
         >
-          Undo them, then make a new swipe
+          {swipe
+            ? asked.request.tip
+              ? "Revert only this reply’s changes & swipe"
+              : "Revert & swipe"
+            : "Undo them, then make a new swipe"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,3 +1,4 @@
+import { withSwipeState } from "./workshopEffects.ts"
 // What the assistant may do in a workshop, and the calls that asked first (spec/WORKSHOP.md §3.4).
 // Grants are the owner's rows, one a workshop, capability and target; approvals bind an answer to
 // one call (its rollout, id and arguments' digest). Only the owner's own RPCs write either: the
@@ -355,7 +356,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
         // same id has a result of its own, so an earlier run's change isn't listed for it.
         const transcript = JSON.parse(version.transcript ?? "[]") as ReadonlyArray<AgentMessage>
         const effects = yield* attributedEffects(sql, version.rollout_id, transcript, callsFrom(transcript, versionId))
-        return yield* withReversions(sql, effects)
+        return yield* withSwipeState(sql, userId, yield* withReversions(sql, effects))
       }).pipe(query("VersionEffects"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

@@ -38,6 +38,9 @@ export class WorkshopFiles extends Context.Service<
   {
     readonly undoEffect: (actor: User, effect: RolloutEffect) => Effect.Effect<RolloutEffect, unknown>
     /** Takes a change back in a card file in Files (agent/tools/files.ts `reverseCardFile`). */
+    readonly inspectSwipeFiles: ReturnType<typeof makeFileTools>["inspectSwipeFiles"]
+    readonly revertSwipeFiles: ReturnType<typeof makeFileTools>["revertSwipeFiles"]
+    readonly restoreSwipeFile: ReturnType<typeof makeFileTools>["restoreSwipeFile"]
     readonly reverseCardFile: ReturnType<typeof makeFileTools>["reverseCardFile"]
     /** Why commands can't run on this server, for the capability row; null: they can. */
     readonly commandsUnavailable: () => Effect.Effect<string | null>
@@ -313,6 +316,9 @@ export class WorkshopFiles extends Context.Service<
       )
       return {
         undoEffect: files.undoEffect,
+        inspectSwipeFiles: files.inspectSwipeFiles,
+        revertSwipeFiles: files.revertSwipeFiles,
+        restoreSwipeFile: files.restoreSwipeFile,
         reverseCardFile: files.reverseCardFile,
         commandsUnavailable: files.commandsUnavailable,
         commandsNote: files.commandsNote,

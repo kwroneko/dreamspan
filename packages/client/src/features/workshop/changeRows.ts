@@ -161,7 +161,7 @@ export const cardFileChangeTarget = (url: URL) => {
 }
 
 /** Every change of the item is undone: the row says so, muted. */
-export const itemUndone = (item: ItemChange) => item.effects.every((e) => e.undoneAt !== null)
+export const itemUndone = (item: ItemChange) => item.effects.every((e) => e.undoneAt !== null || e.swipe?.autoBinned)
 
 /**
  * The item's fields that stand reverted: those reverted in every change of the item that changed

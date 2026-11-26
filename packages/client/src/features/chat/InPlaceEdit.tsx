@@ -68,7 +68,7 @@ export function useEditSource(
   if (draft === undefined) return { source: undefined, base: undefined }
   if (id === null) return { source: undefined, base: "" }
   const source = shown ?? (read?.id === id ? read : undefined)
-  return { source, base: source?.content }
+  return { source, base: source?.blocks?.findLast((block) => block.kind === "text")?.text ?? source?.content }
 }
 
 /** Whether the edit's saved text is read, so its box can take the text's place. */
@@ -157,6 +157,9 @@ export function InPlaceText({
   draft,
   base,
   height,
+  focus = true,
+  lockHeight = false,
+  preserveReading = false,
   caret,
   onCaretTaken,
   onCaretPlaced,
@@ -168,6 +171,9 @@ export function InPlaceText({
   draft: MessageDraft
   base: string
   height: number | null
+  focus?: boolean
+  lockHeight?: boolean
+  preserveReading?: boolean
   /** Where the caret opens (a double-click's place in the text, and its line's place on screen), else at the end. */
   caret: EditCaret | undefined
   onCaretTaken: () => void
@@ -189,10 +195,11 @@ export function InPlaceText({
   const [changed, setChanged] = useState(false)
   if (!changed && text !== opened) setChanged(true)
   const [focused, setFocused] = useState(initialCaret !== undefined)
-  const held = height !== null && !changed
+  const held = height !== null && (lockHeight || !changed)
   return (
     <div
       data-message-edit-text
+      data-preserve-reading={preserveReading || undefined}
       // Holding the caret's line where it was clicked scrolls this box at most, never the chat (holdCaret.ts).
       data-hold-caret-within
       className="message-edit-text rounded-sm outline-1 outline-offset-2 outline-border focus-within:outline-2 focus-within:outline-focus"
@@ -216,7 +223,7 @@ export function InPlaceText({
             base,
             bare: true,
             // Opened from the chat's other view, it leaves focus there (Composition.tsx).
-            autoFocus: !draft.mirror,
+            autoFocus: focus && !draft.mirror,
             caret: initialCaret?.offset,
             caretTop: initialCaret?.top,
             onCaretPlaced,

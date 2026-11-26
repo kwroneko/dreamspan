@@ -26,6 +26,7 @@ interface Body {
 
 interface Script {
   readonly name: string
+  readonly prose?: string
   readonly arguments: object | ((body: Body) => object)
 }
 
@@ -38,10 +39,11 @@ export const startWorkshopProvider = async (
   options: {
     readonly calls?: ReadonlyArray<Script>
     readonly perTask?: boolean
+    readonly fail?: (body: Body, round: number) => boolean
     readonly answer?: string | ((body: Body) => string)
   } = {}
 ) => {
-  const calls = options.calls ?? CALLS
+  const calls: ReadonlyArray<Script> = options.calls ?? CALLS
   const final = options.answer ?? WORKSHOP_ANSWER
   const bodies: Array<Body> = []
   let holding: number | null = null
@@ -85,10 +87,12 @@ export const startWorkshopProvider = async (
       if (!library) return stream(res, [...words(STORY_REPLY), chunk({}, "stop"), chunk({}, null, usage)])
       const from = options.perTask ? body.messages.findLastIndex((m) => m.role === "user") : 0
       const done = body.messages.slice(Math.max(0, from)).filter((m) => m.role === "tool").length
+      if (options.fail?.(body, done)) return res.writeHead(500).end("Synthetic provider failure")
       const call = calls[done]
       const answer = () =>
         call
           ? stream(res, [
+              ...(call.prose ? words(call.prose) : []),
               chunk({
                 role: "assistant",
                 tool_calls: [

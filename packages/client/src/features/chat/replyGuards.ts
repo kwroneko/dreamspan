@@ -17,6 +17,9 @@ export interface ReplyGuardRequest {
   readonly hasSteps: boolean
   /** Regenerate or a swipe to a new version, or carrying on from one of its steps. */
   readonly action: "regenerate" | "resume-step"
+  readonly tip?: boolean
+  readonly autoRevert?: () => void
+  readonly report?: (message: string) => void
   /**
    * Carrying on from one of its steps: the step's index in the version's steps, and whether that
    * step's call is kept (a result edited in place) rather than made again.

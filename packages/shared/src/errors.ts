@@ -104,3 +104,9 @@ export class ProviderError extends Schema.TaggedError<ProviderError>()("Provider
   /** For a context-length error, the limit the provider stated in it, when it states one. */
   contextLimit: Schema.optionalKey(Schema.Int)
 }) {}
+
+export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {
+  message: Schema.String,
+  /** The unconfirmed creation Undo can be retried with binAnyway. */
+  binConfirmation: Schema.optionalKey(Schema.Struct({ changed: Schema.Boolean, chats: Schema.Int }))
+}) {}

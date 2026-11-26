@@ -63,7 +63,10 @@ test.describe("workshop change rows", () => {
       Effect.gen(function* () {
         const connection = yield* api.CreateConnection({
           kind: "openai-chat",
+
           settings: {
+            providerSettings: { toolLoading: "every" },
+
             name: "Synthetic workshop",
             baseUrl: provider.baseUrl,
             compat: {},
@@ -293,25 +296,28 @@ test.describe("workshop change rows", () => {
       })
 })
 
-test.describe("creation Undo across messages", () => {
+test.describe("creation Undo across tool rounds", () => {
   const server = serverPerFile(withAdmin)
   const name = "Synthetic keeper"
   const answer = "The keeper is ready."
-  const provider = useSideChatProvider(server, {
-    answer,
-    calls: [
-      { name: "create_card", arguments: { name } },
-      { name: "send_message", arguments: { message: "I made the keeper." } },
-      { name: "edit_card", arguments: { card: name, changes: [{ field: "description", text: "Keeps watch." }] } }
-    ]
-  })
+  const provider = useSideChatProvider(
+    server,
+    {
+      answer,
+      calls: [
+        { name: "create_card", arguments: { name } },
+        { name: "edit_card", arguments: { card: name, changes: [{ field: "description", text: "Keeps watch." }] } }
+      ]
+    },
+    "every"
+  )
   const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
     asUser(server(), ADMIN.handle, ADMIN.password, use)
 
-  test("offers bin confirmation for a human save between assistant messages", async ({ page }) => {
+  test("offers bin confirmation for a human save between tool calls", async ({ page }) => {
     const workshop = await admin((api) => api.CreateWorkshop({}))
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    provider().hold(2)
+    provider().hold(1)
     await page.goto(`${server().url}/chats/${workshop.id}`)
     await page.getByLabel("Message", { exact: true }).fill("Make and edit a keeper.")
     await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()

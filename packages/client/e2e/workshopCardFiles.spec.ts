@@ -81,7 +81,10 @@ test.describe("workshop card files", () => {
       Effect.gen(function* () {
         const connection = yield* api.CreateConnection({
           kind: "openai-chat",
+
           settings: {
+            providerSettings: { toolLoading: "every" },
+
             name: "Synthetic workshop",
             baseUrl: provider.baseUrl,
             compat: {},
@@ -190,10 +193,14 @@ test.describe("workshop card files", () => {
       await expect(rows.locator(`[data-change-row="${GULL}"] [data-change-count]`)).toHaveText(
         "Card file edited · 1 field"
       )
-      await wrenRow.locator("[data-change-count]").hover()
-      await expect(tip).toHaveText("Shows what the assistant changed: Description.")
-      await wrenRow.locator("[data-change-name]").hover()
-      await expect(tip).toHaveText("Opens the card file wren.png in Files, as it is now.")
+      const checkHint = async (target: string, text: string) =>
+        expect(async () => {
+          await page.mouse.move(0, 0)
+          await wrenRow.locator(target).hover()
+          await expect(tip).toHaveText(text, { timeout: 1200 })
+        }).toPass({ timeout: 10_000 })
+      await checkHint("[data-change-count]", "Shows what the assistant changed: Description.")
+      await checkHint("[data-change-name]", "Opens the card file wren.png in Files, as it is now.")
       await page.mouse.move(0, 0)
       await shot("rows")
       await expectLayout(page, info, `card-files-rows-${width}-${theme}`, { scope: "[data-change-rows]" })

@@ -1,3 +1,5 @@
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import type { VersionBlock } from "@dreamspan/shared/chat.ts"
 import { RefusalJudge, UNSENT_TASK } from "../decision/RefusalJudge.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // Running generations (DESIGN §3.1): one fiber each, any number at once, several under one
@@ -58,6 +60,8 @@ interface Running {
   sections: ReplySections | null
   sectionsText: string
   /** An agent reply's steps as last sent, for a subscriber that joins while it runs (spec/AGENTIC.md §5.1). */
+  blocks?: ReadonlyArray<VersionBlock> | undefined
+  waitingFor?: number | undefined
   steps: ReadonlyArray<RolloutStep> | null
   /** What a reply parser holds back for now, kept if the reply ends here. */
   held: { readonly held: string; readonly into: "body" | "section" } | null
@@ -104,6 +108,8 @@ export class Generations extends Context.Service<
       readonly waitingCache?: boolean
       readonly reasoning?: string
       readonly sections?: string
+      readonly blocks?: ReadonlyArray<VersionBlock>
+      readonly waitingFor?: number
       readonly steps?: ReadonlyArray<RolloutStep>
     }>
     /** The versions generating in a chat. */
@@ -119,6 +125,7 @@ export class Generations extends Context.Service<
       const judge = yield* RefusalJudge
       const writer = yield* Writer
       const reader = yield* Reader
+      const files = yield* Effect.serviceOption(WorkshopFiles)
       const hub = yield* ChatHub
       const notices = yield* Notices
       const generator = yield* Generator
@@ -132,6 +139,26 @@ export class Generations extends Context.Service<
       // Versions a previous process left generating can't continue: they keep their text.
       // What was queued behind them posts without replies (chatSetupWrites.ts).
       const { interrupted, queued } = yield* writer.InterruptGenerations()
+      const settleSwipe = Effect.fnUntraced(function* (versionId?: VersionId) {
+        const pending = yield* writer.SettleWorkshopSwipe(versionId ? { versionId } : {})
+        let restored = pending.restored
+        if (Option.isNone(files)) return restored
+        for (const job of pending.files) {
+          for (const file of job.files) {
+            const didRestore = yield* files.value
+              .restoreSwipeFile(job.actor, file)
+              .pipe(
+                Effect.catch(() =>
+                  Effect.logWarning("A workshop file could not be restored from its version.").pipe(Effect.as(false))
+                )
+              )
+            if (didRestore) restored++
+          }
+          yield* writer.ForgetWorkshopSwipeFiles({ userId: job.actor.id, versionId: job.versionId })
+        }
+        return restored
+      })
+      yield* settleSwipe()
       if (interrupted > 0) yield* Effect.logWarning(`${interrupted} generations were interrupted by the last shutdown`)
       if (queued > 0)
         yield* Effect.logWarning(`${queued} queued messages were posted or dropped after the last shutdown`)
@@ -262,6 +289,17 @@ export class Generations extends Context.Service<
           running.delete(request.versionId)
           if (Exit.isFailure(saved))
             return yield* Effect.logError(`saving generation ${request.versionId} failed`, saved.cause)
+          const restored = !request.workshopSwipe
+            ? 0
+            : yield* settleSwipe(request.versionId).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Restoring the previous swipe’s changes failed", error).pipe(Effect.as(0))
+                )
+              )
+          if (restored) {
+            hub.publish(request.chatId, { _tag: "WorkshopSwipe", message: "Restored the previous swipe’s changes." })
+            if (Option.isSome(warmth)) yield* warmth.value.refreshUser(request.userId, true)
+          }
           const finished = saved.value
           entry.final = finished.version
           if (finished.removedSlotId)
@@ -588,11 +626,17 @@ export class Generations extends Context.Service<
                   // Steps go to subscribers as they stand; the transcript is what keeps them.
                   const { chatId } = entry.request
                   const versionId = chunk.versionId ?? entry.request.versionId
-                  if (versionId === entry.request.versionId) entry.steps = chunk.steps
+                  if (versionId === entry.request.versionId) {
+                    entry.steps = chunk.steps
+                    entry.blocks = chunk.blocks
+                    entry.waitingFor = chunk.waitingFor
+                  }
                   hub.publish(chatId, {
                     _tag: "Steps",
                     versionId,
                     steps: chunk.steps,
+                    ...(chunk.blocks === undefined ? {} : { blocks: chunk.blocks }),
+                    ...(chunk.blockBoundary ? { blockBoundary: true } : {}),
                     ...(chunk.waitingFor ? { waitingFor: chunk.waitingFor } : {})
                   })
                   if (versionId !== entry.request.versionId)
@@ -625,6 +669,8 @@ export class Generations extends Context.Service<
                 )
               })
             ),
+            (generation) =>
+              entry.request.workshopSwipe ? Effect.andThen(entry.request.workshopSwipe, generation) : generation,
             Effect.onExit((exit) => finish(entry, exit)),
             Effect.provideService(AutoRequestGuard, entry.request.autoGuard ?? null)
           )
@@ -726,7 +772,9 @@ export class Generations extends Context.Service<
               waitingCache: entry.waitingCache,
               ...(entry.shown.reasoning ? { reasoning: entry.shown.reasoning } : {}),
               ...(entry.shown.sections ? { sections: entry.shown.sections } : {}),
-              ...(entry.steps ? { steps: entry.steps } : {})
+              ...(entry.steps ? { steps: entry.steps } : {}),
+              ...(entry.blocks ? { blocks: entry.blocks } : {}),
+              ...(entry.waitingFor ? { waitingFor: entry.waitingFor } : {})
             })),
         runningIn: (chatId, forkIds) =>
           [...running.values()]

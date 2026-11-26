@@ -149,6 +149,7 @@ import {
 } from "@dreamspan/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@dreamspan/shared/cardSources.ts"
 import {
+  BlockEdits,
   ForkPreview,
   ForkNoteSelection,
   ForkNotesChanged,
@@ -375,6 +376,14 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
  * was typed in, with exactly that text (drafts.ts `commit`). If it holds anything else now
  * (another tab typed on), it stays active, and nothing else is touched.
  */
+export const SwipeFile = Schema.Struct({
+  path: Schema.String,
+  host: Schema.Boolean,
+  saved: Schema.String,
+  expected: Schema.NullOr(Schema.String),
+  stamp: Schema.optionalKey(Schema.String)
+})
+export type SwipeFile = typeof SwipeFile.Type
 const CommitDraft = Schema.NullOr(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
 
 const LibrarySightPosition = Schema.Struct({
@@ -2739,6 +2748,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       version: NewVersion,
       expectedRowVersion: Schema.Int,
+      cloneWorkshop: Schema.optionalKey(Schema.Boolean),
+      blockEdits: Schema.optionalKey(BlockEdits),
       /** For a swipe with a model chosen ("Regenerate with…"): that model, recorded on it at once. */
       model: Schema.optionalKey(ModelChoice),
       /**
@@ -2752,6 +2763,44 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     },
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("RegenerateWorkshop", {
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      forkId: Schema.NullOr(ForkId),
+      sourceVersionId: VersionId,
+      version: NewVersion,
+      expectedRowVersion: Schema.Int,
+      model: Schema.optionalKey(ModelChoice),
+      fileKeys: Schema.optionalKey(Schema.Array(Schema.Struct(EffectKey)))
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version, reverted: Schema.Int }),
+    error: Schema.Union([NotFound, StaleWrite, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("SettleWorkshopSwipe", {
+    payload: { versionId: Schema.optionalKey(VersionId) },
+    success: Schema.Struct({
+      restored: Schema.Int,
+      files: Schema.Array(
+        Schema.Struct({
+          versionId: VersionId,
+          actor: User,
+          files: Schema.Array(SwipeFile)
+        })
+      )
+    }),
+    error: StorageError
+  }),
+  Rpc.make("RecordWorkshopSwipeFile", {
+    payload: { userId: UserId, versionId: VersionId, file: SwipeFile },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ForgetWorkshopSwipeFiles", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Void,
+    error: StorageError
   }),
   /**
    * Changes a finished user-written version, as fork `forkId` shows it (absent or null: the
@@ -2774,6 +2823,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       /** Its reply sections from now on (null: none; absent: kept), kept in its history the same way. */
       replySections: Schema.optionalKey(Schema.NullOr(ReplySections)),
       expectedRowVersion: Schema.Int,
+      blockEdits: Schema.optionalKey(BlockEdits),
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft),
       /** The edit's thinking draft (field `reasoning`), committed with it if it holds the thinking typed. */

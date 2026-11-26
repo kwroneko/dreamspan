@@ -1,3 +1,5 @@
+import { writeWorkshopEdit } from "./workshopEdits.ts"
+import { visibleBlockText } from "@dreamspan/shared/chat.ts"
 import { refusePending, refusePendingOf } from "./chatKindPolicy.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
 import { displayEndOf, pathPieces, positionOf } from "./displayPath.ts"
@@ -622,7 +624,9 @@ export const makeWriteHandlers = (bin: Bin) =>
         expectedRowVersion,
         model,
         commitDraft,
-        commitReasoningDraft
+        commitReasoningDraft,
+        blockEdits,
+        cloneWorkshop
       }) =>
         Effect.gen(function* () {
           // The row version the user saw is the slot's as their fork shows it (slotInFork).
@@ -649,7 +653,29 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (model)
             yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
               WHERE id = ${inserted.id}`
-          const row = model ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
+          const source =
+            version.sourceVersionId && (cloneWorkshop || blockEdits !== undefined)
+              ? yield* ownedVersion(userId, version.sourceVersionId, true)
+              : null
+          if (source && source.slot_id !== slotId)
+            return yield* new NotFound({ entity: "source version", id: source.id })
+          const workshop =
+            source && (blockEdits !== undefined || toVersion(source).blocks !== undefined)
+              ? yield* writeWorkshopEdit(sql, source, inserted.id, fork.id, blockEdits ?? [])
+              : null
+          if (workshop && workshop.content !== inserted.content)
+            yield* sql`UPDATE version_records SET content = ${workshop.content} WHERE id = ${inserted.id}`
+          const row = model || workshop ? yield* ownedVersion(userId, inserted.id as VersionId, true) : inserted
+          if (source && workshop)
+            for (const field of workshop.fields)
+              yield* drafts.commit(userId, field.draft ?? null, {
+                targetKind: "version_edit",
+                targetId: source.id,
+                matchesField: (_kind, key) => key === field.field,
+                content: field.text,
+                images: field.field === "" ? (toVersion(row).images ?? []) : [],
+                moveTo: row.id
+              })
           yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
           yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
           // A swipe, a continue or an edit is chatting in the fork (UX-REWORK §3, owner 2026-10-27).
@@ -691,7 +717,8 @@ export const makeWriteHandlers = (bin: Bin) =>
         userId,
         versionId,
         forkId,
-        content,
+        content: plainContent,
+        blockEdits,
         keepContent,
         images,
         reasoning,
@@ -718,6 +745,25 @@ export const makeWriteHandlers = (bin: Bin) =>
               actual: rowVersion
             })
           }
+          const blocks = toVersion(shown).blocks
+          const edited = blocks?.map((block) => {
+            if (block.kind !== "text") return block
+            const edit = blockEdits?.find((edit) => edit.message === block.message && edit.part === block.part)
+            return edit ? { ...block, text: edit.text } : block
+          })
+          const content = blockEdits !== undefined && edited ? visibleBlockText(edited) : plainContent
+          const saveBlocks = Effect.fnUntraced(function* (target: string) {
+            const workshop = yield* writeWorkshopEdit(sql, shown, target, fork.id, blockEdits ?? [])
+            for (const field of workshop.fields)
+              yield* drafts.commit(userId, field.draft ?? null, {
+                targetKind: "version_edit",
+                targetId: versionId,
+                matchesField: (_kind, key) => key === field.field,
+                content: field.text,
+                images: field.field === "" ? (toVersion(row).images ?? []) : [],
+                ...(target === versionId ? {} : { moveTo: target })
+              })
+          })
           yield* drafts.commit(userId, commitDraft ?? null, {
             targetKind: "version_edit",
             targetId: versionId,
@@ -764,7 +810,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           // Scripts' record of the thinking only changes with the thinking.
           const rawReasoning = reasoningChanged ? rewritten.raw_reasoning : (row.raw_reasoning ?? null)
           const rawSections = sectionsChanged ? rewritten.raw_sections : (row.raw_sections ?? null)
-          if (content === row.content && before === null && !thinkingChanged) return toVersion(shown)
+          if (content === row.content && before === null && !thinkingChanged && blockEdits === undefined)
+            return toVersion(shown)
           if (before !== null) yield* checkImages(userId, images!, slot.chat_id)
           const attach = (target: string) =>
             Effect.forEach(
@@ -813,6 +860,7 @@ export const makeWriteHandlers = (bin: Bin) =>
               yield* sql`DELETE FROM version_attachments WHERE version_id = ${versionId}`
               yield* attach(versionId)
             }
+            if (blockEdits !== undefined) yield* saveBlocks(versionId)
             return toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
           }
           // Another fork shows it, so this fork gets a copy with the new text, standing in for
@@ -842,6 +890,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           else
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text, name, path)
               SELECT ${copy}, ordinal, media_id, kind, alt_text, name, path FROM version_attachments WHERE version_id = ${versionId}`
+          if (blockEdits !== undefined || blocks) yield* saveBlocks(copy)
           yield* copyLibrary(sql, versionId, copy)
           // Shorter than what the fork showed, before the fork shows the copy.
           yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)

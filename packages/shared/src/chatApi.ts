@@ -18,9 +18,10 @@ import {
   QueuedMessage,
   SlotId,
   Version,
+  VersionBlock,
   VersionId
 } from "./chat.ts"
-import { AutoRefused, LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { AutoRefused, EffectUndoRefused, LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { EditRefused } from "./editorApi.ts"
 import {
@@ -318,7 +319,9 @@ export const ChatEvent = Schema.Union([
         /** The reply sections' panel text streamed so far, when there is any (spec/REPLY-SECTIONS.md). */
         sections: Schema.optionalKey(Schema.String),
         /** An agent reply's steps so far, when it has any (spec/AGENTIC.md §5.1). */
-        steps: Schema.optionalKey(Schema.Array(RolloutStep))
+        steps: Schema.optionalKey(Schema.Array(RolloutStep)),
+        blocks: Schema.optionalKey(Schema.Array(VersionBlock)),
+        waitingFor: Schema.optionalKey(Schema.Int)
       })
     )
   }),
@@ -335,9 +338,12 @@ export const ChatEvent = Schema.Union([
     sequence: LiveSequence
   }),
   /** A generating agent reply's steps, all of them as they stand (spec/AGENTIC.md §5.1). */
+  Schema.TaggedStruct("WorkshopSwipe", { message: Schema.String }),
   Schema.TaggedStruct("Steps", {
     versionId: VersionId,
     steps: Schema.Array(RolloutStep),
+    blocks: Schema.optionalKey(Schema.Array(VersionBlock)),
+    blockBoundary: Schema.optionalKey(Schema.Boolean),
     /** Background subagents the run waits for (spec/SUBAGENTS.md §3.2): "Waiting for 2 subagents". */
     waitingFor: Schema.optionalKey(Schema.Int)
   }),
@@ -455,7 +461,7 @@ const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String
  * and session) to commit it with exactly the text saved.
  */
 export const MessageDraftTarget = Schema.Union([
-  Schema.TaggedStruct("Edit", { versionId: VersionId }),
+  Schema.TaggedStruct("Edit", { versionId: VersionId, field: Schema.optionalKey(Schema.String) }),
   /** The thinking of that edit: a second field of the same edit, typed into a draft of its own. */
   Schema.TaggedStruct("EditThinking", { versionId: VersionId }),
   Schema.TaggedStruct("Write", { slotId: SlotId }),
@@ -468,7 +474,7 @@ export type MessageDraftTarget = typeof MessageDraftTarget.Type
 /** A message editor's draft: an edit's is keyed by the version edited, a written version's by the slot. */
 export const messageDraftKey = (target: MessageDraftTarget) =>
   target._tag === "Edit"
-    ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
+    ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: target.field ?? "" })
     : target._tag === "EditThinking"
       ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: EDIT_THINKING_FIELD })
       : target._tag === "Write"
@@ -492,6 +498,16 @@ export const MessageDraftSave = Schema.Struct({
 })
 
 const DraftCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
+
+export const BlockEdits = Schema.Array(
+  Schema.Struct({
+    message: Schema.Int,
+    part: Schema.Int,
+    text: Schema.String,
+    draft: DraftCommit
+  })
+)
+export type BlockEdits = typeof BlockEdits.Type
 
 /** Where a branch switch went: the sibling, and the fork to open through it. */
 export class BranchSwitch extends Schema.Class<BranchSwitch>("BranchSwitch")({
@@ -726,6 +742,7 @@ export class ChatApi extends RpcGroup.make(
       /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
+      autoRevert: Schema.optionalKey(VersionId),
       /** Optional per-generation model override, recorded on the new version. */
       model: Schema.optionalKey(ModelChoice),
       /**
@@ -735,7 +752,7 @@ export class ChatApi extends RpcGroup.make(
       direction: Schema.optionalKey(Schema.String)
     },
     success: PathEntry,
-    error: Schema.Union([...WriteErrors, GenerationUnavailable])
+    error: Schema.Union([...WriteErrors, GenerationUnavailable, EffectUndoRefused])
   }),
   /**
    * Continue (ST's): a new version of the slot, selected, that starts as the text of
@@ -820,6 +837,7 @@ export class ChatApi extends RpcGroup.make(
       sourceVersionId: VersionId,
       /** Absent when saving thinking on its own: keep the source's body and its rewrite record. */
       content: Schema.optionalKey(Schema.String),
+      blockEdits: Schema.optionalKey(BlockEdits),
       images: Schema.optionalKey(MessageImages),
       /** Its thinking as typed in the edit, plain text ("": none); absent: the source's is kept. */
       reasoning: Schema.optionalKey(Schema.String),
@@ -872,6 +890,7 @@ export class ChatApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       /** Absent when saving thinking on its own: keep the version's body and its rewrite record. */
       content: Schema.optionalKey(Schema.String),
+      blockEdits: Schema.optionalKey(BlockEdits),
       /** Its images from now on (absent: kept); the earlier set stays in its history. */
       images: Schema.optionalKey(MessageImages),
       /** Its thinking from now on, plain text ("": none; absent: kept); the earlier one stays in its history. */

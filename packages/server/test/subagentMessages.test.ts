@@ -217,7 +217,7 @@ describe("subagents in the background, and messages", () => {
 
         script.hold(null)
         yield* eventually(() => finished(events, waiting.versionId)?.status === "complete")
-        assert.strictEqual(finished(events, waiting.versionId)!.content, "Summed up.")
+        assert.strictEqual(finished(events, waiting.versionId)!.content, "Waiting on the cards.\n\nSummed up.")
         // The report reached the reply as an app message, inside the data boundary.
         const last = parents(mock.requests()).at(-1)!
         const report = last.messages.find((m) => m.role === "user" && text(m).includes("finished"))!
@@ -491,7 +491,7 @@ describe("subagents in the background, and messages", () => {
       script.hold(null)
       const resumed = yield* resume(api, chat, waiting)
       yield* eventually(() => finished(events, resumed)?.status === "complete")
-      assert.strictEqual(finished(events, resumed)!.content, "Summed up after resume.")
+      assert.strictEqual(finished(events, resumed)!.content, "Waiting.\n\nSummed up after resume.")
       // The subagent carried on where it stopped: one more request, the one the stop cut.
       assert.strictEqual(completions(mock.requests()).filter(isChild).length, childBefore + 1)
       const [rows] = yield* fixtureSql(

@@ -1,3 +1,4 @@
+import { makeWorkshopSwipeHandlers } from "./workshopSwipe.ts"
 import { serverLogs } from "../serverLogs.ts"
 import { makePluginWriteHandlers } from "./pluginData.ts"
 import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
@@ -107,6 +108,21 @@ const handlers = Layer.unwrap(
       broken: startup.broken.map((row) => new BrokenReferences(row)),
       applied: startup.applied
     })
+    const { handlers: effects, binForSwipe } = yield* makeWorkshopEffectHandlers(
+      {
+        ...library,
+        ...chatSetup,
+        ...graph,
+        ...binOps,
+        ...generation,
+        ...(yield* makeHistoryWriteHandlers),
+        // A card added from a card source by the workshop (cardextools1).
+        AdoptRemoteCard: adoption.AdoptRemoteCard
+      },
+      bin
+    )
+    const reversals = yield* makeChangeReversalWriteHandlers({ EditRef: library.EditRef })
+    const swipes = yield* makeWorkshopSwipeHandlers(bin.drafts, { ...graph, ...binOps, ...reversals, binForSwipe })
     const served = WriteOps.of(
       providerDefinitionHandlers(
         stateModuleHandlers(
@@ -129,21 +145,9 @@ const handlers = Layer.unwrap(
               ...(yield* makeMcpWriteHandlers),
               ...accounts,
               ...chatSetup,
-              ...(yield* makeWorkshopEffectHandlers(
-                {
-                  ...library,
-                  ...chatSetup,
-                  ...graph,
-                  ...binOps,
-                  ...generation,
-                  ...(yield* makeHistoryWriteHandlers),
-                  // A card added from a card source by the workshop (cardextools1).
-                  AdoptRemoteCard: adoption.AdoptRemoteCard
-                },
-                bin
-              )),
-              // Revert and Redo of a workshop's library changes (spec/WORKSHOP-CARDS.md §8.1).
-              ...(yield* makeChangeReversalWriteHandlers({ EditRef: library.EditRef })),
+              ...effects,
+              ...reversals,
+              ...swipes,
               ...(yield* makeWorkshopGrantWriteHandlers),
               ...(yield* makeWorkshopSightWriteHandlers),
               ...(yield* makePersonaLockWriteHandlers),

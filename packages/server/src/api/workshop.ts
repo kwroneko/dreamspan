@@ -494,9 +494,11 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         return { waiting: deliverAnswer(rolloutId, toolCallId, answer, text === "" ? null : text) }
       }).pipe(internal("AnswerToolApproval")),
     ListVersionEffects: ({ versionId }) =>
-      Effect.flatMap(CurrentUser, (user) => reader.VersionEffects({ userId: user.id, versionId })).pipe(
-        internal("ListVersionEffects")
-      ),
+      Effect.flatMap(CurrentUser, (user) =>
+        reader
+          .VersionEffects({ userId: user.id, versionId })
+          .pipe(Effect.flatMap((effects) => files.inspectSwipeFiles(user, effects)))
+      ).pipe(internal("ListVersionEffects")),
     ListRolloutEffects: (input) =>
       Effect.flatMap(CurrentUser, (user) => reader.ListRolloutEffects({ ...input, userId: user.id })).pipe(
         internal("ListRolloutEffects")

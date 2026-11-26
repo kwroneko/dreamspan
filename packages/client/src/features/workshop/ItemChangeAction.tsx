@@ -1,3 +1,4 @@
+import type { RefId, RevisionId } from "@dreamspan/shared/library.ts"
 // A change row's action (spec/WORKSHOP-CARDS.md §7.2, §8.1): Revert for an edit, taking the
 // turn's change back field by field on the item as it is now, as a new revision (later edits
 // stay); Undo for an item the turn made, to the bin, asking first when it changed since or a chat
@@ -46,6 +47,61 @@ const askText = (name: string, changed: boolean, chats: number) => {
   const inChats = chats === 1 ? "is in 1 chat" : `is in ${chats} chats`
   if (changed && chats > 0) return `${name} was changed since and ${inChats}.`
   return changed ? `${name} was changed since.` : `${name} ${inChats}.`
+}
+
+function RestoreChange({ item }: { item: ItemChange }) {
+  const action = useAction()
+  const [confirm, setConfirm] = useState(false)
+  const state = item.effects.find((effect) => effect.undo?.head === item.to)?.swipe
+  const bin = item.created && itemUndone(item) ? state?.binItemId : undefined
+  const rowVersion = state?.rowVersion
+  if (item.file || (!bin && (item.created || !state?.head || state.head === item.to || rowVersion === undefined)))
+    return null
+  const restore = async () => {
+    const result = bin
+      ? await action.run((client) => client("RestoreBinItem", { itemId: bin }), CHANGE_KEYS)
+      : await action.run(
+          (client) =>
+            client("RestoreRevision", {
+              refId: item.refId as RefId,
+              revisionId: item.to as RevisionId,
+              expectedRowVersion: rowVersion!,
+              message: "Restored this workshop reply’s version"
+            }),
+          CHANGE_KEYS
+        )
+    if (result.ok) setConfirm(false)
+  }
+  return (
+    <>
+      <Button
+        variant="ghost"
+        className="h-7 px-2 text-xs"
+        data-change-restore
+        pending={action.pending}
+        onClick={() => {
+          if (!bin && state?.manualSince) setConfirm(true)
+          else void restore()
+        }}
+      >
+        {bin ? "Restore" : "Restore this version"}
+      </Button>
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={`Restore this version of ${item.label}?`}
+        description="You edited this item since the reply. Those edits will remain in Versions."
+        confirmLabel="Restore this version"
+        pending={action.pending}
+        onConfirm={() => void restore()}
+      />
+      {action.error && (
+        <span role="alert" className="text-xs text-danger">
+          {action.error.message}
+        </span>
+      )}
+    </>
+  )
 }
 
 export function ItemChangeAction({
@@ -98,6 +154,7 @@ export function ItemChangeAction({
             {item.created ? "Undone" : "Reverted"}
           </span>
         </Tooltip>
+        <RestoreChange item={item} />
         {reverted && reverts.length > 0 && (
           <Button
             variant="ghost"
@@ -151,6 +208,7 @@ export function ItemChangeAction({
   }
   return (
     <span className="flex shrink-0 flex-col items-end gap-1">
+      <RestoreChange item={item} />
       <Button
         variant="ghost"
         className="h-7 px-2 text-xs"

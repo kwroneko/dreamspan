@@ -1,3 +1,5 @@
+import { versionSteps } from "./rows.ts"
+import { visibleBlockText } from "@dreamspan/shared/chat.ts"
 import type { StoredStateEventData } from "@dreamspan/shared/state.ts"
 import { refusePending } from "./chatKindPolicy.ts"
 import { fileTyped, noteDroppedReply, pendingRow, type SweptDraft, sweepPendingChat, titleFor } from "./pendingChats.ts"
@@ -1262,7 +1264,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       FinishGeneration: ({
         userId,
         versionId,
-        content,
+        content: finalText,
         reasoning,
         replySections,
         nativeReasoning,
@@ -1283,6 +1285,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           ) {
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
+          const blocks = versionSteps(row, true).blocks
+          const content = blocks?.some((block) => block.kind === "text") ? visibleBlockText(blocks) : finalText
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           const columns = rewriteColumns(rewrite)
           yield* sql`UPDATE version_records SET content = ${content}, status = ${status},

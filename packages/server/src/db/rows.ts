@@ -1,3 +1,4 @@
+import { workshopBlocks } from "../agent/workshopBlocks.ts"
 import { counted, stepsOf } from "../agent/steps.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { FrozenTool } from "../agent/tools.ts"
@@ -214,11 +215,13 @@ export const versionExtras = (alias: string) =>
   (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
     WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json,
   (SELECT json_object('transcript', json(p.transcript_json), 'tools', json_extract(p.context_snapshot_json, '$.agent.tools'),
+    'workshop', r.kind = 'workshop',
     'final', r.status NOT IN ('created', 'running'),
     'perVersion', json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'
       OR coalesce(json_extract(p.context_snapshot_json, '$.continuity.historical'), 0) > 0)
     FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
     WHERE p.rollout_id = ${alias}.rollout_id AND (
+      r.kind = 'workshop' OR
       json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'
       OR coalesce(json_extract(p.context_snapshot_json, '$.continuity.historical'), 0) > 0
       OR (r.step_count = 0 AND json_extract(p.context_snapshot_json, '$.agent.contract') IN ('send_message', 'both'))
@@ -297,7 +300,10 @@ const modelOf = (row: VersionRow) => {
   }
 }
 
-const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonly agent?: boolean } => {
+export const versionSteps = (
+  row: VersionRow,
+  finishing = false
+): { steps?: StepsSummary; agent?: boolean; blocks?: NonNullable<Version["blocks"]> } => {
   if (!row.steps_material) {
     if (!row.steps_json) return {}
     const steps = JSON.parse(row.steps_json) as StepsSummary
@@ -307,15 +313,34 @@ const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonl
     transcript: ReadonlyArray<AgentMessage> | null
     tools: ReadonlyArray<FrozenTool> | null
     final: boolean
+    workshop: boolean
     perVersion: boolean
   }
   const count = material.transcript
     ? counted(
-        stepsOf(material.transcript, material.tools ?? [], !!material.final, material.perVersion ? row.id : undefined)
+        stepsOf(
+          material.transcript,
+          material.tools ?? [],
+          finishing || !!material.final || row.status !== "generating",
+          material.perVersion || material.workshop ? row.id : undefined
+        )
       )
     : 0
   const summary = row.steps_json ? (JSON.parse(row.steps_json) as StepsSummary) : { ms: null }
-  return count ? { steps: { count, ms: summary.ms }, agent: true } : { agent: true }
+  return {
+    agent: true,
+    ...(count ? { steps: { count, ms: summary.ms } } : {}),
+    ...(material.workshop && material.transcript
+      ? {
+          blocks: workshopBlocks(
+            material.transcript,
+            material.tools ?? [],
+            finishing || !!material.final || row.status !== "generating",
+            row.id
+          )
+        }
+      : {})
+  }
 }
 
 export const toVersion = (row: VersionRow) =>
