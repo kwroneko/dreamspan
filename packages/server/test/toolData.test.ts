@@ -210,7 +210,10 @@ it.effect("fresh dedicated setup results expose their app-created ids as metadat
     const ctx = {
       ...context([]),
       reader: { RolloutToolReceipt: () => Effect.succeed(null) },
-      writer: { AgentCreateEntity: () => Effect.succeed(JSON.stringify({ id, entityId: id, revision: id })) }
+      writer: {
+        AgentCreateEntity: () =>
+          Effect.succeed({ text: JSON.stringify({ id, entityId: id, revision: id }), addedBytes: 0 })
+      }
     } as unknown as ToolContext
     const out = yield* setupTools
       .find((t) => t.id === "create_card")!
