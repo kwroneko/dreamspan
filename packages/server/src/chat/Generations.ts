@@ -430,9 +430,7 @@ export class Generations extends Context.Service<
                 const key = `${failure.script.scope}:${failure.script.id}`
                 if (entry.reported.has(key)) continue
                 entry.reported.add(key)
-                yield* Effect.logWarning(
-                  `regex script "${failure.script.name}" was skipped while a reply streamed: ${failure.reason}`
-                )
+                yield* Effect.logWarning("A regex script was skipped while a reply streamed")
               }
             }
             if (entry.closed) return

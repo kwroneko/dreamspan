@@ -156,9 +156,9 @@ export class WorkshopFiles extends Context.Service<
       const appSource = () =>
         (sourceCopy ??= prepareAppSource(config.dataDir).then(
           (copy) => copy.folder,
-          (error: unknown) => {
+          () => {
             sourceCopy = null
-            Effect.runFork(Effect.logWarning(`copying the app's source for commands failed: ${String(error)}`))
+            Effect.runFork(Effect.logWarning("copying the app's source for commands failed"))
             return null
           }
         ))

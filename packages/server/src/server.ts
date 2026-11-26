@@ -87,12 +87,14 @@ import {
   Headers,
   HttpIncomingMessage,
   HttpRouter,
+  HttpServerError,
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
   HttpStaticServer
 } from "effect/http"
 import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
+import { serverLogs } from "./serverLogs.ts"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } from "./api/chats.ts"
@@ -841,7 +843,18 @@ export const serverWith = <E>(
       StaticRoutes,
       InterruptedRequests,
       RequestGuard
-    )
+    ),
+    {
+      disableLogger: true,
+      // Request paths can contain file names or credentials. Log the status even when
+      // the HTTP layer converts a defect to a response, without logging its Cause.
+      middleware: (app) =>
+        Effect.onExit(app, (exit) =>
+          Effect.logInfo("Sent HTTP response").pipe(
+            Effect.annotateLogs({ "http.status": HttpServerError.exitResponse(exit).status })
+          )
+        )
+    }
   ).pipe(
     Layer.provide(AttachmentPublicationRecovery),
     // --- ST data folder import (ARCHITECTURE.md §13)
@@ -893,7 +906,8 @@ export const serverWith = <E>(
     Layer.provideMerge(Accounts.layer),
     Layer.provideMerge(TrustedAddresses.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, formats)),
-    Layer.provide(InFlightRpcs.layer)
+    Layer.provide(InFlightRpcs.layer),
+    Layer.provide(serverLogs)
   )
 
 /**

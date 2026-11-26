@@ -1,3 +1,4 @@
+import { serverLogs } from "../serverLogs.ts"
 import { makePluginReadHandlers } from "./pluginData.ts"
 import { makeFileVersionReadHandlers } from "./fileVersions.ts"
 import { makeFileShareReadHandlers } from "./fileShares.ts"
@@ -178,5 +179,7 @@ RpcServer.layer<OpsOf<typeof ReadOps>>(ReadOps, { concurrency: 1, disableFatalDe
   Layer.provide(RpcServer.layerProtocolWorkerRunner),
   Layer.provide(NodeWorkerRunner.layer),
   Layer.launch,
-  NodeRuntime.runMain
+  Effect.tapCause((cause) => Effect.logError("Database reader stopped", cause)),
+  Effect.provide(serverLogs),
+  NodeRuntime.runMain({ disableErrorReporting: true })
 )

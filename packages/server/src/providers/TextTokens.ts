@@ -128,7 +128,7 @@ export class TextTokens extends Context.Service<
                 remote.withPermits(1),
                 Effect.map((result) => ({ ok: true as const, result })),
                 Effect.catch((error) =>
-                  Effect.as(Effect.logWarning(`counting tokens for ${modelKey} failed`, error), {
+                  Effect.as(Effect.logWarning("counting text tokens failed", error), {
                     ok: false as const,
                     message: error._tag === "TimeoutError" ? "it took too long." : error.message
                   })

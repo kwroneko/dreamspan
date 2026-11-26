@@ -16,9 +16,9 @@ const typedErrors =
     Effect.catch(effect, (error): Effect.Effect<never, Exclude<E, SqlError.SqlError> | StorageError> => {
       if (!SqlError.isSqlError(error)) return Effect.fail(error as Exclude<E, SqlError.SqlError>)
       const storageError = toStorageError(operation)(error)
-      return Effect.logError(
-        `storage operation ${operation} failed (${storageError.reason}): ${storageError.message}`
-      ).pipe(Effect.andThen(Effect.fail(storageError)))
+      return Effect.logError(`storage operation ${operation} failed (${storageError.reason})`).pipe(
+        Effect.andThen(Effect.fail(storageError))
+      )
     })
 
 /**

@@ -1051,7 +1051,7 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         return Effect.try({ try: () => capabilitiesOf(raw), catch: () => bad() }).pipe(
           Effect.tap(() =>
             unmapped.length
-              ? Effect.logWarning(`cardex: parameters with no control, left out: ${unmapped.join(", ")}`)
+              ? Effect.logWarning(`cardex: left out ${unmapped.length} parameters with no control`)
               : Effect.void
           )
         )

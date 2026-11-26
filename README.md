@@ -16,7 +16,7 @@ npm run build
 NODE_ENV=production npm start
 ```
 
-Open the local address on port 8080 over HTTP. By default Dreamspan listens only on loopback and stores its data in `./data`. Settings → Account lets you set a password for the local admin account.
+Open `http://127.0.0.1:8080`. By default Dreamspan listens only on loopback and stores its data in `./data`. Settings → Account lets you set a password for the local admin account.
 
 ## Development
 

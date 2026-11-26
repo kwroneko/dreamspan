@@ -71,7 +71,7 @@ export function FirstRunSteps({ data }: { data: ShellLibrary }) {
           title: "Import from SillyTavern",
           done: false,
           detail: "Bring in your characters, chats, presets and lorebooks, or card files one at a time.",
-          action: { to: "/import/st", label: "Import" }
+          action: { to: "/import", label: "Import" }
         },
     {
       title: "Start a chat",

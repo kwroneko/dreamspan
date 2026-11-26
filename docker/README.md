@@ -16,7 +16,7 @@ services:
   dreamspan:
     image: ${DREAMSPAN_IMAGE:-dreamspan:0.1.0}
     ports:
-      - "${DREAMSPAN_BIND_ADDRESS:?Set this to the host's IPv4 loopback address}:8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
     environment:
@@ -30,7 +30,7 @@ secrets:
     file: ../dreamspan-secrets/admin-password
 ```
 
-Set `DREAMSPAN_BIND_ADDRESS` to your host's IPv4 loopback address in the Compose `.env` file. Run `docker compose up -d --wait` and open that address on port 8080 over HTTP. Sign in as `admin` with the password you chose. This file seeds the password when there is no enabled admin with a password. Change it in **Settings → Account** after signing in.
+Binding to `127.0.0.1` keeps the published port accessible only from the host. Run `docker compose up -d --wait` and open `http://127.0.0.1:8080`. Sign in as `admin` with the password you chose. This file seeds the password when there is no enabled admin with a password. Change it in **Settings → Account** after signing in.
 
 For remote use, put the app behind an HTTPS reverse proxy that supports WebSockets. Set `PUBLIC_ORIGINS` to the exact browser-facing origin and keep the app's port private. If the proxy supplies the user identity, configure proxy authentication and trusted peers as described in the [architecture guide](../ARCHITECTURE.md#4-authentication).
 
