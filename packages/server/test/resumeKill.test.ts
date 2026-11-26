@@ -416,7 +416,12 @@ for (const phase of ["approval", "delegated reply"] as const)
           Effect.gen(function* () {
             const api = yield* client()
             const seeded = yield* generateReply(api, {
-              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              // The scripted calls must reach their approval and delegated execution paths.
+              connection: {
+                kind: "openai-chat",
+                baseUrl: `${mock.url}/v1`,
+                providerSettings: { toolLoading: "every" }
+              },
               model: {},
               preset: { openai_max_context: 32768 }
             })

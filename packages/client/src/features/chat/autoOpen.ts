@@ -1,9 +1,7 @@
-// When a streaming disclosure (a reply's Reasoning, its steps) opens and folds by itself (DESIGN
-// §7.4). It streams open and folds when the reply arrives, but short content must not flash:
-// it opens only once it has been streaming for AUTO_OPEN_AFTER_MS (one that completes sooner
-// never opens), and once opened it stays open for at least AUTO_OPEN_MIN_MS before folding.
-// A user's own toggle always wins; the callers keep that choice apart from this.
-import { useEffect, useRef, useState } from "react"
+// A streaming disclosure (a reply's Reasoning or steps) waits before opening to avoid flashing
+// short content (DESIGN §7.4). Once open, it stays open for a minimum time if the reply finishes.
+// Turning off the streaming preference folds it immediately. Callers keep manual choices separately.
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 
 export const AUTO_OPEN = { afterMs: 600, minOpenMs: 800 } as const
 
@@ -21,32 +19,33 @@ export function useAutoOpen(
 ) {
   const own = useState(false)
   const [open, setOpen] = state ?? own
-  const latest = useRef({ live, setOpen })
-  latest.current = { live, setOpen }
   const openedAt = useRef<number | null>(null)
+  const show = useEffectEvent(() => {
+    if (!live) return
+    openedAt.current = Date.now()
+    setOpen(true)
+  })
+  const fold = useEffectEvent(() => {
+    openedAt.current = null
+    setOpen(false)
+  })
   useEffect(() => {
-    if (streaming && enabled) {
-      const timer = setTimeout(() => {
-        if (!latest.current.live) return
-        openedAt.current = Date.now()
-        latest.current.setOpen(true)
-      }, AUTO_OPEN.afterMs)
+    if (streaming) {
+      if (!enabled) {
+        fold()
+        return undefined
+      }
+      const timer = setTimeout(() => show(), AUTO_OPEN.afterMs)
       return () => clearTimeout(timer)
     }
-    if (!streaming && openedAt.current === null) {
+    if (openedAt.current === null) {
       // Done, and never opened here (or opened by an element since gone): folded.
-      latest.current.setOpen(false)
+      fold()
       return undefined
     }
-    if (!streaming && openedAt.current !== null) {
-      const wait = Math.max(0, openedAt.current + AUTO_OPEN.minOpenMs - Date.now())
-      const timer = setTimeout(() => {
-        openedAt.current = null
-        latest.current.setOpen(false)
-      }, wait)
-      return () => clearTimeout(timer)
-    }
-    return undefined
+    const wait = Math.max(0, openedAt.current + AUTO_OPEN.minOpenMs - Date.now())
+    const timer = setTimeout(() => fold(), wait)
+    return () => clearTimeout(timer)
   }, [streaming, enabled])
-  return open
+  return open && (!streaming || enabled)
 }

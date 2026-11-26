@@ -424,7 +424,8 @@ it.live(
         (m) => Effect.promise(() => m.close())
       )
       yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        // Keep the direct offer visible so absence tests distinguish permissions from deferral.
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
         model: { context: 200000 }
       })
       const chat = yield* api.CreateWorkshop({}),
@@ -519,7 +520,7 @@ it.live(
         (m) => Effect.promise(() => m.close())
       )
       yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
         model: { context: 200000 }
       })
       const chat = yield* api.CreateWorkshop({}),

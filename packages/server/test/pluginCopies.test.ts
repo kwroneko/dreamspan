@@ -15,6 +15,13 @@ import { foldState } from "@dreamspan/shared/state.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks } from "./support/mockProvider.ts"
 
+// Byte comparisons span fresh chats, each of which would get its own cache key.
+const byteComparisonConnection = (mock: { url: string }) => ({
+  kind: "openai-chat",
+  baseUrl: `${mock.url}/v1`,
+  providerSettings: { promptCacheKey: false }
+})
+
 const chunks = (name: string, args: unknown) => [
   {
     id: "copy-call",
@@ -69,7 +76,7 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           (m) => Effect.promise(() => m.close())
         )
         yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          connection: byteComparisonConnection(mock),
           model: {},
           state: [{ key: "agent.enabled", value: { on: true } }]
         })
@@ -107,7 +114,7 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           message: "Another enabled plugin already replaces this part. Turn it off first."
         })
         const reply = yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          connection: byteComparisonConnection(mock),
           model: {},
           state: [{ key: "agent.enabled", value: { on: true } }]
         })
@@ -164,7 +171,7 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
         )
         const nextRequest = mock.requests().length
         yield* generateReply(api, {
-          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          connection: byteComparisonConnection(mock),
           model: {},
           state: [{ key: "agent.enabled", value: { on: true } }]
         })
@@ -604,7 +611,7 @@ for (const [id, entry, args] of [
           )
           const generate = () =>
             generateReply(api, {
-              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              connection: byteComparisonConnection(mock),
               model: {},
               greeting: "Synthetic earlier text",
               state: [
