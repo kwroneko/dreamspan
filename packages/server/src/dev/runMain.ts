@@ -5,7 +5,7 @@ import { serverEnvironment } from "../serverEnvironment.ts"
 // entry point (main.ts) can't wire the fake generator, and the image doesn't contain this
 // directory (.dockerignore).
 import { NodeRuntime } from "@effect/platform-node"
-import { Cause, Config, Effect, Exit, Layer, Option, Runtime, Schema } from "effect"
+import { Config, Effect, Layer, Option, Schema } from "effect"
 import * as ContextGenerator from "../chat/ContextGenerator.ts"
 import { AppConfig } from "../config.ts"
 import { DecisionEngine } from "../decision/engine.ts"
@@ -14,6 +14,7 @@ import * as FakeGenerator from "./fakeGenerator.ts"
 import { fakeCardSources } from "./fakeCardSource.ts"
 import { fakeSavedMedia, fakeSavedMediaWanted } from "./fakeSavedMedia.ts"
 import { fakeSummaryStyle, fakeSummaryStyleWanted } from "./fakeSummaryStyle.ts"
+import { teardown } from "../updates/restart.ts"
 
 class FakeGeneratorInProduction extends Schema.TaggedError<FakeGeneratorInProduction>()(
   "FakeGeneratorInProduction",
@@ -23,9 +24,6 @@ class FakeGeneratorInProduction extends Schema.TaggedError<FakeGeneratorInProduc
     return "The development server is not for production: it writes synthetic text into chats."
   }
 }
-
-const teardown: Runtime.Teardown = (exit, onExit) =>
-  Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
 
 const options = Config.all({
   /** Tokens a second for each fake generation; unset, the real generator, as in production. */

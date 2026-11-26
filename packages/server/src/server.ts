@@ -79,6 +79,7 @@ import {
   AuthenticatedForkMergeApi,
   AuthenticatedWorkshopPresetApi,
   AuthenticatedShellUpdatesApi,
+  AuthenticatedUpdateApi,
   CurrentUser,
   Health
 } from "@dreamspan/shared/api.ts"
@@ -162,6 +163,8 @@ import { makePersonaLockHandlers } from "./api/personaLock.ts"
 import { makeDraftChatHandlers } from "./api/draftChats.ts"
 import * as McpConnections from "./mcp/McpConnections.ts"
 import manifest from "../../../package.json" with { type: "json" }
+import { UpdateRejected } from "@dreamspan/shared/updates.ts"
+import { Updates } from "./updates/service.ts"
 
 const { version } = manifest
 const startedAt = Date.now()
@@ -237,9 +240,33 @@ const DatabaseStatusHandlers = DatabaseStatusApi.toLayer(
   })
 )
 
+const UpdateHandlers = AuthenticatedUpdateApi.toLayer(
+  Effect.gen(function* () {
+    const updates = yield* Updates
+    const admin = Effect.flatMap(CurrentUser, (user) =>
+      user.role === "admin" ? Effect.void : Effect.fail(new Forbidden({ message: "Only admins can manage updates." }))
+    )
+    return {
+      GetUpdateStatus: () => admin.pipe(Effect.andThen(Effect.promise(updates.status))),
+      CheckForUpdates: () => admin.pipe(Effect.andThen(Effect.promise(updates.check))),
+      ApplyServerUpdate: () =>
+        admin.pipe(
+          Effect.andThen(
+            Effect.tryPromise({
+              try: updates.apply,
+              catch: (error) =>
+                error instanceof UpdateRejected ? error : new UpdateRejected({ message: "Could not apply the update." })
+            }).pipe(Effect.uninterruptible)
+          )
+        )
+    }
+  })
+)
+
 const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
   DatabaseStatusHandlers,
+  UpdateHandlers,
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedComposerLibraryApi.toLayer(makeComposerLibraryHandlers),
   AuthenticatedSharedNoteRefsApi.toLayer(makeSharedNoteRefsHandlers),
@@ -561,6 +588,8 @@ const HealthRoute = HttpRouter.add(
   "/healthz",
   Effect.gen(function* () {
     const config = yield* AppConfig
+    const updates = yield* Updates
+    const commit = yield* Effect.promise(updates.bootCommit)
     const generator = yield* Generator
     const generatorKind = Option.isSome(generator) ? (generator.value.kind ?? "custom") : "none"
     const buildId = yield* Effect.promise(async () => {
@@ -577,6 +606,7 @@ const HealthRoute = HttpRouter.add(
       headers: {
         "cache-control": "no-store",
         "x-app-version": version,
+        ...(commit ? { "x-app-commit": commit } : {}),
         "x-generator-kind": generatorKind,
         ...(buildId ? { "x-client-build": buildId } : {})
       }
@@ -903,6 +933,7 @@ export const serverWith = <E>(
     Layer.provideMerge(McpConnections.layer.pipe(Layer.provide(ProvidersLive))),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
+    Layer.provide(Updates.layer),
     Layer.provideMerge(Accounts.layer),
     Layer.provideMerge(TrustedAddresses.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, formats)),

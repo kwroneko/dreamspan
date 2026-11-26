@@ -37,6 +37,7 @@ import * as completionSound from "./completionSoundFeature.tsx"
 import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
+import * as updates from "./updates/index.tsx"
 import * as workbench from "./workbench/index.tsx"
 import * as threads from "./threads/index.tsx"
 import * as workshop from "./workshop/index.tsx"
@@ -59,6 +60,7 @@ export const registerFeatures = () => {
   login.register()
   characters.register()
   status.register()
+  updates.register()
   library.register()
   editor.register()
   chat.register()

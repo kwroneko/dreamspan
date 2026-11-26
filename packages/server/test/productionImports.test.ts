@@ -422,6 +422,11 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
     reason: "Generated client build-id.json; final COPY includes the whole dist directory.",
     expressions: ['readFile(join(config.clientDist, "build-id.json"), "utf8")']
   },
+  "packages/server/src/updates/service.ts": {
+    reason:
+      "Only the regular package-lock.json at the verified Git checkout root, before and after a supervised update.",
+    expressions: ["readFile(path)"]
+  },
   "packages/server/src/sources/CardSources.ts": {
     reason: "Thumbnails created in the configured data volume.",
     expressions: ["readFile(join(config.dataDir, thumb.value.path))"]

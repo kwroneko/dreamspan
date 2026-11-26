@@ -103,7 +103,7 @@ const storage = () => {
 }
 
 /** Reloads, after a short flush of open editors' server drafts. */
-const reloadApp = async () => {
+export const reloadApp = async () => {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([

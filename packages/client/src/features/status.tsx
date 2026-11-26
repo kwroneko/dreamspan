@@ -6,6 +6,7 @@ import { AppClient } from "../rpc.ts"
 import { useSession } from "../session.ts"
 import { Card, CardHeader } from "../ui/Surface.tsx"
 import { useTitle } from "./shell.tsx"
+import { UpdatesCard } from "./updates/index.tsx"
 
 const healthAtom = AppClient.query("Health", undefined)
 // Read once per visit: it changes only when the database writer starts again.
@@ -83,6 +84,7 @@ function Status() {
           )
         }}
       </AsyncView>
+      {user.role === "admin" && <UpdatesCard />}
     </div>
   )
 }

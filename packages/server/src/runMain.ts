@@ -1,18 +1,12 @@
 import { NodeRuntime } from "@effect/platform-node"
-import { Cause, Effect, Exit, Layer, Runtime } from "effect"
+import { Effect, Layer } from "effect"
 import * as ContextGenerator from "./chat/ContextGenerator.ts"
 import { AppConfig } from "./config.ts"
 import { serverWith } from "./server.ts"
 import { serverEnvironment } from "./serverEnvironment.ts"
 import * as CardSources from "./sources/CardSources.ts"
 import { cardexAdapter, cardSourceSetup } from "./sources/cardex.ts"
-
-/**
- * SIGTERM or SIGINT interrupts the server, and that's how it's meant to stop: exit 0, not
- * the default 130, which systemd counts as a failure. Anything else keeps the default.
- */
-const teardown: Runtime.Teardown = (exit, onExit) =>
-  Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
+import { teardown } from "./updates/restart.ts"
 
 /** Expected operator-facing startup refusals must not print loader or source locations. */
 const startupRefusal = (message: string) => {
