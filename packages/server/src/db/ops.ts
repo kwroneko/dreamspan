@@ -1145,7 +1145,8 @@ export const McpResolved = Schema.Struct({
   ),
   headersEnc: Schema.NullOr(Schema.Uint8Array),
   proxyUrlEnc: Schema.NullOr(Schema.Uint8Array),
-  ownerRole: Schema.Literals(["admin", "user"]),
+  ownerRole: UserRole,
+  callerRole: UserRole,
   /** The calling user's own sign-in with the server, still encrypted. */
   oauthEnc: Schema.NullOr(Schema.Uint8Array),
   /** A local program's environment variables, still encrypted. */

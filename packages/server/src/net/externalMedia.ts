@@ -7,41 +7,7 @@ import { join } from "node:path"
 import { BlockList, isIP } from "node:net"
 import { fileTypeFromBuffer } from "file-type"
 import type { NetworkShape } from "./Network.ts"
-
-const denied = new BlockList()
-for (const [ip, bits] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.88.99.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4]
-] as const)
-  denied.addSubnet(ip, bits, "ipv4")
-// Azure's platform virtual address, globally numbered but not an internet destination.
-denied.addAddress("168.63.129.16", "ipv4")
-const globalV6 = new BlockList()
-globalV6.addSubnet("2000::", 3, "ipv6")
-denied.addSubnet("2001::", 23, "ipv6") // protocol assignments, including Teredo and benchmarking
-// Documentation and IPv4-embedding/tunnelling must not provide a way back to a local target.
-denied.addSubnet("2001:db8::", 32, "ipv6")
-denied.addSubnet("2002::", 16, "ipv6")
-denied.addSubnet("3fff::", 20, "ipv6")
-
-export const isPublicMediaAddress = (ip: string) => {
-  const family = isIP(ip)
-  if (family === 4) return !denied.check(ip, "ipv4")
-  return family === 6 && globalV6.check(ip, "ipv6") && !denied.check(ip, "ipv6")
-}
+import { isPublicAddress } from "./addresses.ts"
 
 const TYPES = new Set([
   "image/png",
@@ -214,7 +180,7 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
             local.addAddress(entry.address.split("%")[0]!, entry.family === "IPv6" ? "ipv6" : "ipv4")
         if (
           addresses.length === 0 ||
-          addresses.some((ip) => !isPublicMediaAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
+          addresses.some((ip) => !isPublicAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
         )
           throw new ExternalMediaRefused("This media address is not public")
         // Approval can be removed while DNS is pending.

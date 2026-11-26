@@ -3,11 +3,20 @@
 // route taken is reported, never silent. ESLint forbids `fetch` and `undici` elsewhere.
 import { lookup as lookupCallback, type LookupAddress } from "node:dns"
 import { lookup } from "node:dns/promises"
-import { isIP } from "node:net"
+import { isIP, type Socket, type TcpNetConnectOpts } from "node:net"
 import { InvalidNetworkSettings } from "@dreamspan/shared/api.ts"
 import { ServerError } from "@dreamspan/shared/errors.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
-import { Agent, DecoratorHandler, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
+import {
+  Agent,
+  buildConnector,
+  DecoratorHandler,
+  type Dispatcher,
+  ProxyAgent,
+  Socks5ProxyAgent,
+  fetch as undiciFetch
+} from "undici"
+import { bareHost, isLocalhostName, isPublicAddress } from "./addresses.ts"
 import { makeDispatcherPool } from "./dispatcherPool.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Secrets } from "../secrets.ts"
@@ -45,6 +54,7 @@ interface NetworkView {
 
 /** Transport pinned to the settings whose secrets were registered for this request. */
 export interface RequestNetwork {
+  readonly publicOnly: boolean
   /**
    * `targetAddresses` checks every hop before it connects (redirects included) and pins the
    * connection to the addresses it returns, as `NetworkShape.fetchFor`'s does.
@@ -56,7 +66,11 @@ export interface RequestNetwork {
 }
 
 export interface NetworkShape {
-  readonly prepare: (override: ProxyOverride, registerSecret: (value: string) => void) => RequestNetwork
+  readonly prepare: (
+    override: ProxyOverride,
+    registerSecret: (value: string) => void,
+    options?: { readonly publicOnly: boolean }
+  ) => RequestNetwork
   /**
    * A fetch for one connection's requests. `onRoute` hears the route of every request,
    * for the connection test and the request inspector.
@@ -102,7 +116,39 @@ export class RedirectRefused extends Error {
   override readonly name = "RedirectRefused"
 }
 
+/** A public-only connection could not establish that its destination is public. */
+export class AddressRefused extends Error {
+  override readonly name = "AddressRefused"
+}
+
 const resolveHost = async (host: string) => (await lookup(host, { all: true })).map((answer) => answer.address)
+
+const publicAddresses = async (
+  hostname: string,
+  subject: string,
+  checked?: ReadonlyArray<string>
+): Promise<ReadonlyArray<string>> => {
+  const host = bareHost(hostname)
+  const refuse = () => new AddressRefused(`${subject} targets a private or local address. Use a public address.`)
+  if (isLocalhostName(host)) throw refuse()
+  const addresses = checked ?? (isIP(host) ? [host] : await resolveHost(hostname).catch(() => []))
+  if (addresses.length === 0) throw new AddressRefused(`Couldn't resolve the address for ${subject.toLowerCase()}.`)
+  if (addresses.some((ip) => !isPublicAddress(ip))) throw refuse()
+  return addresses
+}
+
+/** A connection's own proxy is also a destination. Its socket may only use the checked answers. */
+const pinnedLookup = (addresses: ReadonlyArray<string>): TcpNetConnectOpts["lookup"] => {
+  const answers = addresses.map((address) => ({ address, family: isIP(address) }))
+  return (_hostname, { all, family }, callback) => {
+    const allowed = family ? answers.filter((answer) => answer.family === family) : answers
+    const first = allowed[0]
+    if (first === undefined)
+      return callback(new AddressRefused("The proxy has no allowed address for this family."), "")
+    if (all) return callback(null, allowed)
+    callback(null, first.address, first.family)
+  }
+}
 
 /**
  * For targets that go direct because their addresses are on the bypass list: the
@@ -151,7 +197,14 @@ const sourceHost =
     return dispatch({ ...options, headers: { ...Object.fromEntries(entries), host } }, handler)
   }
 
-const makeDispatcher = (route: Route, bypass: () => BypassList, servername?: string, host?: string): Dispatcher => {
+const makeDispatcher = (
+  route: Route,
+  bypass: () => BypassList,
+  servername?: string,
+  host?: string,
+  proxyAddresses?: ReadonlyArray<string>,
+  proxyTunnel?: boolean
+): Dispatcher => {
   const configure = (agent: Dispatcher) => {
     const timed = agent.compose(idleTimeouts)
     return host === undefined ? timed : timed.compose(sourceHost(host))
@@ -163,11 +216,31 @@ const makeDispatcher = (route: Route, bypass: () => BypassList, servername?: str
     return configure(agent)
   }
   const url = new URL(route.proxy)
-  const agent =
-    url.protocol === "socks5:" || url.protocol === "socks5h:"
-      ? new Socks5ProxyAgent(url, { requestTls: { servername } })
-      : new ProxyAgent({ uri: url.href, requestTls: { servername } })
-  return configure(agent)
+  const lookup = proxyAddresses === undefined ? undefined : pinnedLookup(proxyAddresses)
+  if (url.protocol === "socks5:" || url.protocol === "socks5h:") {
+    const agent = new Socks5ProxyAgent(url.href.replace(/^socks5h:/, "socks5:"), {
+      requestTls: { servername },
+      ...(lookup === undefined ? {} : { connect: buildConnector({ lookup }) })
+    })
+    if (host !== undefined) {
+      // The pinned Undici version passes URL.hostname to its SOCKS encoder, which treats
+      // bracketed IPv6 as a domain name. Leave only the literal for the numeric encoding.
+      const connector = agent as typeof agent & {
+        createSocks5Connection: (host: string, port: number) => Promise<Socket>
+      }
+      const connect = connector.createSocks5Connection.bind(connector)
+      connector.createSocks5Connection = (hostname, port) => connect(bareHost(hostname), port)
+    }
+    return configure(agent)
+  }
+  return configure(
+    new ProxyAgent({
+      uri: url.href,
+      requestTls: { servername },
+      ...(proxyTunnel ? { proxyTunnel: true } : {}),
+      ...(lookup === undefined ? {} : { proxyTls: { lookup } })
+    })
+  )
 }
 
 export const layer = Layer.effect(
@@ -201,11 +274,29 @@ export const layer = Layer.effect(
 
     // One dispatcher per route, reused so connections pool; closed with the layer.
     const dispatchers = makeDispatcherPool()
-    const dispatcherFor = (route: Route, settings: Current, pinnedTarget?: URL, servername?: string, host?: string) => {
+    const dispatcherFor = (
+      route: Route,
+      settings: Current,
+      {
+        pinnedTarget,
+        servername,
+        host,
+        proxyAddresses,
+        proxyTunnel
+      }: {
+        pinnedTarget: URL | undefined
+        servername: string | undefined
+        host: string | undefined
+        proxyAddresses: ReadonlyArray<string> | undefined
+        proxyTunnel: boolean
+      }
+    ) => {
       const routeKey =
         route.via === "direct" ? `direct:${route.pinned ? JSON.stringify(settings.bypassEntries) : "any"}` : route.proxy
-      const key = JSON.stringify([routeKey, pinnedTarget?.origin, servername, host])
-      return dispatchers.get(key, () => makeDispatcher(route, () => settings.bypass, servername, host))
+      const key = JSON.stringify([routeKey, pinnedTarget?.origin, servername, host, proxyAddresses, proxyTunnel])
+      return dispatchers.get(key, () =>
+        makeDispatcher(route, () => settings.bypass, servername, host, proxyAddresses, proxyTunnel)
+      )
     }
     yield* Effect.addFinalizer(() => Effect.promise(() => dispatchers.close()))
 
@@ -235,17 +326,24 @@ export const layer = Layer.effect(
       onRoute?: (route: Route, target: URL) => void,
       targetAddresses?: TargetAddresses,
       crossOriginRedirect?: (next: URL) => boolean,
-      settings?: Current
+      settings?: Current,
+      publicOnly = false
     ): typeof fetch => {
       const routed = async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
         let target = new URL(input instanceof Request ? input.url : input.toString())
         let request: { input: Parameters<typeof fetch>[0]; init: RequestInit } = { input, init }
         for (let hop = 0; ; hop++) {
           const selected = settings ?? Ref.getUnsafe(current)
-          const addresses = await targetAddresses?.(target)
+          const checked = await targetAddresses?.(target)
+          const addresses = publicOnly ? await publicAddresses(target.hostname, "This connection", checked) : checked
           const route = await routeNow(target, override, selected, addresses)
-          if (route.via === "proxy" && proxyUrlProblem(route.proxy) !== null) {
-            throw new Error(`The proxy for this request is unusable: ${proxyUrlProblem(route.proxy)}`)
+          let proxyAddresses: ReadonlyArray<string> | undefined
+          if (route.via === "proxy") {
+            const problem = proxyUrlProblem(route.proxy)
+            if (problem !== null) throw new Error(`The proxy for this request is unusable: ${problem}`)
+            if (publicOnly && route.source === "connection") {
+              proxyAddresses = await publicAddresses(new URL(route.proxy).hostname, "This connection's proxy")
+            }
           }
           onRoute?.(route, target)
           if (addresses !== undefined) {
@@ -265,17 +363,20 @@ export const layer = Layer.effect(
               // Use the checked literal on the wire, including the proxy's CONNECT/SOCKS
               // destination. Keep HTTP Host and TLS identity on the original hostname.
               pinnedTarget = new URL(target)
-              pinnedTarget.hostname = isIP(address) === 6 ? `[${address}]` : address
+              // Parse before assigning: the hostname setter silently ignores invalid literals.
+              const literal = isIP(address) === 6 ? `[${address}]` : address
+              pinnedTarget.hostname = new URL(`http://${literal}`).hostname
               const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
               servername = isIP(hostname) === 0 ? hostname : undefined
             }
-            const dispatcher = dispatcherFor(
-              route,
-              selected,
+            const dispatcher = dispatcherFor(route, selected, {
               pinnedTarget,
               servername,
-              pinnedTarget ? target.host : undefined
-            )
+              host: pinnedTarget ? target.host : undefined,
+              proxyAddresses,
+              // CONNECT makes the checked literal the proxy's tunnel authority even for HTTP.
+              proxyTunnel: publicOnly && route.via === "proxy"
+            })
             return undiciFetch((pinnedTarget?.href ?? request.input) as Parameters<typeof undiciFetch>[0], {
               ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
               redirect: "manual",
@@ -377,12 +478,15 @@ export const layer = Layer.effect(
       })
 
     return Network.of({
-      prepare: (override, registerSecret) => {
+      prepare: (override, registerSecret, options) => {
+        const publicOnly = options?.publicOnly ?? false
         const settings = Ref.getUnsafe(current)
         if (settings.proxyUrl !== null) registerSecret(settings.proxyUrl)
         if (override.mode === "custom") registerSecret(override.url)
         return {
-          fetchFor: (onRoute, targetAddresses) => fetchFor(override, onRoute, targetAddresses, undefined, settings),
+          publicOnly,
+          fetchFor: (onRoute, targetAddresses) =>
+            fetchFor(override, onRoute, targetAddresses, undefined, settings, publicOnly),
           route: (target) => Effect.promise(() => routeNow(target, override, settings)),
           bypassed: (host) => bypasses(settings.bypass, host)
         }

@@ -9,8 +9,13 @@ import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { McpConnections } from "../src/mcp/McpConnections.ts"
 import { client, login, serverLayer, testConfig } from "./support/config.ts"
-import { approveSignIn, startFakeAuthServer } from "./support/fakeAuthServer.ts"
+import { approveSignIn as approveLocally, startFakeAuthServer } from "./support/fakeAuthServer.ts"
 import { fakeTool, startFakeMcpServer } from "./support/fakeMcpServer.ts"
+import { startHttpProxy, testPublicAddress, withTestHost } from "./support/proxies.ts"
+
+const bind = [127, 0, 0, 1].join(".")
+const approveSignIn = (url: string) => approveLocally(withTestHost(url, bind))
+const fakeAuth = () => startFakeAuthServer({}, { bind, advertise: testPublicAddress })
 
 const KEY = "sk-shared-admin-key-9876"
 
@@ -24,7 +29,7 @@ const settings = (url: string, name = "Team"): McpConnectionSettings => ({
 
 const fake = (initial: Parameters<typeof startFakeMcpServer>[0]) =>
   Effect.acquireRelease(
-    Effect.promise(() => startFakeMcpServer(initial)),
+    Effect.promise(() => startFakeMcpServer(initial, testPublicAddress)),
     (server) => Effect.promise(() => server.close())
   )
 
@@ -34,6 +39,12 @@ const people = Effect.gen(function* () {
   const admin = yield* local.Whoami()
   yield* local.SetPassword({ userId: admin.id, currentPassword: null, newPassword: "admin-password" })
   const adminApi = yield* client({ cookie: (yield* login(admin.handle, "admin-password")).cookie })
+  // Simulate public endpoints while keeping every connection inside the test.
+  const proxy = yield* Effect.acquireRelease(
+    Effect.promise(() => startHttpProxy((host) => (host === testPublicAddress ? bind : host))),
+    (proxy) => Effect.promise(proxy.close)
+  )
+  yield* adminApi.SetNetworkSettings({ proxyUrl: proxy.url, bypass: [], forceProxy: false })
   const user = (handle: string) =>
     Effect.gen(function* () {
       const account = yield* adminApi.CreateUser({
@@ -190,10 +201,7 @@ describe("shared MCP servers", () => {
     () =>
       Effect.gen(function* () {
         const { admin, bob } = yield* people
-        const auth = yield* Effect.acquireRelease(
-          Effect.promise(() => startFakeAuthServer()),
-          (s) => Effect.promise(() => s.close())
-        )
+        const auth = yield* Effect.acquireRelease(Effect.promise(fakeAuth), (s) => Effect.promise(() => s.close()))
         const server = yield* fake({ auth, tools: [fakeTool("echo")] })
         // Bob's own "Team" first: his key is team.
         const bobs = yield* bob.api.CreateMcpConnection({ settings: settings(server.streamableUrl) })
@@ -289,10 +297,7 @@ describe("shared MCP servers", () => {
   it.live("a shared user's sign-in page carries the server's origin only, and the sign-in works", () =>
     Effect.gen(function* () {
       const { admin, bob } = yield* people
-      const auth = yield* Effect.acquireRelease(
-        Effect.promise(() => startFakeAuthServer()),
-        (s) => Effect.promise(() => s.close())
-      )
+      const auth = yield* Effect.acquireRelease(Effect.promise(fakeAuth), (s) => Effect.promise(() => s.close()))
       const server = yield* fake({ auth, tools: [fakeTool("echo")] })
       const created = yield* admin.api.CreateMcpConnection({
         settings: settings(`${server.streamableUrl}?team=private-path-part`)

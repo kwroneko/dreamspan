@@ -1,7 +1,8 @@
 // Synthetic untrusted media, with no real internet traffic.
 import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
-import { isPublicMediaAddress, makeExternalFetcher } from "../src/net/externalMedia.ts"
+import { isPublicAddress } from "../src/net/addresses.ts"
+import { makeExternalFetcher } from "../src/net/externalMedia.ts"
 import type { NetworkShape, TargetAddresses } from "../src/net/Network.ts"
 
 const pixel = Buffer.from(
@@ -68,7 +69,7 @@ const refused = [
 describe("external media address policy", () => {
   for (const ip of refused)
     it(`refuses ${ip} after DNS resolution`, async () => {
-      expect(isPublicMediaAddress(ip)).toBe(false)
+      expect(isPublicAddress(ip)).toBe(false)
       const fake = fakeNetwork()
       const get = makeExternalFetcher(fake.network, { resolve: async () => [ip] })
       await expect(get("https://media.invalid/a", controller())).rejects.toThrow()

@@ -5,7 +5,7 @@ import * as Database from "../src/db/Database.ts"
 import { describeRoute, parseBypass } from "../src/net/route.ts"
 import * as Network from "../src/net/Network.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
-import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
+import { startHttpProxy, startSocks5Proxy, startTarget, withTestHost } from "./support/proxies.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
 import { cardexAdapter } from "../src/sources/cardex.ts"
@@ -82,6 +82,21 @@ describe("network", () => {
       )
       assert.isTrue(httpProxy.tunnels().every((host) => host.startsWith("127.0.0.1:")))
       assert.isTrue(socks.tunnels().every((host) => host.startsWith("127.0.0.1:")))
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("sends a checked IPv6 destination to SOCKS as a numeric address", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const ip = ["2003", "", "1"].join(":")
+      const original = new URL(target.url)
+      const proxy = yield* resource(() => startSocks5Proxy(undefined, (host) => (host === ip ? original.hostname : "")))
+      const network = yield* Network.Network
+      yield* network.setInstance({ proxyUrl: proxy.url, bypass: [], forceProxy: false })
+      const checked = network.prepare({ mode: "inherit" }, () => {}, { publicOnly: true }).fetchFor()
+      const response = yield* Effect.promise(() => checked(withTestHost(target.url, `[${ip}]`)))
+      assert.deepStrictEqual(yield* Effect.promise(() => response.json()), { ok: true })
+      assert.deepStrictEqual(proxy.tunnels(), [`${ip}:${original.port}`])
     }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
