@@ -2,7 +2,7 @@
 // the server can refuse bundles that no longer match its own code (ARCHITECTURE.md §3.6).
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { join, relative, sep } from "node:path"
+import { isAbsolute, join, relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /** The repository root. Stamped paths are relative to it. */
@@ -32,9 +32,13 @@ const hashOf = (sources: ReadonlyArray<string>) => {
 export const writeStamp = (bundleDir: string, moduleIds: Iterable<string>) => {
   const sources = new Set([LOCKFILE])
   for (const id of moduleIds) {
-    if (id.startsWith(root) && !id.includes(`${sep}node_modules${sep}`)) {
-      sources.add(relative(root, id).split(sep).join("/"))
-    }
+    if (!isAbsolute(id)) continue
+    // The bundler can report slash-delimited paths on Windows. relative() accepts
+    // either separator there and returns a native path with the drive resolved.
+    const path = relative(root, id)
+    if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) continue
+    const parts = path.split(sep)
+    if (!parts.includes("node_modules")) sources.add(parts.join("/"))
   }
   const sorted = [...sources].sort()
   const stamp: Stamp = { sources: sorted, hash: hashOf(sorted) }

@@ -131,8 +131,8 @@ export const loadServerSecret = (options: ServerSecretOptions) =>
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
         }
-        // Tighten permissions on a file that was copied in or restored with looser ones.
-        if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, 0o600)
+        // Windows uses ACLs. chmod there would only change the read-only attribute.
+        if (process.platform !== "win32" && (statSync(path).mode & 0o077) !== 0) chmodSync(path, 0o600)
         return readFileSync(path, "utf8").trim()
       },
       catch: (error) => new ServerSecretInvalid({ source: path, reason: String(error) })

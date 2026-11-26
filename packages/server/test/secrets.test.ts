@@ -15,7 +15,7 @@ describe("server secret", () => {
       const first = yield* loadServerSecret({ dataDir, ...none })
       const second = yield* loadServerSecret({ dataDir, ...none })
       assert.strictEqual(first, second)
-      assert.strictEqual(statSync(join(dataDir, "secret.key")).mode & 0o777, 0o600)
+      if (process.platform !== "win32") assert.strictEqual(statSync(join(dataDir, "secret.key")).mode & 0o777, 0o600)
     })
   )
 

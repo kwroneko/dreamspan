@@ -100,7 +100,7 @@ The slow startup refusal tests preserve the shipped `packages/server` and siblin
 - **Bound to where they belong.** Each ciphertext is bound to what it belongs to (`credential:<id>:key`, `connection:<id>:headers`, `connection:<id>:proxy_url`), so it doesn't decrypt anywhere else.
 - **Format:** a version byte, a fresh 12-byte nonce, the tag, then the ciphertext.
 - **Only the main thread holds the secret.** The database workers only ever see ciphertext.
-- **The secret is automatic** (owner, 2026-10-10: setup must be trivial). It comes from `SECRET_KEY` or `SECRET_KEY_FILE` (a Docker secret) when set. Otherwise it's generated at first start into `DATA_DIR/secret.key`, mode 0600 (tightened if a restore loosened it), and never overwritten.
+- **The secret is automatic** (owner, 2026-10-10: setup must be trivial). It comes from `SECRET_KEY` or `SECRET_KEY_FILE` (a Docker secret) when set. Otherwise it's generated at first start into `DATA_DIR/secret.key` and never overwritten. POSIX systems use mode 0600 (tightened if a restore loosened it). Windows uses the data directory's inherited ACLs.
 - **Honest scope:** with the key file next to the database, encryption protects a leaked database or backup on its own, not a copy of the whole data directory.
 - **A changed secret** makes stored secrets unreadable (`SecretUnreadable`), which surfaces as "enter the key again". It never surfaces as a crash.
 
@@ -1524,6 +1524,10 @@ Tests cover prefix edits, signed and redacted blocks, intra-message edits, model
 ---
 
 ## 7. Deployment
+
+**Starting from source.** `npm start`, `Start.bat`, `Start.command` and `start.sh` run `scripts/start.mjs` from the checkout. The launcher uses only Node built-ins. It checks for Node 24.11 or later and probes SQLite FTS5 in an in-memory worker. If `node_modules` is missing it runs `npm ci --include=dev`. A missing client index or worker stamp triggers `scripts/build.mjs`, also the entry point of `npm run build`. That script builds the client and server workspaces in order with `MIMALLOC_ALLOW_THP=0`. Both scripts can run npm via its JS entry point without a command shell.
+
+**Source supervisor.** The launcher runs `packages/server/src/main.ts` with inherited stdio, `DREAMSPAN_SUPERVISED=1` and `NODE_ENV=production` if unset. Exit code 75 requests a restart after an update. The launcher forwards shutdown signals on POSIX and shares the console's Ctrl+C event with its child on Windows. It returns the server's exit status after shutdown. `npm run start:server` runs the server directly, as does the Docker image's exec-form `CMD`.
 
 **App release version.** The server reads the root `package.json` version at startup and reports it in both the `X-App-Version` header on `/healthz` and the `Health.version` RPC field shown in Settings → Server status. The Docker image includes the root manifest. The plugin API has its own compatibility version.
 
