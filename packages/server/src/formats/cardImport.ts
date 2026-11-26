@@ -8,7 +8,7 @@ import type { Effect } from "effect"
 import { posix } from "node:path"
 import { describeImage } from "../importer/images.ts"
 import { cardFromJson } from "./card.ts"
-import { ASSET_KEYWORD, decodeText, isPng, readChunks, replaceCardChunks } from "./png.ts"
+import { ASSET_KEYWORD, decodeCardText, isPng, readChunks, replaceCardChunks, splitText } from "./png.ts"
 import { attempt, defaultLimits, fail, type FormatError, type Limits, parseJson } from "./safety.ts"
 import { extract, isZip, readZip } from "./zip.ts"
 
@@ -38,22 +38,20 @@ export interface CardImport {
  */
 const fromPng = (bytes: Uint8Array, limits: Limits, issues: ReportBuilder) => {
   const chunks = readChunks(bytes, limits)
-  const texts = chunks.flatMap((chunk) => (chunk.type === "tEXt" ? [{ chunk, ...decodeText(chunk.data) }] : []))
+  const texts = chunks.flatMap((chunk) => (chunk.type === "tEXt" ? [splitText(chunk.data)] : []))
   const named = (keyword: string) => texts.find((text) => text.keyword.toLowerCase() === keyword)
   const source = named("ccv3") ?? named("chara")
   if (!source) return fail("png.no_card", "The PNG has no character card in it.")
   if (texts.some((text) => text.keyword.startsWith(ASSET_KEYWORD))) {
     issues.add("info", "png.assets_ignored", "Assets in PNG text chunks aren't supported; they were skipped.")
   }
+  const card = cardFromJson(
+    parseJson(decodeCardText(source.payload, limits), limits.maxCardJsonBytes, limits, issues),
+    limits,
+    issues
+  )
   const avatar: CardFile = { uri: "ccdefault:", ext: "png", bytes: replaceCardChunks(chunks) }
-  return {
-    ...cardFromJson(
-      parseJson(Buffer.from(source.text, "base64"), limits.maxCardJsonBytes, limits, issues),
-      limits,
-      issues
-    ),
-    avatar
-  }
+  return { ...card, avatar }
 }
 
 // ST's: RisuAI writes `embeded://`, the spec's spelling; `__asset:` is the PNG chunk form.

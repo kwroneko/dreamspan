@@ -1613,6 +1613,7 @@ Tests cover prefix edits, signed and redacted blocks, intra-message edits, model
 | Lorebook entries | 10,000 | An assumption to revisit with real files: a lorebook of a few thousand entries is already exceptional. 20,000 full ST entries would need 2.2M values, about 2 s of parsing |
 | PNG chunks | 16,384 | Bounds the chunk walk |
 | PNG chunk size | 32 MiB | Checked against the declared length before anything is read |
+| PNG card payload, base64 | 4 × ceil(card JSON cap / 3) bytes | Bounds the encoded text before decoding. The decoded JSON still has its own cap |
 | Zip entries | 1,024 | Bounds the directory walk |
 | Zip entry, uncompressed | 64 MiB | Checked against the declared size before inflating |
 | Zip total, uncompressed | 128 MiB | Over every entry extracted from one archive |
