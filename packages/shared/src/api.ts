@@ -1,4 +1,5 @@
 import { PluginApi } from "./plugins.ts"
+import { UpdateApi } from "./updates.ts"
 import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
@@ -541,12 +542,15 @@ export class DatabaseStatusApi extends RpcGroup.make(
   Rpc.make("GetDatabaseStartup", { success: DatabaseStartup, error: Schema.Union([Forbidden, ServerError]) })
 ).middleware(Authentication) {}
 
+export const AuthenticatedUpdateApi = UpdateApi.middleware(Authentication)
+
 /** A workshop composer's library items (composerApi.ts). */
 export class AuthenticatedComposerLibraryApi extends ComposerLibraryApi.middleware(Authentication) {}
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedComposerLibraryApi)
   .merge(DatabaseStatusApi)
+  .merge(AuthenticatedUpdateApi)
   .merge(AuthenticatedModelEditApi)
   .merge(AuthenticatedMoveApi)
   .merge(AuthenticatedPluginApi)

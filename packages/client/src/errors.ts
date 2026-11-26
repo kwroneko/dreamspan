@@ -25,6 +25,7 @@ import { NotResumable } from "@dreamspan/shared/agent.ts"
 import { ApprovalRefused, EffectUndoRefused, GrantRefused } from "@dreamspan/shared/workshopApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
+import { UpdateRejected } from "@dreamspan/shared/updates.ts"
 
 export interface AppError {
   readonly tag: string
@@ -74,6 +75,7 @@ const stale = (entity: string) =>
   )
 
 const describeError = (error: unknown): AppError => {
+  if (error instanceof UpdateRejected) return make("UpdateRejected", error.message)
   if (error instanceof PluginRejected) return make("PluginRejected", sentence(error.message))
   if (error instanceof ForkNotesChanged) return make("ForkNotesChanged", error.message)
   if (error instanceof LcmEstimateChanged) return make("LcmEstimateChanged", error.message)

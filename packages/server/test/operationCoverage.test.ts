@@ -27,6 +27,9 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       "plugin.new"
     ])
     const protectedTags = [
+      "GetUpdateStatus",
+      "CheckForUpdates",
+      "ApplyServerUpdate",
       "SetWorkshopGrant",
       "AnswerToolApproval",
       "SetRegexApproval",

@@ -52,6 +52,7 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
         ...process.env,
         HOST: "127.0.0.1",
         PORT: String(serverPort),
+        UPDATE_CHECK: "off",
         DATA_DIR: dataDir,
         DB_READERS: "1",
         // The bundles `npm run test:browser` built: a source worker takes about five times the

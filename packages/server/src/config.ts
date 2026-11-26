@@ -14,6 +14,13 @@ const AppConfigFromEnv = Config.all({
   port: Config.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })), serverEnvironment.PORT).pipe(
     Config.withDefault(8080)
   ),
+  updateCheck: Config.Literals(["on", "off"], serverEnvironment.UPDATE_CHECK).pipe(Config.withDefault("on")),
+  updateCheckIntervalMs: Config.schema(
+    Schema.Int.check(Schema.isBetween({ minimum: 60_000, maximum: 2_147_483_647 })),
+    serverEnvironment.UPDATE_CHECK_INTERVAL_MS
+  ).pipe(Config.withDefault(1_800_000)),
+  updateRemote: Config.String(serverEnvironment.UPDATE_REMOTE).pipe(Config.withDefault("origin")),
+  updateBranch: Config.String(serverEnvironment.UPDATE_BRANCH).pipe(Config.withDefault("master")),
   dataDir: Config.String(serverEnvironment.DATA_DIR).pipe(Config.withDefault("./data")),
   /** Every account's Files (spec/FILES-AND-ENVIRONMENT.md §1.1); empty: DATA_DIR/files. */
   filesDir: Config.String(serverEnvironment.FILES_DIR).pipe(Config.withDefault("")),

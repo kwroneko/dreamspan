@@ -874,6 +874,9 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   ListUsers: { adminOnly: (actor) => refused(actor.api.ListUsers(), "Forbidden") },
   GetDatabaseStartup: { adminOnly: (actor) => refused(actor.api.GetDatabaseStartup(), "Forbidden") },
+  GetUpdateStatus: { adminOnly: (actor) => refused(actor.api.GetUpdateStatus(), "Forbidden") },
+  CheckForUpdates: { adminOnly: (actor) => refused(actor.api.CheckForUpdates(), "Forbidden") },
+  ApplyServerUpdate: { adminOnly: (actor) => refused(actor.api.ApplyServerUpdate(), "Forbidden") },
   CreateUser: {
     adminOnly: (actor) =>
       refused(

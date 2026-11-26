@@ -18,5 +18,7 @@ vi.mock("../src/actions.tsx", () => ({
 it("shows the running server's version from Health", () => {
   register()
   const page = routes.get("settings.status")!
-  expect(renderToStaticMarkup(createElement(page.component))).toContain("Version</dt><dd>9.8.7</dd>")
+  const html = renderToStaticMarkup(createElement(page.component))
+  expect(html).toContain("Version</dt><dd>9.8.7</dd>")
+  expect(html).not.toContain(">Updates<")
 })
