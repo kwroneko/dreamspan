@@ -380,6 +380,6 @@ const bootstrapAdmin = Effect.gen(function* () {
     passwordHash: yield* hashPassword(password, yield* PasswordCost)
   })
   yield* user
-    ? Effect.logInfo(`Set the password of ${user.handle} from the environment`)
+    ? Effect.logInfo(`Set the password of account ${user.id} from the environment`)
     : Effect.logInfo("The admin password in the environment is ignored: an admin already has a password")
 })

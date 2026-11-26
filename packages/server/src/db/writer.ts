@@ -1,3 +1,4 @@
+import { serverLogs } from "../serverLogs.ts"
 import { makePluginWriteHandlers } from "./pluginData.ts"
 import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
 import { makeFileShareWriteHandlers } from "./fileShares.ts"
@@ -183,5 +184,7 @@ RpcServer.layer<OpsOf<typeof WriteOps>>(WriteOps, { concurrency: 1 }).pipe(
   Layer.provide(RpcServer.layerProtocolWorkerRunner),
   Layer.provide(NodeWorkerRunner.layer),
   Layer.launch,
-  NodeRuntime.runMain
+  Effect.tapCause((cause) => Effect.logError("Database writer stopped", cause)),
+  Effect.provide(serverLogs),
+  NodeRuntime.runMain({ disableErrorReporting: true })
 )

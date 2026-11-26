@@ -907,6 +907,8 @@ export const layer = (options: ProvidersOptions = {}) =>
   Layer.effect(
     Providers,
     Effect.gen(function* () {
+      // SDK callbacks cross a Promise boundary. Keep the server logger when they run Effects.
+      const runProviderEffect = Effect.runPromiseWith(yield* Effect.context<never>())
       const formats = yield* Effect.serviceOption(Formats)
       const reader = yield* Reader
       const writer = yield* Writer
@@ -1401,12 +1403,12 @@ export const layer = (options: ProvidersOptions = {}) =>
           }
           if (probe === null || probe.state === "failed") {
             const detail = probe === null ? "No answer in time." : prepared.scrub(probe.detail)
-            yield* Effect.logInfo(`price list of ${connectionId}: ${detail}`)
+            yield* Effect.logInfo(`price list of ${connectionId}: fetch failed`)
             record("failed", at + PRICE_RETRY_MS, detail)
             return
           }
           if (probe.state === "unsupported" || probe.state === "denied") {
-            yield* Effect.logInfo(`price list of ${connectionId}: ${prepared.scrub(probe.detail)}`)
+            yield* Effect.logInfo(`price list of ${connectionId}: ${probe.state}`)
             // Unsupported: asked again only when the connection changes or models are refreshed.
             record(
               probe.state,
@@ -2085,7 +2087,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   if (key) {
                     const warm =
                       ttl != null &&
-                      (await Effect.runPromise(
+                      (await runProviderEffect(
                         fromStorage(
                           reader.CachePrefixWarm({
                             userId: request.userId,
@@ -2112,7 +2114,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 }
                 // All live reads and cache waits are over. A later tool round has the same
                 // authorization; a changed run cannot send new bytes.
-                const configuration = await Effect.runPromise(authorizeAuto(request.userId, auto), { signal }).catch(
+                const configuration = await runProviderEffect(authorizeAuto(request.userId, auto), { signal }).catch(
                   (error: unknown) => {
                     state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
                     throw error
@@ -2168,7 +2170,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
-              await Effect.runPromise(authorizeAuto(request.userId, auto), { signal }).catch((error: unknown) => {
+              await runProviderEffect(authorizeAuto(request.userId, auto), { signal }).catch((error: unknown) => {
                 state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
                 throw error
               })
@@ -2229,7 +2231,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   // Adapters without injected fetch must still authorize their dispatch.
                   let configuration: string | null = null
                   if (!prepared.kind.acceptsFetch)
-                    configuration = await Effect.runPromise(authorizeAuto(request.userId, auto)).catch(
+                    configuration = await runProviderEffect(authorizeAuto(request.userId, auto)).catch(
                       (error: unknown) => {
                         state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
                         throw error
@@ -2316,7 +2318,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                       : history
                         ? [{ kind: "reasoning_left_out" as const, message: HISTORY_DROP_NOTES[bound.reason] }]
                         : [{ kind: "thinking_left_out" as const, message: DROP_NOTES[bound.reason] }]
-                  await Effect.runPromise(open(final), { signal })
+                  await runProviderEffect(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },
                     final
@@ -2367,7 +2369,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                       ...(extraMessageText.length > 0 ? { extraMessageText } : {})
                     }
                     recordSent = () =>
-                      Effect.runPromise(
+                      runProviderEffect(
                         fromStorage(
                           writer.RecordSentContext({
                             userId: request.userId,
@@ -2398,7 +2400,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         )
                         // Not stopped with the request: what was sent stays on record.
                       ).catch((error: unknown) =>
-                        Effect.runPromise(
+                        runProviderEffect(
                           Effect.logWarning(`recording the context sent for ${rolloutId} failed`, error)
                         )
                       )
@@ -2462,7 +2464,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 // For the request inspector only, as what the check above left out.
                 const rolloutId = request.attribution.rolloutId
                 if (state.providerDropped > 0 && rolloutId)
-                  await Effect.runPromise(
+                  await runProviderEffect(
                     fromStorage(
                       writer.RecordSentContext({
                         userId: request.userId,
@@ -2476,7 +2478,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                       })
                     )
                   ).catch((error: unknown) =>
-                    Effect.runPromise(Effect.logWarning(`recording ${rolloutId}'s dropped reasoning failed`, error))
+                    runProviderEffect(Effect.logWarning(`recording ${rolloutId}'s dropped reasoning failed`, error))
                   )
               }
             },
@@ -3128,7 +3130,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 apiKey: prepared.apiKey,
                 headers: prepared.headers,
                 fetch: async (input, init) => {
-                  const configuration = await Effect.runPromise(authorizeAuto(request.userId, auto), { signal })
+                  const configuration = await runProviderEffect(authorizeAuto(request.userId, auto), { signal })
                   if (configuration !== null && configuration !== autoConfigurationStamp())
                     throw new Error(autoChanged().message)
                   return fetchFor(prepared, () => {})(input, init)

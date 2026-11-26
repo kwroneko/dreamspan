@@ -900,11 +900,7 @@ export const layer = Layer.effect(
         const client = new Client(MCP_CLIENT_INFO, { capabilities: {} })
         // Sampling, roots and elicitation are never declared; a server asking anyway is refused.
         client.fallbackRequestHandler = async (request) => {
-          runFork(
-            Effect.logWarning(
-              `MCP server "${connection.name}" asked for ${request.method}, which the app doesn't offer`
-            )
-          )
+          runFork(Effect.logWarning(`MCP server ${connection.id} asked for an unsupported method`))
           throw new McpError(ErrorCode.MethodNotFound, `${request.method} isn't supported`)
         }
         yield* Effect.acquireRelease(
@@ -1239,7 +1235,7 @@ export const layer = Layer.effect(
         )
         .pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning(`listing ${prepared.connection.name}'s tools again failed`, cause)
+            Effect.logWarning(`listing ${prepared.connection.id}'s tools again failed`, cause)
           )
         )
     }

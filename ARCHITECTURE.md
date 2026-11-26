@@ -132,6 +132,8 @@ The slow startup refusal tests preserve the shipped `packages/server` and siblin
 
 **Event-loop monitoring** (`eventLoop.ts`). A 10 ms timer measures how late each tick runs, into one-second buckets. `Health` reports the last minute: the longest single delay (`eventLoopMaxMs`) and the worst one-second p99 (`eventLoopP99Ms`). Reading them resets nothing, so callers don't affect each other. Node's `monitorEventLoopDelay` isn't used: it discards the first interval after a reset, so a 300 ms stall starting just after a bucket change showed as 0.3 ms. Tested: a single 300 ms block shows in the max, including 2, 10 and 25 ms after a bucket change, and still does after another read and a bucket change. Anything that blocks the loop delays every live stream, so this is a budgeted metric (CLIENT-FRAMEWORK §7).
 
+Server logs use operation names, internal ids, counts and HTTP status codes. The HTTP logger omits request paths and raw causes. The server and worker loggers reduce error objects and Effect causes to failure categories before formatting. Keep provider diagnostics, filenames and story text out of log messages themselves. Provider error details used by the requesting account follow the provider layer's credential scrubbing (§6).
+
 ---
 
 ## 3. Database

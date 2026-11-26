@@ -482,11 +482,15 @@ function Section({
   if (all.length === 0 && archived.length === 0)
     return (
       <EmptyState title={`No ${noun} yet`}>
-        <Tooltip label="Opens file import.">
-          <Link to="/import" className="text-accent">
-            Import files to add some.
-          </Link>
-        </Tooltip>
+        {kind === "note" ? (
+          <p>Use New note to make one, or save a note from a chat or card as a shared note.</p>
+        ) : (
+          <Tooltip label="Opens file import.">
+            <Link to="/import" className="text-accent">
+              Import files to add some.
+            </Link>
+          </Tooltip>
+        )}
       </EmptyState>
     )
   return (

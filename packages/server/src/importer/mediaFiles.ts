@@ -230,7 +230,7 @@ export const discardMedia = (dataDir: string, sha256: string, wanted: Effect.Eff
 export const readMedia = (dataDir: string, path: string) =>
   isMediaPath(path)
     ? Effect.tryPromise(() => readFile(join(dataDir, path))).pipe(
-        Effect.tapError((error) => Effect.logWarning(`media file ${path} can't be read`, error)),
+        Effect.tapError((error) => Effect.logWarning("a media file can't be read", error)),
         Effect.orElseSucceed(() => undefined)
       )
     : Effect.succeed(undefined)

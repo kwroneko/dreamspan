@@ -118,10 +118,7 @@ export class ImageTokenCounts extends Context.Service<
                     Effect.timeout("30 seconds"),
                     gate.withPermits(1),
                     Effect.catch((error) =>
-                      Effect.as(
-                        Effect.logWarning(`counting an image's tokens for ${pending.modelKey} failed`, error),
-                        "failed" as const
-                      )
+                      Effect.as(Effect.logWarning("counting an image's tokens failed", error), "failed" as const)
                     ),
                     Effect.ensuring(Effect.sync(() => busy.delete(key)))
                   )

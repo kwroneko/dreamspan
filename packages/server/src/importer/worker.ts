@@ -1,6 +1,7 @@
+import { serverLogs } from "../serverLogs.ts"
 // Format worker bootstrap: every worker installs the same scoped built-ins and plugins.
 import { NodeRuntime, NodeWorkerRunner } from "@effect/platform-node"
-import { Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/rpc"
 import * as Importers from "./importers.ts"
 import * as Exporters from "./exporters.ts"
@@ -14,5 +15,7 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
   Layer.provide(RpcServer.layerProtocolWorkerRunner),
   Layer.provide(NodeWorkerRunner.layer),
   Layer.launch,
-  NodeRuntime.runMain
+  Effect.tapCause((cause) => Effect.logError("Format worker stopped", cause)),
+  Effect.provide(serverLogs),
+  NodeRuntime.runMain({ disableErrorReporting: true })
 )
