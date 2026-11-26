@@ -17,14 +17,14 @@
 
 Original status: Draft, 2026-10-09. Phase 0 deliverable (see PLAN.md). Everything here is **[P] Proposed** unless marked otherwise. Section references like "DESIGN §3.1" point to [DESIGN.md](DESIGN.md).
 
-**Baseline**: reference-harness's storage layer (`src/storage/database.ts`). We reuse its patterns:
+**Storage principles**
 - `agent_sessions` with a separate `agent_session_payloads` blob table holding the frozen context snapshot and transcript
 - `agent_session_branches` holding the spans discarded by a fork
 - summaries with `summary_events` / `summary_parents` lineage
 - coverage worked out at build time instead of stored
 - a single-writer SQLite queue
 
-What's new here: reference-harness's timeline is a **linear** event list per room. Ours is a **graph** with versions, and it carries state, layered library entities, changesets, and drafts.
+The timeline is a **graph** with versions, and it carries state, layered library entities, changesets and drafts.
 
 ---
 
@@ -134,7 +134,7 @@ users ──< user_prefs, drafts       └──  jobs (summarization, idle-time
   - `exportable`
 - **preset_overlay**: `ops[]` applied to whatever preset is active: `toggle(identifier, on)`, `replace(identifier, content)`, `append(identifier, text)`, `insert(after_identifier, prompt)`. It's attached to a card (the owner) and applied under a condition (DESIGN §6.3). It's stored as operations rather than a snapshot, because it has to apply to presets it has never seen.
 
-The documents are validated with Effect Schema (reference-harness uses TypeBox; this codebase uses Effect throughout). Each document has a `schema_version` so it can be migrated. Card and lorebook schemas are in `@dreamspan/shared/docs/` (ARCHITECTURE.md §8).
+The documents are validated with Effect Schema. Each document has a `schema_version` so it can be migrated. Card and lorebook schemas are in `@dreamspan/shared/docs/` (ARCHITECTURE.md §8).
 
 ---
 
@@ -295,7 +295,7 @@ Notes are `entities` of kind `note` (§3.3), so they have revisions, variants an
 
 ## 7. Rollouts
 
-### 7.1 `rollouts` (the equivalent of reference-harness's `agent_sessions`)
+### 7.1 `rollouts`
 | column | notes |
 |---|---|
 | `id`, `chat_id` | |
@@ -306,17 +306,17 @@ Notes are `entities` of kind `note` (§3.3), so they have revisions, variants an
 | `parent_rollout_id` | Set when it resumes a previous rollout (`rollout.continuity = resume_previous`, DESIGN §7.7) |
 | `role` | `narrator` · `agent:<entity>` · `summarizer` · … |
 | `connection_id`, `model_id` | |
-| `request_class` | Scheduler priority (`interactive` · `idle` · `background`), as in reference-harness |
+| `request_class` | Scheduler priority (`interactive` · `idle` · `background`) |
 | `usage` | Input, output, cache read, cache write, cost, request count |
 | `cache_observed_json` | Per request: whether a cache read happened. Feeds the warm/cold indicator and the parallel-swipe staggering. |
 | `error`, `created_at`, `started_at`, `completed_at` | |
 
-**`rollout_payloads`** `(rollout_id, context_snapshot_json, transcript_json)`: blobs kept in their own table, as in reference-harness. The **context snapshot** is the assembled context *as structured parts*, each tagged with its source, not just the final request body. That's what lets the run inspector show "preset block X, card Y, summary Z, notes".
+**`rollout_payloads`** `(rollout_id, context_snapshot_json, transcript_json)`: blobs kept in their own table. The **context snapshot** is the assembled context *as structured parts*, each tagged with its source, not just the final request body. That's what lets the run inspector show "preset block X, card Y, summary Z, notes".
 
 **`rollout_branches`**: the same idea as `agent_session_branches`. These are discarded spans from step edits, redos and forks inside a rollout.
 
 ### 7.2 Resuming
-As in reference-harness `recovery.ts`. The snapshot is taken when the rollout is created, and the transcript is flushed after each turn completes. To resume, synthetic error turns and partial turns are stripped, the interruption policy is applied (DESIGN §7.5), and a fresh agent is reseeded. Editing a step writes a `rollout_branches` row for the discarded tail and then resumes.
+The snapshot is taken when the rollout is created, and the transcript is flushed after each turn completes. To resume, synthetic error turns and partial turns are stripped, the interruption policy is applied (DESIGN §7.5), and a fresh agent is reseeded. Editing a step writes a `rollout_branches` row for the discarded tail and then resumes.
 
 ---
 
@@ -338,13 +338,13 @@ As in reference-harness `recovery.ts`. The snapshot is taken when the rollout is
 
 **`summary_inputs`** (level 1) `(summary_id, slot_id, version_id, ordinal)`: **records the version of each slot that was summarized.**
 
-**`summary_parents`** (level ≥ 2) `(summary_id, parent_id, ordinal)`, as in reference-harness.
+**`summary_parents`** (level ≥ 2) `(summary_id, parent_id, ordinal)`.
 
-**`summarization_jobs`**: as in reference-harness, but keyed by `(chat_id, first_slot_id, last_slot_id, level)`. `request_class` includes `idle`.
+**`summarization_jobs`**: keyed by `(chat_id, first_slot_id, last_slot_id, level)`. `request_class` includes `idle`.
 
 ### 8.2 Behavior on a graph
 - **Sharing:** a summary is valid for **every path that contains its covered chain**. Branches and threads share summaries up to the fork automatically, with no copying.
-- **Coverage selection** works as in reference-harness's `selectSummaryCoverage`, restricted to summaries whose chain lies on the path and whose `audience` includes the viewer. Contiguity is checked by slot parentage instead of timestamps.
+- **Coverage selection** considers only summaries whose chain lies on the path and whose `audience` includes the viewer. Contiguity is checked by slot parentage instead of timestamps.
 - **Staleness is derived, not flagged:** a level-1 summary is stale if any `summary_inputs.version_id` differs from that slot's current `selected_version_id`, or if a slot became `context_excluded`. A higher level is stale if any parent is stale. Stale summaries are shown and queued for regeneration in idle time (DESIGN §8).
 - **Mechanical changesets** (renames) write a new `summary_revision` and update `summary_inputs.version_id` to the new versions, so the summary stays fresh without being regenerated.
 - **Chunking:** the job planner never lets a chunk cross a branch point it doesn't need to, or a presence boundary when presence-limited views are active.
@@ -411,7 +411,7 @@ Drafts are written continuously (debounced) through the WebSocket. Committing tu
 
 **`app_settings`** `(key, value_json)`: instance-wide defaults (admin). **`user_settings`** `(user_id, key, value_json)`: each user's defaults, including defaults per chat kind.
 
-**`jobs`**: generic background work (import, backfill, idle-time scheduling), separate from `summarization_jobs`, with reference-harness-style claim, retry and priority.
+**`jobs`**: generic background work (import, backfill, idle-time scheduling), separate from `summarization_jobs`, with claim, retry and priority rules.
 
 ---
 

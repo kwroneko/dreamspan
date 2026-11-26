@@ -1,6 +1,6 @@
 # One fork model for the library
 
-**Status**: Obsolete: implemented 2026-11-06 (libfork); ARCHITECTURE §3.9 ("The model", "Forks") documents what was built. Kept as the design record. Originally Proposed, 2026-11-06 (libfork), from schemaforecast §2.6. The owner's decisions it rests on are DESIGN §4 **[D]** 2026-11-01 ("Explicit merges for every library fork"), the owner's 2026-11-06 instruction quoted below, and DESIGN §4 **[D]** 2026-11-06 ("A fork's History is a git branch's log"), which replaced §4 change 1 as first built; everything else is **[P]**. Delta from master df2cdffa (ARCHITECTURE §3.9, §14.6). reference-harness (`latest`, 9b385944) has no counterpart: it keeps no versioned library documents and no forks of them, so nothing there is reused.
+**Status**: Obsolete: implemented 2026-11-06 (libfork); ARCHITECTURE §3.9 ("The model", "Forks") documents what was built. Kept as the design record. Originally Proposed, 2026-11-06 (libfork), from schemaforecast §2.6. The owner's decisions it rests on are DESIGN §4 **[D]** 2026-11-01 ("Explicit merges for every library fork"), the owner's 2026-11-06 instruction quoted below, and DESIGN §4 **[D]** 2026-11-06 ("A fork's History is a git branch's log"), which replaced §4 change 1 as first built; everything else is **[P]**. Delta from master df2cdffa (ARCHITECTURE §3.9, §14.6).
 
 Owner, 2026-11-06: "If it doesn't make a product difference, we shouldn't have two models, but make sure the unified one is the best option."
 

@@ -62,7 +62,7 @@ const ordered = Schema.makeFilter(
 export const LcmSettings = Schema.Struct({
   enabled: Schema.Boolean,
   ...sizes,
-  /** Same-level summaries condensed into one (reference-harness's condense_fanout, 5). */
+  /** How many same-level summaries are condensed into one. Defaults to 5. */
   fanout: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(2))),
   /** The output target of a condensation, in tokens (condense_target_tokens, 800). */
   condenseTarget: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))

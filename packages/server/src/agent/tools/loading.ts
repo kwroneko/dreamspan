@@ -2,9 +2,8 @@
 // change nothing outside the run, so they need no capability and are never asked first. Loading
 // never grants anything: a loaded tool runs through the same offered-tools check, receipts,
 // capability standing and approvals as one sent from the start, and only tools already in the
-// run's frozen offer can be loaded (an Off capability's tools aren't in it). A delta from
-// reference-harness's `tools/tool-search.ts` and `tools/load-skill.ts`: skills are registered entries,
-// not files, and the result's `loaded` names are what the wire layer serializes as the load point.
+// run's frozen offer can be loaded (an Off capability's tools aren't in it). Skills are registry
+// entries. The result's `loaded` names are what the wire layer serializes as the load point.
 import { createHash } from "node:crypto"
 import { Type } from "@earendil-works/pi-ai"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"

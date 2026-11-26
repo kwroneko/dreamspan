@@ -1,6 +1,6 @@
 // The reply contract (spec/REPLY-CONTRACT.md milestone 1): a story reply with tools is given with
 // `send_message` unless the chat says otherwise; text outside it is never the reply and never
-// streams into the body; a turn that ends in text is nudged as reference-harness's forced completion, at
+// streams into the body. A turn that ends in text is nudged at
 // most three times a run, counted from the transcript; then the reply fails visibly. The
 // replying character may pass with `no_reply`, shown as a silent, swipeable version. Scripted
 // providers only.

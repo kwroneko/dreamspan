@@ -7,7 +7,7 @@
 
 ## 1. Why this project, unlike the earlier attempts
 
-The owner's earlier frontends dropped Effect because they had nothing for it to manage. reference-harness's console is the measured case: about 1,400 `Schema.*` calls against roughly a dozen uses of `Effect` itself, all at one HTTP boundary.
+The owner's earlier frontends dropped Effect because they had nothing for it to manage.
 
 This project is made of exactly what Effect is for:
 
@@ -59,11 +59,11 @@ This project is made of exactly what Effect is for:
 - **`unstable` modules (rpc, http, sql, reactivity).**
   - Pin exact versions and upgrade deliberately.
   - Keep our own thin modules between app code and these APIs, so a breaking minor touches a few files.
-- **SQLite driver.** `@effect/sql-sqlite-node` v4 is built on `node:sqlite`, not better-sqlite3 (which reference-harness uses).
+- **SQLite driver.** `@effect/sql-sqlite-node` v4 is built on `node:sqlite`, not better-sqlite3.
   - FTS5 works in `node:sqlite` (checked on Node 24.15, SQLite 3.51.3).
   - Node's docs still mark `node:sqlite` as a release candidate.
   - Turso was evaluated as an alternative engine and deferred: [STORAGE.md](STORAGE.md).
-  - **[O]** Choose between `node:sqlite` through the official driver, or better-sqlite3 behind our own `SqlClient` adapter. It also needs checking that extension loading (sqlite-vec, if we use it) and reference-harness's single-writer queue port cleanly.
+  - **[O]** Choose between `node:sqlite` through the official driver, or better-sqlite3 behind our own `SqlClient` adapter. It also needs checking that extension loading (sqlite-vec, if we use it) works with the adapter and that writes can be serialized through one connection.
 - **Agents write v3 code by habit.** Examples: `catchAll` instead of `catch`, `Context.Tag` instead of `Context.Service`, `Either` instead of `Result`, and stale `effect/unstable/*` paths from the beta.
   - Install the official `Effect-TS/skills`.
   - State "Effect 4.x only" in CLAUDE.md.
@@ -103,4 +103,3 @@ Facts checked 2026-10-10 against the npm registry and the published `effect@4.0.
 - `node:sqlite` status: https://nodejs.org/api/sqlite.html
 - Reference apps: https://github.com/pingdotgg/t3code · https://github.com/HazelChat/hazel
 - The counter-view: https://runharbor.com/blog/2025-11-24-why-we-dont-use-effect-ts
-- reference-harness console usage counted locally (`console/src`, 2026-10-10)

@@ -995,7 +995,7 @@ export const baseline: ReadonlyArray<string> = [
     connection_id TEXT REFERENCES connections(id),
     model_id TEXT REFERENCES models(id),
     request_class TEXT NOT NULL,
-    -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness).
+    -- Provider-reported usage, rolled up. NULL means unknown, not zero.
     llm_requests INTEGER,
     usage_input_tokens INTEGER,
     usage_output_tokens INTEGER,

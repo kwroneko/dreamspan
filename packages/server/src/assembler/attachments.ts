@@ -1,5 +1,5 @@
 // A workshop message's attachments as the model reads them (spec/FILES-AND-ENVIRONMENT.md §6.1),
-// in the shape reference-harness uses: one `<attachment filename="…" type="…" size="…" path="…"/>` line
+// one `<attachment filename="…" type="…" size="…" path="…"/>` line
 // each, after the message's text. The file is already in the account's Files at that path, so
 // the assistant opens it with its tools when it needs it; an image also goes as an image block
 // (`image_block="true"`) to a model that sees images. The lines stay with the message in every

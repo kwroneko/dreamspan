@@ -1,6 +1,6 @@
 # Dynamic tool loading: tool_search, load_skill and card skills
 
-**Status**: Implemented portions obsolete as proposals (§2–§7, §10, §11.1(b), §15–§17), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
+**Status**: Implemented portions obsolete as proposals (§2–§7, §10, §11.1(b), §15–§17), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`).
 
 **Built finish1-strict (2026-11-25), obsolete as a proposal.** Strict JSON-schema tool support follows the OpenAI and Messages wires by default, including compatible and opaque deployments; explicit compat overrides remain authoritative. The narrower defaults in §17.3 row 11 are historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
 
@@ -18,7 +18,7 @@
 
 **Built finish1-sdk (2026-11-25), obsolete as a proposal.** SDK cache and transcript controls default on by compatible wire, with operation-specific measured exclusions and endpoint classification, including OpenRouter behind a named OpenAI connection. The family/provider allowlists in §17.3 rows 8 and 12 are historical. Current implementation and regression coverage are in ARCHITECTURE.md. No new live measurements were made.
 
-The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
+The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
 This replaces WORKSHOP §1.2's "Skills … Not taken" row and AGENTIC §1.2's "dynamic tool loading" exclusion, for workshops only.
 
@@ -57,7 +57,7 @@ The transforms are `providers/toolLoading.ts`, registered first in `providers/bu
 
 ## 4. The loaded set comes from the transcript
 
-A loading tool's successful result stores `details.loaded` (names). Only a result matching an earlier `tool_search` or `load_skill` call is a load point; unrelated and orphan results are ignored. The loaded set at any point is the deferred names some successful loading result names (`loadedSet`, `loadPoints` in `agent/toolLoading.ts`), as in reference-harness. Nothing else stores it, so resume, step edits and carried turns load the same tools at the same points:
+A loading tool's successful result stores `details.loaded` (names). Only a result matching an earlier `tool_search` or `load_skill` call is a load point; unrelated and orphan results are ignored. The loaded set at any point is the deferred names some successful loading result names (`loadedSet`, `loadPoints` in `agent/toolLoading.ts`). Nothing else stores it, so resume, step edits and carried turns load the same tools at the same points:
 
 - Editing a load result's text keeps its `details`: the load stays.
 - Editing a loading call's arguments runs it again under a new id: a new load.
@@ -160,13 +160,13 @@ At the time of this round, OpenAI direct was unmeasured; §16 supersedes that st
 
 DeepSeek through OpenRouter also needs `reasoning` / `reasoning_content` on a replayed assistant tool call (400 without). Its valid ids are `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-pro` and `deepseek/deepseek-chat`.
 
-## 9. reference-harness's caching problems, and how this avoids them
+## 9. Cache behavior during tool loading
 
 1. Responses `supports_tool_search` off by default (f631da3f; 71 of 72 skill loads rewrote the whole context): here the Responses wire uses `tool_search_output` items whenever it's on, and a wire is on only for its measured host.
 2. Responses deferred `function_call` replay without namespace: 400 "Missing namespace for function_call" (347a99b2, 5c44829b): the transform sets `namespace` to the tool's name on every replayed call of a loaded tool.
 3. Anthropic: declaring a loaded tool only at load time changes `tools`, rewriting the cache and invalidating thinking bound to the prefix (e4a7823d, f4f4119e): every tool is declared from the first request, deferred ones marked; the tool list bytes never change (measured, §8).
 4. Bedrock has no cache lookback, and its own breakpoints work (96a2c8ce, 58480097): Bedrock gets no wire. Through OpenRouter it was measured (§8.2): each newly used loaded tool rewrote the whole cache, so a Bedrock-pinned or unpinned OpenRouter Claude gets every tool. Direct Bedrock (connection kind `bedrock`) is not measured: Anthropic's docs list tool search on Bedrock's InvokeModel only, not Converse.
-5. Hosts that don't defer natively: reference-harness's `declare_deferred_tools` with `supports_tool_references` off sends loaded definitions as text. That works through OpenRouter only where the upstream defers natively (Anthropic, Vertex); where OpenRouter defers itself (DeepSeek) or Bedrock serves, the first call of each loaded tool rewrote the cache (§8.2), so those get every tool instead.
+5. Sending loaded definitions as text through OpenRouter preserved the cache when the upstream deferred tools natively (Anthropic, Vertex). When OpenRouter deferred tools itself (DeepSeek) or routed to Bedrock, the first call to each loaded tool rewrote the cache (§8.2). Those requests send every tool upfront.
 6. Tools the agent shouldn't search (6618bd30, harness-only tools): only the run's frozen offer is searchable.
 
 ## 10. Built, and not yet
@@ -229,7 +229,7 @@ Regressions: `toolLoadingReview.test.ts` (untrusted index/read, frozen and selec
 | [OpenAI tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) | gpt-5.4 and later only. Loaded tools go at the end of the context, keeping the cache; `tool_search_call` / `tool_search_output` and `additional_tools` items |
 | [Anthropic tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) | Custom tool search returns `tool_reference` blocks; supported models; on Bedrock through InvokeModel only (not Converse), and on Vertex |
 | [DeepSeek Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api) | Tool fields `name`, `input_schema`, `description`; `cache_control` ignored; no `defer_loading`, no `tool_reference` |
-| reference-harness `latest` (9b385944), `spec/DYNAMIC-TOOL-LOADING.md` | Per-transport table; compat flags `supports_tool_search` (on by default), `supports_tool_references`, `declare_deferred_tools` (definitions as text when references are off), `drop_stale_thinking` |
+
 | pi-ai 0.84.2 (npm) | Deferral modes: `kimi` (tools in a system message) only for Kimi K3 on Moonshot and Fireworks, never DeepSeek or OpenRouter; `supportsAdditionalTools` / `supportsToolSearch` for OpenAI gpt-5.4+; tool references off for Haiku. The installed pi-ai 1.0.3 has no deferral support |
 
 
@@ -243,7 +243,7 @@ No provider calls during review. The measured allowlist remains the five Claude 
 
 ## 15. Dispatcher implementation (calltool1, 2026-11-13; obsolete as a proposal, current defaults in §17)
 
-Delta from reference-harness's `declare_deferred_tools` with references off: definitions still travel as text at successful transcript load points, but loaded tools are never added to the declared array. The fixed `call_tool {name, arguments}` accompanies the immediate tools from the first request. The model uses exact names; immediate tools, loaders and `call_tool` itself cannot be dispatched. The established final request without tools remains the turn-cap/partial-text exception.
+Deferred definitions travel as text at successful transcript load points, but loaded tools are never added to the declared array. The fixed `call_tool {name, arguments}` accompanies the immediate tools from the first request. The model uses exact names; immediate tools, loaders and `call_tool` itself cannot be dispatched. The established final request without tools remains the turn-cap/partial-text exception.
 
 `ExecutionRegistry.toolLoadingWires` has a replaceable `dispatcher` fallback profile. Native profiles win in Automatic. Defaults are restricted to the following live results in §11.1; no new live measurements were made:
 
@@ -311,7 +311,7 @@ Haiku's other dispatcher runs read 23449/23942 at R3. Dispatcher loaded definiti
 
 ## 17. Provider default audit and live measurements, 2026-11-24
 
-This round starts from assembler version 85 with Automatic dispatcher already enabled for every workshop model outside its native profile. §17 records the current decisions and supersedes the Automatic profiles in §§3, 8, 14, 15 and 16. Assembler version 86 fences the changes to native selection, cache and model capability defaults. As in reference-harness, new compatible model IDs inherit tool loading. Dreamspan keeps the existing per-wire transforms and uses its fixed dispatcher when native loading is unavailable.
+This round starts from assembler version 85 with Automatic dispatcher already enabled for every workshop model outside its native profile. §17 records the current decisions and supersedes the Automatic profiles in §§3, 8, 14, 15 and 16. Assembler version 86 fences the changes to native selection, cache and model capability defaults. New compatible model IDs inherit tool loading. Dreamspan keeps the existing per-wire transforms and uses its fixed dispatcher when native loading is unavailable.
 
 ### 17.1 Native loading
 

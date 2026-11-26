@@ -1306,8 +1306,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           return saved ? undefined : { block: true, reason: "The tool call could not be saved. Go on without it." }
         },
         // One message a turn (DESIGN §7.2): a sent message, or a pass, ends the loop. Under
-        // `send_message` alone, a turn that ends in plain text is asked to send it, as reference-harness's
-        // forced completion (spec/REPLY-CONTRACT.md §3.3), at most SEND_NUDGES times a run; then the
+        // `send_message` alone, a turn ending in plain text is nudged to send it
+        // (spec/REPLY-CONTRACT.md §3.3), at most SEND_NUDGES times a run. Then the
         // reply fails (§3.4). A failed or stopped turn is never nudged: it fails or stops the reply.
         finishTurn: ({ message }, signal) => {
           // The cap's request is the last, whatever it asked for; a stop ends the loop here.
@@ -1356,7 +1356,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       })
 
       // The transcript is the agent's whole state, flushed in order after each turn and at the
-      // end (reference-harness session-capture). A failed write is logged, never fatal.
+      // end. A failed write is logged, never fatal.
       let flushing: Promise<void> = Promise.resolve()
       // Whether the loop reached its own end; a scope closed before that was stopped (the user's
       // Stop interrupts the run, and the finalizer aborts the agent).

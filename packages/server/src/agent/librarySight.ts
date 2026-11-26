@@ -4,9 +4,7 @@
 // class once per reply, inside the call's step, with the four scopes: Allow (this reply), Allow
 // in this chat, Allow always for the workshop's assistant card, Allow always. Off refuses.
 //
-// Delta from reference-harness (`src/config/schema.ts`'s per-agent `tools` allowlists): there, what an
-// agent may use is static configuration with no one to ask; here the user is present and the
-// content is theirs, so the first use of a class asks, and the answer's scope is the user's.
+// The first use of a class asks the user. The user chooses the scope of that grant.
 import type { ApprovalPrompt } from "@dreamspan/shared/agent.ts"
 import type { ChatId, ForkId, SlotId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"

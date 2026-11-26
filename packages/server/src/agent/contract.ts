@@ -1,10 +1,8 @@
 // The reply contract's mechanical records (spec/REPLY-CONTRACT.md §3.6, milestone 2): a run under
 // the send tool, read from its stored transcript and the spans Resume cut from it, as attempts
 // (each ending: the turn before a nudge, or the run's last) with what went wrong in each, and the
-// run's outcome. A delta from reference-harness's `deriveContractEvents` (src/agent/contract.ts): one run a
-// rollout and no contract redos, so no run splitting and no redo numbering; an attempt Resume cut
-// counts, as its failure message does (§3.4); no `sent_not_final` (a send ends our run) and no
-// `self_talk` (reference-harness's offline audit). Pure: the inspector and the per-model metrics read it.
+// run's outcome. Each rollout is one run. An attempt cut by Resume counts toward the failure
+// total (§3.4). A send ends the run. The inspector and per-model metrics use this pure scan.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import {
   CONTRACT_FAILURES,
@@ -17,7 +15,7 @@ import { looksLikeContextMarkup } from "../assembler/contextMarkup.ts"
 import { isNudge } from "./messages.ts"
 import { NO_REPLY, SEND_MESSAGE } from "./steps.ts"
 
-/** Tool-call markup of the common chat templates and tool-call formats, written as text (reference-harness's). */
+/** Tool-call markup from common chat templates and tool-call formats, written as text. */
 const TOOL_CALL_MARKUP: ReadonlyArray<RegExp> = [
   /<\/?(?:[a-z]+:)?(?:tool_calls?|function_calls?|invoke|tool_use)\b/i,
   /<function=/i,
@@ -70,7 +68,7 @@ type Item =
 /**
  * The order the messages were written in: cut k truncated the transcript at its fork index and
  * kept the tail as its messages, so walking the cuts newest first recovers each earlier
- * transcript (reference-harness's `chronology`). `cut`: 0 for the live transcript, else the cut's number.
+ * transcript. `cut`: 0 for the live transcript, else the cut's number.
  */
 const chronology = (messages: ReadonlyArray<AgentMessage>, cuts: ReadonlyArray<ContractCut>): Array<Item> => {
   let current: Array<{ m: AgentMessage; cut: number }> = messages.map((m) => ({ m, cut: 0 }))

@@ -1,7 +1,7 @@
-// The System-One decision API as a provider kind (spec/AGENTIC.md §7; reference-harness
-// `src/decisions/client.ts`): one endpoint takes `{ model, state, questions }` and returns typed
+// The System-One decision API as a provider kind (spec/AGENTIC.md §7).
+// One endpoint takes `{ model, state, questions }` and returns typed
 // answers. It isn't a chat API, so it never goes through pi-ai and writes no replies; the base URL
-// is the endpoint itself, as reference-harness's `endpoint` is, so OpenRouter, TypeSafe's native route,
+// is the endpoint itself, so OpenRouter, TypeSafe's native route,
 // a gateway or a self-hosted server are all just an address.
 import { Effect } from "effect"
 import type { ProviderStreams } from "@earendil-works/pi-ai"

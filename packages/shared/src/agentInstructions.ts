@@ -38,7 +38,7 @@ export const SEND_NUDGE_PROMPT = {
   hint: "Sent when a reply that uses tools ends in plain text instead of sending it. Leave it empty for the default."
 } as const
 
-/** reference-harness's `not_sent` wording, with its no_reply line where the reply may pass. */
+/** The default reminder to send a reply, with a pass option when `no_reply` is available. */
 export const sendNudgeText = (noReply: boolean) =>
   noReply
     ? "Your turn ended without sending a message. You must end every turn by either:\n- Calling send_message with your reply, OR\n- Calling no_reply if you have nothing to say.\n\nText you write outside of send_message is not visible to users."
@@ -50,5 +50,5 @@ export const ownSendNudge = (prompts: ReadonlyArray<{ readonly identifier: strin
   return own.trim() === "" ? null : own
 }
 
-/** How many times one run is asked to send before its reply fails (reference-harness's `forced_completion_retries`). */
+/** How many times one run is asked to send before its reply fails. */
 export const SEND_NUDGES = 3

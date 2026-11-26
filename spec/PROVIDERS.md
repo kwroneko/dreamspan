@@ -10,29 +10,29 @@
 - every provider type has an overridable base URL
 - model lists are fetched from the upstream, and users can add and edit models
 
-This is phase 0's provider work (PLAN.md): connections, model lists, user-defined models with capabilities, write-only keys, the usage ledger, and one streaming entry point that the context assembler (phase 2) and the agent loop (phase 4) will call. It's written as a delta from reference-harness (CLAUDE.md), which runs pi-ai 0.84.2 with a patch.
+This is phase 0's provider work (PLAN.md): connections, model lists, user-defined models with capabilities, write-only keys, the usage ledger, and one streaming entry point that the context assembler (phase 2) and the agent loop (phase 4) will call.
 
 ---
 
-## 1. Summary of the deltas
+## 1. Provider layer design choices
 
-| Area | reference-harness (0.84.2) | Here (pi-ai 1.0.x) | Why |
+| Area | Design option considered | Proposed design (pi-ai 1.0.x) | Why |
 |---|---|---|---|
 | Where models come from | Hand-written TOML `[models.*]`; `createModelFromConfig` builds every `Model` | Rows in `connections` and `models`, per user. Fetched from the upstream, merged with pi-ai's built-in catalog, and edited by the user | DESIGN §9 [D]: fetched lists, user edits, separate users |
 | Keys | `${ENV}` placeholders in TOML, one shared key; a missing variable silently becomes `""` | Stored per connection, encrypted, write-only. Never read from the server's environment | Multi-user: one user's key must never serve another user. Nothing silent |
 | Calling pi-ai | `streamSimple` from `@earendil-works/pi-ai/compat`, which pi-ai calls a temporary entry point | The lazy API implementations (`api/<api>.lazy`) called directly, with an explicit key and `normalizeContext` | `/compat` is deprecated. The `Models` collection resolves keys from the environment and a credential store per provider, which doesn't fit per-user connections (§4) |
-| Agent loop in between | Every call goes through pi-agent-core, so errors arrive flattened to strings and reference-harness tags classes inside them | Non-agentic generation calls the provider layer directly. Errors are typed values (§7) | Phase 2 needs no agent loop. Phase 4 decides how pi-agent-core wraps this |
+| Agent loop in between | Every call goes through pi-agent-core, so errors arrive flattened to strings and error classes must be encoded inside them | Non-agentic generation calls the provider layer directly. Errors are typed values (§7) | Phase 2 needs no agent loop. Phase 4 decides how pi-agent-core wraps this |
 | Retries | Layer 0: buffers a whole attempt and forwards it only on `done`, then retries any failure | Retries only before the first token. A failure after tokens is kept as a failed version and the user decides (§7) | RP streams to a person, so buffering would hide the stream. DESIGN §3.1: failed generations are versions |
-| Cache breakpoints | `onPayload` injectors find the boundaries by searching the wire text for `<system>`, `<conversation_summary` and similar (reference-harness's own note says they should come from the context code) | The assembler marks breakpoint positions structurally, and a per-API `onPayload` step translates them (§8) | Fixes the weakness reference-harness flags itself |
+| Cache breakpoints | `onPayload` injectors find the boundaries by searching the wire text for `<system>`, `<conversation_summary` and similar | The assembler marks breakpoint positions structurally, and a per-API `onPayload` step translates them (§8) | Keeps breakpoint placement tied to assembly rather than wire markup |
 | Thinking levels | Hand-mirrors pi-ai internals (`THINKING_BUDGET_BY_LEVEL`, the adaptive heuristic), which have already drifted | `getSupportedThinkingLevels(model)` and `thinkingLevelMap` from pi-ai 1.x | No mirror to drift |
 | Cache TTL | Not modelled | `Model.promptCache` from pi-ai's catalog, overridable per model or connection | Feeds the cache-warmth indicator (DESIGN §5.5) |
 | Usage and cost | `budget.record` ledger rows on commit; pi-ai's `calculateCost` against config prices | A ledger row for every request, retries and failures included, with raw provider usage kept. Cost comes from formulas the user can override (§9) | Owner [D]: tracking every run is the part that matters now |
 | Outbound network | Direct, or the process's proxy environment | One instance-wide HTTP or SOCKS proxy for every outgoing request, a bypass list with local ranges by default, and a per-connection override (§6) | Owner [D] |
 | The patch | Two hunks: Anthropic `stopCategory`, and the Responses deferred-tool namespace | **No patch** (§11) | `onProviderStreamEvent` exposes `stop_details`. Deferred tools are phase 4 |
 
-Kept as in reference-harness:
+Provider conventions
 - `maxRetries: 0` on the SDKs, so retries happen in one place and are visible.
-- `sessionId` for cache affinity (reference-harness uses the timeline key; here, the chat id).
+- `sessionId` for cache affinity using the chat ID.
 - `onResponse` for status codes and `Retry-After`.
 - `isContextOverflow` from pi-ai.
 - Usage left unknown is `NULL`, never zero.
@@ -58,7 +58,7 @@ A connection is **one provider kind, one wire API, one base URL, one key, and he
 
 - **OpenAI Chat Completions doubles as the generic OpenAI-compatible kind**: point its base URL at llama.cpp, vLLM or any gateway. Both OpenAI kinds are required on day one (owner [D]).
 - **DeepSeek is its own kind** (owner [D], at minimum). It has reasoning quirks in agentic use: the API requires `reasoning_content` on replayed assistant messages in tool-call turns, and it has its own thinking switch. pi-ai covers both through compat (`requiresReasoningContentOnAssistantMessages`, `thinkingFormat: "deepseek"`), auto-detected for the `deepseek` provider. A guard test pins that behavior (§11).
-- **The kind decides the pi `provider` string** on every `Model` built from the connection. pi-ai uses that string, together with the base URL, to pick request dialects. reference-harness sets `provider` to the real upstream for the same reason (`schema.ts:842-847`). The kind still names the dialect behind a custom gateway URL, so a gateway in front of OpenRouter keeps OpenRouter's routing, reasoning and session headers.
+- **The kind decides the pi `provider` string** on every `Model` built from the connection. pi-ai uses that string, together with the base URL, to pick request dialects. The kind still names the dialect behind a custom gateway URL, so a gateway in front of OpenRouter keeps OpenRouter's routing, reasoning and session headers.
 - **[P] Schema change.** Today `connections.api` holds values that mix wire APIs and providers (DATA-MODEL §11 lists `gemini` and `openrouter` next to `openai-completions`). Migration `0005_providers` replaces it with `kind` plus `api`, while the table is still empty. The other changes below go in the same migration.
 - **Later, separately:** built-in model lists as a fallback for providers whose list endpoint is missing or thin. pi-ai's catalog already contains them.
 
@@ -116,7 +116,7 @@ The user-editable fields (DESIGN §9 [P]), mapped to what pi-ai's `Model` needs:
 | `vision` | `input: ["text", "image"]` | Drives the "no vision" warning (DESIGN §10.2a) |
 | `reasoning`, `thinking_levels` | `reasoning`, `thinkingLevelMap` | |
 | `tools` | not on `Model` | The agent loop checks it in phase 4 |
-| `prefill` | not on `Model` | `none`, `assistant` (a trailing assistant message), or `tool_schema` (reference-harness's GPT prefill, ported later). Where it's `none`, the assembler drops prefill and the preview says so (DESIGN §1.2) |
+| `prefill` | not on `Model` | `none`, `assistant` (a trailing assistant message), or `tool_schema` (strict-schema GPT prefill, proposed for a later phase). Where it's `none`, the assembler drops prefill and the preview says so (DESIGN §1.2) |
 | `cache_ttl_s` | `promptCache` | Feeds the cache-warmth indicator |
 | `cache_breakpoints` | not on `Model` | `auto` (pi-ai's markers), `explicit` (§8), `none` |
 | `compat` | `compat` | Raw pi compat overrides, an escape hatch. Merged over the connection's |
@@ -245,34 +245,34 @@ The earlier proposal refused private addresses for non-admin users. It's withdra
 - `Aborted`
 - `Unknown { message }`
 
-This replaces reference-harness's error-string tags, which only exist because pi-agent-core keeps nothing but `errorMessage`. The non-agentic path doesn't go through pi-agent-core, and phase 4 can carry the typed error alongside the loop.
+The provider layer returns structured errors directly to its callers.
 
-**To verify:** reference-harness notes that the Anthropic SDK threw before `onResponse` fired, so Anthropic 429s had no `Retry-After` (`scheduler.ts:1205-1212`). pi-ai 1.0.3 calls `onResponse` explicitly in its Anthropic adapter. A test against a mock 429 settles it.
+**To verify:** check whether the Anthropic SDK throws before `onResponse` fires, leaving HTTP 429 responses with no `Retry-After` (`scheduler.ts:1205-1212`). pi-ai 1.0.3 calls `onResponse` explicitly in its Anthropic adapter. A test against a mock 429 settles it.
 
 ### 7.2 Retries
 
 - **Before the first token:** `RateLimited`, `Overloaded` and `Network` retry automatically, with backoff that honors `Retry-After`, up to a budget. Each retry shows on the generating version ("retrying, 2/3") and gets its own ledger row.
 - **After tokens:** nothing retries automatically. The version ends `failed` with its partial text and the error (DESIGN §3.1: failed generations are versions), and the user decides: swipe again, continue, or keep the partial.
-- **This is the main delta from reference-harness's Layer 0,** which buffers everything until `done`. An agent can afford to buffer; a person watching a stream can't.
+- **Stream each attempt as it arrives.** The reader sees the reply as soon as it starts.
 - Retry and backoff use Effect `Schedule` inside the generation's fiber, so stopping the version interrupts the wait too.
 
 ### 7.3 Concurrency
 
 Any number of generations run at once (DESIGN §10.1). Two limits apply:
 - `max_concurrent` per connection, optional, queueing in arrival order
-- a `RateLimited` with `Retry-After` pauses new requests on that connection until the time passes, as reference-harness's group backoff does
+- a `RateLimited` with `Retry-After` pauses new requests on that connection until the time passes
 
-reference-harness's full scheduler (priority classes, admission inside retry, health probes, fallback chains) isn't ported in phase 0. The `request_class` column already exists on `rollouts` for when idle-time jobs arrive (phase 3). The cold-cache stagger (DESIGN §5.5) is phase 2.
+A full scheduler (priority classes, admission inside retry, health probes, fallback chains) isn't ported in phase 0. The `request_class` column already exists on `rollouts` for when idle-time jobs arrive (phase 3). The cold-cache stagger (DESIGN §5.5) is phase 2.
 
 ---
 
 ## 8. Cache breakpoints
 
 - **`auto`:** pi-ai's own markers. Anthropic gets `cache_control` on the system prompt, the last tool and the last message. OpenAI gets `prompt_cache_key` from `sessionId`, and OpenRouter gets `x-session-id`. `cacheRetention` picks short or long TTLs where the provider has them.
-- **`explicit`:** reference-harness's scheme (DESIGN §5.5 [P]): system/preset, summary layer, last stable timeline item.
+- **`explicit`:** mark the boundaries in DESIGN §5.5 [P]: system/preset, summary layer, last stable timeline item.
   - The difference is where positions come from. The **assembler** returns them as message indices into the `Context` it built, and a per-API `onPayload` step maps each index to the wire item pi-ai produced for it.
   - pi-ai's conversion is deterministic per API, so each mapping is covered by a test on synthetic contexts, including the cases where pi merges or splits messages (system folding, tool results).
-  - This replaces reference-harness's wire-text search.
+
   - The phase 0 interface accepts `breakpoints` and applies them for `anthropic-messages`. The other APIs and the rest of the scheme come with the assembler (phase 2).
 - **Observed caching** comes from the ledger's cache-read and cache-write counts (§9). It's what turns the cache indicator from "warm (assumed)" into "warm (verified)" (DESIGN §5.5).
 
@@ -298,7 +298,7 @@ reference-harness's full scheduler (priority classes, admission inside retry, he
 | `status` | `running`, `complete`, `failed`, `aborted`, `interrupted` |
 | `started_at`, `first_token_at`, `ended_at` | |
 | `input_uncached`, `cache_read`, `cache_write`, `cache_write_long`, `output`, `reasoning` | Normalized counts (§9.2). `NULL` means unknown, never zero |
-| `usage_source` | `reported`, `estimated` (aborted before the provider reported usage, estimated as reference-harness's `estimateAbortedRequestUsage` does) or `none` |
+| `usage_source` | `reported`, `estimated` (aborted before the provider reported usage, estimated locally) or `none` |
 | `raw_usage_json` | The provider's usage object, verbatim |
 | `reported_cost` | Cost as the provider reports it, when it does (OpenRouter's `usage.cost`) |
 | `cost`, `cost_currency`, `cost_formula_id` | Computed when the row closes (§9.3) |
@@ -369,9 +369,9 @@ Versions and rollouts reference `connections(id)` and `models(id)` by foreign ke
 
 - **Pin `@earendil-works/pi-ai` 1.0.3,** the latest release older than the 5-day cooldown. Its dependencies (the Anthropic, OpenAI, Google and Bedrock SDKs, typebox) are pinned transitively by the lockfile.
 - **No patch:**
-  - `stopCategory` (reference-harness 7da8400): pi-ai still doesn't normalize it, but the public `onProviderStreamEvent` hook sees Anthropic's `message_delta.stop_details`. Refusal handling isn't phase 0 work anyway.
-  - The Responses deferred-tool namespace (reference-harness 347a99b): 1.0.3 still replays a namespace only for the same model (`openai-responses-shared.js:227`). It only matters for tool search over deferred tools on Responses-compatible endpoints. Re-check in phase 4.
-- **A guard test per pi-ai behavior we rely on** that isn't strongly documented. That's reference-harness's `pi-ai-deferred-namespace.test.ts` pattern: a pi-ai bump that breaks one fails `npm run check`. The behaviors:
+  - `stopCategory`: pi-ai still doesn't normalize it, but the public `onProviderStreamEvent` hook sees Anthropic's `message_delta.stop_details`. Refusal handling isn't phase 0 work anyway.
+  - The Responses deferred-tool namespace: 1.0.3 still replays a namespace only for the same model (`openai-responses-shared.js:227`). It only matters for tool search over deferred tools on Responses-compatible endpoints. Re-check in phase 4.
+- **A guard test per pi-ai behavior we rely on** that isn't strongly documented. A pi-ai bump that breaks one fails `npm run check`. The behaviors:
   - placeholder keys for keyless servers
   - the `onPayload` replacement contract
   - the breakpoint index mapping

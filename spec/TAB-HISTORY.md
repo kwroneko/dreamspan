@@ -1,6 +1,6 @@
 # Tab history: back and forward in each tab
 
-**Status**: Proposed, 2026-11-24 (job `tabhistory1`). **Built** (tabhistory1, 2026-11-24) for wide screens, §1 to §7 and §9: obsolete as an implementation proposal; ARCHITECTURE §5 "The workbench" ("Tab history", "Back and forward in the strip") records it. §8 (phones) stays open. Everything here is **[P]** unless it cites a **[D]** (DESIGN §10.1, "Every tab has its own back and forward", owner 2026-11-24). It is a delta from master `50493640a`: ARCHITECTURE §5 "The workbench: frames and tabs" (each tab its own router over a memory history, the browser's URL following the focused tab, the least frame size of minframe1 and minframe2). reference-harness has no tabs or frames, so there's nothing to take from it.
+**Status**: Proposed, 2026-11-24 (job `tabhistory1`). **Built** (tabhistory1, 2026-11-24) for wide screens, §1 to §7 and §9: obsolete as an implementation proposal; ARCHITECTURE §5 "The workbench" ("Tab history", "Back and forward in the strip") records it. §8 (phones) stays open. Everything here is **[P]** unless it cites a **[D]** (DESIGN §10.1, "Every tab has its own back and forward", owner 2026-11-24). It is a delta from master `50493640a`: ARCHITECTURE §5 "The workbench: frames and tabs" (each tab its own router over a memory history, the browser's URL following the focused tab, the least frame size of minframe1 and minframe2).
 
 ## 1. The problem
 

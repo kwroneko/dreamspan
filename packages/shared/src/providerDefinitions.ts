@@ -153,7 +153,7 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
     keyOptional: false,
     auth: bedrockAuth,
     // Bedrock reads a cached prefix only at a marker position the previous request also marked
-    // (no lookback; measured in reference-harness), so markers go at each reusable section and the
+    // (no lookback), so markers go at each reusable section and the
     // previous request's history marker is repeated.
     defaults: { auth: "api-key", cacheBreakpoints: "explicit", lookback: false, maxMarkers: 4 },
     settings: ["region", ...cacheSettings],

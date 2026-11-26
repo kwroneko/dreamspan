@@ -8,9 +8,8 @@
 // a workshop recorded as a change the app can't undo (`mcp.call`). A story pages a long result
 // with `read_result`, which reads only the run's own transcript.
 //
-// Deltas from reference-harness (`src/mcp/`, `src/agent/dynamic-tools.ts`): no annotation-based effect
-// classes (one class, `mcp`, enabled is the consent); clients kept per (connection, user) rather
-// than a process-wide pool; a call is sent again only when the server proved it refused it
+// MCP tools share one effect class, `mcp`. Enabling it grants consent. Clients are kept per
+// (connection, user). A call is sent again only when the server proved it refused it
 // unprocessed (spec/MCP.md §7.2), never on a message match.
 import { Type } from "@earendil-works/pi-ai"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"

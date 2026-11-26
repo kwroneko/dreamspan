@@ -1,8 +1,8 @@
 // Dynamic tool loading (spec/TOOL-LOADING.md): a run's tools split into a small set sent from the
 // first request on and the rest, which the model loads with `tool_search` or `load_skill` while it
-// works. A delta from reference-harness's `agent/dynamic-tools.ts`: the same allowlist direction, trailing-*
-// globs and transcript-derived loaded set, but the per-wire-API serialization is ours
-// (providers/toolLoading.ts), not pi-ai's, and every part is a registered, replaceable entry.
+// works. Allowlists accept trailing-* globs and the transcript records which tools are loaded.
+// providers/toolLoading.ts handles serialization for each wire API. Every part is a registered,
+// replaceable entry.
 //
 // This module is pure: matching, the split, the loaded set and the index text.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -308,7 +308,7 @@ export const loadPoints = (
 
 /**
  * The loaded set is derived from the transcript, never stored beside it: the deferred tools some
- * successful loading result names (reference-harness's rule). Resume, step edits and carried turns
+ * successful loading result names. Resume, step edits and carried turns
  * recompute it from what they keep, so a replay loads the same tools at the same points.
  */
 export const loadedSet = (messages: ReadonlyArray<AgentMessage | Message>, deferred: ReadonlySet<string>) =>
@@ -396,7 +396,7 @@ export const loadSkillDescription = (skills: ReadonlyArray<Skill>, deferring = t
     ...skills.map(indexLine)
   ].join("\n")
 
-/** `tool_search`'s definition names the deferred tools no skill covers (reference-harness's "orphans" index). */
+/** The definition of `tool_search` names deferred tools that no skill covers. */
 export const toolSearchDescription = (orphans: ReadonlyArray<string>) =>
   [
     'Finds tools that aren\'t loaded yet and loads the matches, making them callable. Query "select:name_a,name_b" loads exact names; other words are matched against names and descriptions. Prefer load_skill when a skill covers what you need.',

@@ -134,7 +134,7 @@ export const forTarget = (
 /**
  * The request for one step of a rollout: the frozen prefix, then `suffix`, with `tools`.
  * `explicitTail`: one more cache breakpoint on the last suffix message, so each request reads
- * the one before it from the cache (reference-harness's tail checkpoint). It goes last, as the least
+ * the one before it from the cache. It goes last, as the least
  * important: the provider layer drops it when the model's marker budget is spent.
  */
 export const rolloutRequest = (

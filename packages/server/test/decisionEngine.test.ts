@@ -1,5 +1,5 @@
-// The decision engine's ladder (spec/AGENTIC.md §7), ported from reference-harness's engine tests
-// (`test/decisions.test.ts`): a point that's off sends nothing; a model verdict; low confidence,
+// The decision engine's ladder (spec/AGENTIC.md §7): a point that's off sends nothing.
+// A confident answer gives a model verdict. Low confidence,
 // a malformed answer, a failed request and a timeout each fall back with their reason, and each
 // sent request is a decision rollout that's closed. Fake storage and provider: no real calls.
 import { assert, describe, it } from "@effect/vitest"

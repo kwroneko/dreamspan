@@ -2,13 +2,11 @@
 // client over the app's network, Check, and the ledger row of every request sent. Storage goes
 // through the database workers; this module only encrypts, decrypts and talks to servers.
 //
-// Deltas from reference-harness's `McpClientPool` (src/mcp/client-pool.ts): servers are rows the user
-// adds, not config; nothing connects at startup; a call's client is kept per (connection, user),
-// opened at the first call that needs it and closed after 5 idle minutes, on an edit of the
-// connection (its `cache_revision`), when it stops being usable and at shutdown; a Check opens a
-// client of its own and closes it after. A dead session reconnects once, shared by concurrent
-// callers, as reference-harness's `reconnect`, but the call is sent again only when the HTTP status
-// proves the server refused it unprocessed (§7.2), never on a message match. Headers and keys
+// Users add servers as database rows. Connections open on demand, and clients are kept
+// per (connection, user). A client closes after 5 idle minutes, on a connection edit (its
+// `cache_revision`), when the connection stops being usable, or at shutdown. Each Check opens
+// and closes its own client. Concurrent callers share a single reconnect for a dead session.
+// A call is sent again only when the HTTP status proves the server refused it unprocessed (§7.2). Headers and keys
 // are host-bound secrets resolved per call; every request is a ledger row; requests go through
 // `Network` (proxy, bypass, same-origin redirects) via the SDK's `fetch` option.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"

@@ -14,9 +14,7 @@
 
 **Built live-test fixes (fixes1114, 2026-11-14; obsolete as implementation proposals):** the coordinator's enabled-version ruling below is implemented, with immutable approved-build runtime checks, name/version step headings, cross-tab reload notices, pending-summary copy/range-bounded summary instructions and story-title Changes rows. See ARCHITECTURE §17 and the fixes1114 implementation record. Existing Proposed/Open choices retain their markings.
 
-
-**Status**: Built, obsolete as an implementation proposal (2026-11-20 check): units W1 to W9 and P1 to P5 of §9 are built (ARCHITECTURE §16 from "Workshop chats, server" to "Workshop side chat", "Workshop context", and §17 "Plugin host"); the files, commands, subagents and MCP additions are in FILES-AND-ENVIRONMENT.md, SUBAGENTS.md and MCP.md. **Not built:** a plugin registry on GitHub and installing a plugin from a remote repository (PLUGINS.md), and a sandbox for plugin code that would let a non-admin enable one (plugins stay admin-enabled and full-trust, ARCHITECTURE §17). §10's open questions 4 and 5 are closed (§10 item 4 by the owner; item 5, git, by the built `isomorphic-git`). Proposed 2026-11-12 (job `phase6`). The design for PLAN Phase 6 and DESIGN §7.7, with the Phase 6 parts of §7.3 and §10.3, and the plugin loader as a delta to [PLUGINS.md](PLUGINS.md). Everything below is **[P]** unless it cites a **[D]** in DESIGN or PLUGINS. It is a delta from two things: the build at master `21c7fb3d` (ARCHITECTURE §2, §3.7, §3.13, §5, §16 "Agent rollouts"), and reference-harness on branch `latest` (`9b385944`, 2026-10-29): its tool set (`src/tools/`), effect classes (`tools/side-effects.ts`), workspace files and skills (its ARCHITECTURE §9a), sandbox (§11a) and MCP adapter (`src/mcp/tool-adapter.ts`). Build units are in §9; their sections become obsolete as they move to ARCHITECTURE.
-
+**Status**: Built, obsolete as an implementation proposal (2026-11-20 check): units W1 to W9 and P1 to P5 of §9 are built (ARCHITECTURE §16 from "Workshop chats, server" to "Workshop side chat", "Workshop context", and §17 "Plugin host"); the files, commands, subagents and MCP additions are in FILES-AND-ENVIRONMENT.md, SUBAGENTS.md and MCP.md. **Not built:** a plugin registry on GitHub and installing a plugin from a remote repository (PLUGINS.md), and a sandbox for plugin code that would let a non-admin enable one (plugins stay admin-enabled and full-trust, ARCHITECTURE §17). §10's open questions 4 and 5 are closed (§10 item 4 by the owner; item 5, git, by the built `isomorphic-git`). Proposed 2026-11-12 (job `phase6`). The design for PLAN Phase 6 and DESIGN §7.7, with the Phase 6 parts of §7.3 and §10.3, and the plugin loader as a delta to [PLUGINS.md](PLUGINS.md). Everything below is **[P]** unless it cites a **[D]** in DESIGN or PLUGINS. It extends the build at master `21c7fb3d` (ARCHITECTURE §2, §3.7, §3.13, §5, §16 "Agent rollouts"). Build units are in §9; their sections become obsolete as they move to ARCHITECTURE.
 
 **Built registry adapters (adapters1, 2026-11-14):** the stable API/editable-copy subset of PLUGINS §§3–5, §8 and WORKSHOP §§5.3, 5.7, §9 now covers all built-in macros (aliases together), four causal history tools, note listing/switching and presence. Those adapters and the grouped/searchable picker are obsolete as implementation proposals; ARCHITECTURE §17 records their contracts, cache cost, deadlines, authorization and privacy boundaries. Other tools/registries still need their adapters. Full-trust runtime remains unchanged. Proposed details remain Proposed; no decision status is promoted.
 
@@ -28,7 +26,6 @@
 
 
 **Built sidewrite1 (2026-11-13):** §3.4, §3.5, §3.6 and §4’s story targeting now use the side tab’s validated request position for writes as well as reads. This subset is obsolete as an implementation proposal; see ARCHITECTURE §16, “Side-chat write positions”. Positioned approvals refuse a moved answering tab. Standalone workshops keep current-branch behavior; no Proposed item is promoted to Decided. No baseline change.
-
 
 **Built W1 (workshop1, 2026-11-12):** The server-only subset of §2.1–§2.2, §1.1's workshop rollout/purpose/Activity changes, §3.3's four library read tools and §8's `workshop.defaults` / `CreateWorkshop` are implemented and obsolete as implementation proposals; see ARCHITECTURE §16, “Workshop chats, server”. The remaining proposals retain their status. W1 deliberately uses contract `both` and fresh per-turn assembly; §2.3–§2.4 remain for W5.
 
@@ -85,7 +82,7 @@ The owner's stated end goal (phase6 brief, 2026-11-12): the app becomes a self-c
 
 **Built P4 authoring (2026-11-13):** WORKSHOP §9's P4 row and the authoring subset of §§6.1–6.4 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Workshop plugin authoring”. Dedicated confined tools, working/committed checks, generated API references, bounded shipped-source reference, receipts/Undo and exact-version consent are built. P5's `plugin_copy_builtin` and editable copies remain unbuilt. Session trust remains Open and dormant. Independent P4 review closes check-child network access, binds consent preparation to scope and arguments, and repairs interrupted repository creation. The coordinator accepts Every-tool definitions only for available, enabled capabilities; role/capability filtering and per-mode costs are recorded in ARCHITECTURE. No Proposed item is promoted to Decided; no baseline change relative to P3.
 
-## 1. Deltas from the build and from reference-harness
+## 1. Changes from the build
 
 ### 1.1 What the build already has
 
@@ -103,9 +100,9 @@ The owner's stated end goal (phase6 brief, 2026-11-12): the app becomes a self-c
 
 Verified in code on 2026-11-12: every registry named above exists (`makeRegistry`, `defineSlot`). The production image runs the server's main thread from source and ships `packages/server/src` and `packages/shared/src`, but not `packages/client/src`; `rolldown` and `typescript` are dev dependencies, so neither is in the image; `node:24-slim` has no `git` binary.
 
-### 1.2 What reference-harness does, and what changes here
+### 1.2 Workshop design choices
 
-| reference-harness (`latest`) | Here | Why |
+| Design option considered | Proposed design | Why |
 |---|---|---|
 | Session types (`agent.session_types.<name>`): workspace files, a tools allowlist, model and skills per type | **Chat kind profiles** (§2.1): planner, contract, continuity, toolset and look per kind, registered | Per chat, not per platform; a plugin adds a kind |
 | Workspace files (`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `TAIL.md`) assembled into the system prompt | The **Assistant card** and the **Workshop preset**, ordinary library items assembled by the registered assembler | DESIGN §7.7 [D]: an agent preset and a default assistant card the user can swap |
@@ -267,7 +264,7 @@ A user's unsaved editor drafts on a card the agent changes behave as when anothe
 
 ### 3.4 Asking first, grants, and regenerating
 
-- **The grant.** A branch-owned state key **`workshop.grants { capability, mode: "off" | "ask" | "allow" | null }`** in the workshop chat (registered in `@dreamspan/shared/state.ts`, folded into `ChatState.workshopGrants`; `null` goes back to the default), written by the strip's chip and by "Allow in this workshop" through `ChangeCast`'s new `WorkshopGrant` change, and never by a tool (§3.2). Off removes the capability's tools from the next turn's definitions (the cache breaks once). Ask first and Allowed change nothing the model is sent, only execution, so the definitions stay byte-stable (reference-harness's record-turn gate works the same way).
+- **The grant.** A branch-owned state key **`workshop.grants { capability, mode: "off" | "ask" | "allow" | null }`** in the workshop chat (registered in `@dreamspan/shared/state.ts`, folded into `ChatState.workshopGrants`; `null` goes back to the default), written by the strip's chip and by "Allow in this workshop" through `ChangeCast`'s new `WorkshopGrant` change, and never by a tool (§3.2). Off removes the capability's tools from the next turn's definitions (the cache breaks once). Ask first and Allowed change nothing the model is sent, only execution, so the definitions stay byte-stable.
 - **The ask.** `beforeToolCall`, for a tool whose capability is Ask first (or an `outside` tool not allowed), flushes the transcript (built), then waits on an in-memory deferred keyed by `(rolloutId, toolCallId)`. The rollout stays `running`, with no provider request open. The `Steps` event shows the call with the status `waiting`, and the client renders inside the tool's row in the steps element what it will do (`summarize`, with the arguments folded under it), then **Allow** ("Lets the assistant do this once"), **Allow in this workshop** ("Lets it do this kind of thing here without asking again") and **Decline** ("Tells the assistant not to"). The header badge reads "Waiting for you". `AnswerToolApproval { rolloutId, toolCallId, answer: "allow" | "allow_chat" | "deny", note? }` (WorkshopApi) resolves it; `allow_chat` also writes the grant at the leaf. Declined, the tool result is an error the model sees: "{{user}} declined this." with the note, if any. Stop ends the wait like any running tool.
 - **Restarts.** A restart parks the rollout as `interrupted` (built). Resume re-runs a dangling call (the built policy), except a `library`, `setup` or `outside` call without a receipt, which asks again: "The app stopped while this was running. It may already have happened: check before allowing it again." A call with a receipt answers from it (built).
 - **Regenerating warns** (§7.3 [P]). Regenerate, a swipe, Resume and Resume from a step, on a version whose rollout has effects not yet undone, first show a `ConfirmDialog` (through a new client `replyGuards` registry beside `replyHooks`, whose entries may cancel; `replyHooks.beforeReply` can't): "This reply created the card Mara Quill and started the chat The Skerry Light. A new version won't remove them, and the assistant may make them again." **Undo them, then make a new version** · **Keep them and make a new version** · **Cancel**. Read and `chat_state` effects need no warning: a swipe reverses `chat_state` (built).
@@ -395,7 +392,7 @@ All are confined to one repository by path resolution (no `..`, no symlinks lead
 | `plugin_create` | library | `id`, `name`, `runs: "browser" \| "server"` → a repository from the template (manifest, `src/client.tsx` or `src/server.ts`, a test) and its first commit |
 | `plugin_read`, `plugin_search` | read | `plugin`, `path`, `range?` / `query` → the file with line numbers / the matches |
 | `plugin_write` | library | `plugin`, `path`, `content` → creates or overwrites, uncommitted |
-| `plugin_edit` | library | `plugin`, `path`, `old_str`, `new_str`, or `edits: [...]` (all or nothing, reference-harness's semantics) |
+| `plugin_edit` | library | `plugin`, `path`, `old_str`, `new_str`, or `edits: [...]` (all or nothing) |
 | `plugin_diff`, `plugin_log` | read | uncommitted changes / commits with their messages |
 | `plugin_check` | read | `plugin`, `commit?` (default: the working tree) → the report of §5.2 |
 | `plugin_commit` | library | `plugin`, `message` → the commit id. Effect `plugin.commit`; undo: a revert commit |

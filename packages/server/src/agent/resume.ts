@@ -1,7 +1,7 @@
 // Resuming an agent rollout (spec/AGENTIC.md §4.2, §4.4; DESIGN §7.5): what of a stored
 // transcript a new rollout carries on from, so the model is sent the same prefix and the same
-// turns and can't tell it was stopped. A delta from reference-harness's recovery.ts: its strip of the
-// failed tail, plus the interruption policies and editing a step first. Pure: the API reads the
+// turns and can't tell it was stopped. The plan strips the failed tail, applies interruption
+// policies and supports editing a step first. Pure: the API reads the
 // transcript and writes the new version; the agent session runs what this keeps.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import {
@@ -101,7 +101,7 @@ export const planResume = (
   if (messages === null) return fresh([])
   const kept = messages.slice()
   const stripped: Array<AgentMessage> = []
-  // The failed tail (reference-harness stripFailedTail), and results a stop cut short.
+  // Remove the failed tail and any results a stop cut short.
   while (kept.length > 0 && (isFailedTurn(kept.at(-1)!) || isInterruptedResult(kept.at(-1)!)))
     stripped.unshift(kept.pop()!)
   const partial = stripped.filter((m): m is AssistantMessage => m.role === "assistant")

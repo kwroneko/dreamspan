@@ -4,7 +4,7 @@
 
 ## 1. Where things stand
 
-- **Historical code snapshot when this discussion was written** (superseded for implemented sections above): master = `origin/master` (`dreamspan`). Nothing from this discussion is built: it was design only, and no code changes until the design is agreed. One exception, on a branch: `refs/heads/claude/compassionate-rhodes-787c7d` (d30483d) imports the names users gave forks in ST as branch names, and re-import fills in missing names without overwriting app-set ones. It's not reviewed or merged; three scale tests timed out in its full run under load and pass alone.
+- **Historical code snapshot when this discussion was written** (superseded for implemented sections above): master = `origin/master`. Nothing from this discussion is built: it was design only, and no code changes until the design is agreed. One exception, on a branch: `refs/heads/claude/compassionate-rhodes-787c7d` (d30483d) imports the names users gave forks in ST as branch names, and re-import fills in missing names without overwriting app-set ones. It's not reviewed or merged; three scale tests timed out in its full run under load and pass alone.
 - The owner isn't using the app yet (below).
 - **Housekeeping still open:** whether to build a "sync from ST" button.
 

@@ -10,8 +10,6 @@
 - The GitHub API for cordiverse/cordis and deepseek-ai/deepseek-harness.
 - A probe script run against `cordis@4.0.0-rc.10` on Node 24.15 with the repo's `effect@4.0.1`.
 
-reference-harness has no plugin kernel, so this isn't a delta from it.
-
 ---
 
 ## 1. Maturity

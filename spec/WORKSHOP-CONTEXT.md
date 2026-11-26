@@ -2,7 +2,7 @@
 
 # Workshop context: window, long runs, history tools, the preset
 
-**Status**: Proposed, 2026-11-12 (job `workctx1`). A delta to [WORKSHOP.md](WORKSHOP.md) §2.4 and §10 question 4, [LCM.md](LCM.md) and [AGENTIC.md](AGENTIC.md) §4.5, and to reference-harness on branch `latest` (`9b385944`): its ARCHITECTURE §9b, `spec/SUMMARY-LAYER-BUDGET.md`, `spec/TOOL-RESULT-BUDGET.md`, `spec/RESUMABLE-SESSIONS.md` §12 and `spec/SESSION-RECORDS.md` §5. Items are marked as in DESIGN.md: **[D]** the owner said it (quoted), **[P]** proposed, **[O]** open. The parts built by `workctx1` are listed in §6 and documented in ARCHITECTURE §16 ("Workshop context"); their text here is obsolete as an implementation proposal and stays as the design record.
+**Status**: Proposed, 2026-11-12 (job `workctx1`). A delta to [WORKSHOP.md](WORKSHOP.md) §2.4 and §10 question 4, [LCM.md](LCM.md) and [AGENTIC.md](AGENTIC.md) §4.5. Items are marked as in DESIGN.md: **[D]** the owner said it (quoted), **[P]** proposed, **[O]** open. The parts built by `workctx1` are listed in §6 and documented in ARCHITECTURE §16 ("Workshop context"); their text here is obsolete as an implementation proposal and stays as the design record.
 
 The owner, 2026-11-12, on this work (the brief's quotes; these are the only **[D]** items here):
 - **[D]** "We're building a generic agent, just focused and scoped on working for our harness. People will use it for more than just making plugins, and making/editing cards and libraries (those are the main use cases, though). It can't be too rigid, but it should be easiest for those things."
@@ -49,9 +49,9 @@ The owner's question ("Why would we ever limit context to 4096 by default?") set
 
 ## 2. Long workshop runs
 
-### 2.1 reference-harness, and the deltas
+### 2.1 Workshop context design choices
 
-| reference-harness (`latest`) | Here | Why |
+| Design option considered | Proposed design | Why |
 |---|---|---|
 | Reply-to-continue resumes a completed session's rollout (RESUMABLE-SESSIONS §4–§9); session records later replaced it as the default (SESSION-RECORDS §2) | Every workshop turn carries on the previous run (`resume_previous`, built W5; DESIGN §7.7 [D]) | The workshop is one long piece of work with one user |
 | **No compaction**: a resumed session near its ceiling re-parks (`failed-resumable`); the spec names "eliding old tool *results* while keeping assistant turns and tool-call args" as the least-bad first cut (RESUMABLE-SESSIONS §12) | **Elide old tool results first** (§2.3), then a fresh build with the summaries (§2.4) | Keeps the "what I did" narrative and the cache prefix before the first elided result |
@@ -92,9 +92,9 @@ The marker, model-facing: `[Result left out to save room. read_run with message 
 
 ## 3. History tools for agents
 
-### 3.1 What exists, and reference-harness's names
+### 3.1 Existing content and its limits
 
-| Here (built, AGENTIC §4.5) | reference-harness | Bound here | Bound there |
+| Content (built, AGENTIC §4.5) | Comparable content | Dreamspan limit | Alternative limit |
 |---|---|---|---|
 | `search_chat { query, speaker?, limit?, before_message? }`, the chat's full-text index (`versions_fts`, the index `job/review-search` built message search on; reader `SearchChat`) | `search_messages` (FTS, `limit` ≤ 200, default 30) | ≤ 20 results (8), 240-character excerpts: about 1,600 tokens | 6,000-character bodies, 200,000 characters in all, then one-line snippets |
 | `read_messages { from, count? }` | `read_messages` | ≤ 20 messages, the 16,000-character result cap | Its paging |
@@ -141,7 +141,7 @@ The seeded **Workshop** preset is an ordinary library preset (`entity_revisions.
 |---|---|---|
 | Main | Who the assistant is and what the app is | The preset's `main` prompt |
 | Assistant | The card the user talks to: its description, personality and the rest of its card slots | `charDefinitions` and the other card markers, as in a story preset. **[D]** the card stays ("it can just be a regular card") |
-| Workspace instructions | The user's standing instructions for working in this app ("my cards use second person", "never touch presets marked Final"), as reference-harness's `AGENTS.md` | A prompt, `workspaceInstructions`, whose text is the user's own |
+| Workspace instructions | The user's standing instructions for working in this app ("my cards use second person", "never touch presets marked Final") | A prompt, `workspaceInstructions`, whose text is the user's own |
 | Summaries | Where the summary layer goes | A marker, `summaries`; until the assembler fills it, the layer goes before the history as in stories |
 | Skills | The installed skills the assistant can load, each with what it's for | A marker, `skillsIndex` (built, wsb2) |
 | Card skills | The names of the skills the assistant's card carries; their instructions reach the model only once the user allows one | A marker, `cardSkills` (built, wsb2) |

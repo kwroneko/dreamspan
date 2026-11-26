@@ -1242,7 +1242,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const start = path === undefined && hostCwd ? FILES_MOUNT : cwd
         const asked = resolveIn(ctx, path ?? name, start, roots, true)
         if (asked.root.host) throw new FilePathRefused("Export to a path in your files (/files).")
-        // A taken name gets " (2)", " (3)"… beside it, never replaced (reference-harness's uniquifyPath).
+        // A taken name gets " (2)", " (3)" and so on to avoid overwriting the file.
         const ext = posix.extname(asked.full)
         const stem = asked.full.slice(0, asked.full.length - ext.length)
         let place = asked

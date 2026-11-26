@@ -94,8 +94,7 @@ export const LOADED_DEFINITIONS = "Loaded tool definitions (call them by name):"
  * `function.defer_loading: true`, and the flags never change. A tool sent without its flag joins
  * Anthropic's tool prefix and rewrites the cache, and a `tool_reference` reaches the model only as
  * its name (both measured), so the loading call's result carries the loaded definitions as text
- * instead and the model calls the declared tools (reference-harness's `declare_deferred_tools` without
- * tool references).
+ * instead and the model calls the declared tools.
  */
 export const applyRouterToolLoading = (payload: Json, loading: ToolLoadingRequest): Json => {
   const byName = new Map(loading.deferred.map((t) => [t.name, t]))
@@ -149,7 +148,7 @@ export const responsesId = (id: string) =>
  * `tool_search_output` carrying the loaded definitions with `defer_loading: true`. OpenAI puts
  * loaded tools at the end of the context, so the request's earlier items keep their bytes. A
  * replayed call to a loaded tool names its namespace (the tool's own name), which the endpoint
- * requires for a function not in the default namespace (reference-harness 347a99b2).
+ * requires for a function outside the default namespace.
  */
 export const applyResponsesToolLoading = (payload: Json, loading: ToolLoadingRequest): Json => {
   const byName = new Map(loading.deferred.map((t) => [t.name, t]))

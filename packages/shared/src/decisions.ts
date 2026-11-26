@@ -1,4 +1,4 @@
-// Decision models (DESIGN §7.6; spec/AGENTIC.md §7), as reference-harness's `src/decisions/types.ts`:
+// Decision models (DESIGN §7.6; spec/AGENTIC.md §7):
 // the System-One wire body `{ model, state, questions }` and its typed answers, and the user's
 // settings, which say per connection which decision points may send anything (owner rule:
 // nothing goes to a provider without the user's opt-in on that connection).

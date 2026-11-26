@@ -2,7 +2,7 @@
 
 **Status:** Built 2026-11-05 (job noteoverrides); **obsolete as an implementation requirement**: what is built is in ARCHITECTURE §12 ("Notes that replace prompts") and §15 ("Replacements"). Kept as the design record for DESIGN §4.2. **[D]** marks the owner's decisions (quoted in DESIGN §4.2); everything else here is **[P]**, the coordinator's or this job's choices, open to the owner's change.
 
-This completes DESIGN §4.2's **[O] Still to design**: the UI on every surface, the cache-breakpoint display and the assembler changes. reference-harness has no counterpart (it has no presets or card fields to replace); the assembler part is a delta from our own registered pipeline (ARCHITECTURE §15), not from reference-harness.
+This completes DESIGN §4.2's **[O] Still to design**: the UI on every surface, the cache-breakpoint display and the assembler changes. The assembler changes extend the registered pipeline (ARCHITECTURE §15).
 
 ## 1. The model
 

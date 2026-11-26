@@ -76,7 +76,7 @@ What we checked for `node:sqlite` on Node 24.15 (SQLite 3.51.3):
 - the session/changeset API is available
 - no adapter code needs writing
 
-reference-harness's single-writer pattern carries over: writes are serialized through one connection.
+Writes are serialized through one connection.
 
 **Keep the engine swappable:**
 - All SQL goes through our own storage modules, never from feature code.

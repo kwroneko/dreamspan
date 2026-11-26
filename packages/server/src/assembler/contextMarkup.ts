@@ -1,6 +1,6 @@
 // The markup the app wraps a model's context in, in one place: the assembler writes it with these,
 // and the reply contract's records (agent/contract.ts) recognize a reply that copies it
-// (spec/REPLY-CONTRACT.md §3.6 `context_mimicry`; reference-harness's RENDERED_MESSAGE_TAGS). A test
+// (spec/REPLY-CONTRACT.md §3.6 `context_mimicry`). A test
 // keeps the two in step: everything written here is recognized there.
 
 /** A history line with its speaker's name before it (the preset's names behavior). */

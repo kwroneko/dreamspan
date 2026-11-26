@@ -1,9 +1,7 @@
-// Decision models (DESIGN §7.6 [D]: integrated as in reference-harness, never mandatory, a heuristic
-// fallback at each point; spec/AGENTIC.md §7). A delta from reference-harness's `src/decisions/registry.ts`:
-// the same point shape (questions, state, resolve, fallback) and the same evaluate() ladder, with
-// one connection per point instead of a model chain, and settings per connection instead of a
-// `[decisions]` config block. Nothing is sent unless the user turned the point on for a
-// connection (owner rule: provider sends are opt-in per connection). Each call is a rollout of
+// Decision models (DESIGN §7.6 [D], spec/AGENTIC.md §7) are optional. Each point
+// declares its questions, state, resolver and heuristic fallback. Configure one
+// connection per point. Nothing is sent unless the user enabled the point for that connection.
+// Each call is a rollout of
 // kind `decision` with its ledger rows, so the Activity panel lists it with tokens and cost.
 // Points are a registry: a plugin adds one, or replaces or removes a built-in, by its id.
 import type { ChatId, ForkId, SlotId, Version, VersionId } from "@dreamspan/shared/chat.ts"
@@ -60,7 +58,7 @@ interface DecisionServices {
   readonly evaluate: DecisionEngineShape["evaluate"]
 }
 
-/** One decision point (reference-harness's `DecisionPoint<I, V>`). */
+/** One decision point. */
 export interface DecisionPoint<I, V> {
   readonly id: string
   /** User-facing, for the connection's Decisions settings. */

@@ -726,7 +726,7 @@ export interface ProvidersShape {
   /**
    * One decision request (spec/AGENTIC.md §7) on a connection whose kind answers decisions:
    * sent once, with the connection's key, headers and route, and recorded in the ledger whether
-   * or not its answers parse (every billed attempt counts, as in reference-harness). Never retried.
+   * or not its answers parse. Every billed attempt counts. Never retried.
    */
   readonly decide: (request: DecideRequest) => Effect.Effect<DecideResult, ProviderError | ServerError>
   /**

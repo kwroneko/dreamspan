@@ -4,8 +4,7 @@
 // the protocol; this module gives it a provider that keeps everything in memory for one step,
 // so the caller decides what is stored, encrypted, on the user's own use of the connection.
 //
-// Delta from reference-harness, which has no OAuth: the whole module. Delta from the spec: the client
-// registers itself by dynamic registration only. A Client ID Metadata Document needs an https
+// The client registers itself by dynamic registration. A Client ID Metadata Document needs an https
 // address the authorization server can fetch, which a self-hosted instance often lacks.
 import { randomBytes } from "node:crypto"
 import { lookup } from "node:dns/promises"

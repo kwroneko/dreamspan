@@ -283,7 +283,7 @@ const runCostFor = (type: Pick<SubagentType, "story"> | undefined, limits: Resol
 /** The request a subagent's run ends with, at its turn cap. */
 const WRITE_REPORT = "Write your report now."
 
-/** The one-time harness note at 80% of a limit (§6.2, reference-harness's first tier). */
+/** The one-time harness note at 80% of a limit (§6.2). */
 const WRAP_UP = "You're close to your limit: stop looking further and write your report now with what you have."
 
 /** A report longer than this is cut with a marker, so its envelope fits the result budget. */

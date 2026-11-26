@@ -2,8 +2,7 @@
 // Context it built; this places `cache_control` markers on the wire messages pi-ai
 // produced for them, in its onPayload hook.
 //
-// reference-harness found boundaries by searching the wire text for known tags. Here the
-// positions come from the caller, and the wire message for each is found by aligning the
+// Positions come from the caller, and the wire message for each is found by aligning the
 // transcript with the payload in order, by role and text. pi-ai keeps user, assistant
 // and tool-result messages in order, but drops empty ones and merges consecutive tool
 // results, so a plain index mapping would break.

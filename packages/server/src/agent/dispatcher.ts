@@ -1,5 +1,5 @@
-// Delta from reference-harness's declare_deferred_tools without references: definitions still travel
-// at transcript load points, but one fixed wire tool calls the canonical, fully validated tool.
+// Deferred definitions travel at transcript load points. One fixed wire tool dispatches
+// to the canonical, fully validated tool.
 // Nothing here executes tools. The session's ordinary executor owns permissions and receipts.
 import {
   Type,

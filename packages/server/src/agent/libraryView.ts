@@ -1,7 +1,6 @@
-// How the workshop assistant sees a card, lorebook or preset (spec/WORKSHOP-CARDS.md §4.3), as a
-// delta from reference-harness's `character_card_read` (src/tools/character-card.ts): an item that fits
-// the inline limit is shown whole; a larger one as its summary (each field's size, never its
-// text), to be read in pages. Pure: the caller passes the model's local token counter, so the
+// How the workshop assistant sees a card, lorebook or preset (spec/WORKSHOP-CARDS.md §4.3).
+// An item that fits the inline limit is shown whole. A larger item shows each field's size
+// and can be read in pages. Pure: the caller passes the model's local token counter, so the
 // same revision and model always render the same bytes.
 import { Effect } from "effect"
 import { withoutCardSkills } from "./toolLoading.ts"
@@ -14,7 +13,7 @@ type CountText = (text: string) => number
 
 /** Owner [D] (2026-11-24): "8000 tokens is fine". */
 const INLINE_TOKENS = 8_000
-/** reference-harness's adaptive share of the window (`ADAPTIVE_CONTEXT_SHARE`), so a small model isn't flooded. */
+/** Share of the context window used to cap inline content for smaller models. */
 const WINDOW_SHARE = 0.2
 
 /** The inline limit for a model with `window` tokens (unknown: the limit itself). */
@@ -23,7 +22,7 @@ export const inlineLimit = (window: number | null | undefined) =>
     ? Math.max(1, Math.min(INLINE_TOKENS, Math.floor(window * WINDOW_SHARE)))
     : INLINE_TOKENS
 
-/** The card's text fields in the order a card editor shows them, as reference-harness's TEXT_FIELDS. */
+/** The card's text fields in the order the card editor shows them. */
 export const CARD_TEXT_FIELDS = [
   "description",
   "personality",
@@ -66,7 +65,7 @@ const firstPage = (rows: ReadonlyArray<{ readonly line: string }>, more: string)
     : rows.map((row) => row.line)
 
 /**
- * An item's summary: reference-harness's "structure plus per-field counts", in the model's tokens. A card
+ * An item's structure and per-field counts in the model's tokens. A card
  * lists each text field's tokens and lines, its greetings and its lorebook; a lorebook its
  * entries; a preset its prompts in order, on or off.
  */
@@ -190,7 +189,7 @@ export const compactElement = (item: AttachedItem, count: CountText) => renderin
 /** A token counter that may ask a worker: the tools count in the run's model's tokens. */
 export type CountEffect = (text: string) => Effect.Effect<number>
 
-/** Four characters a token, reference-harness's estimate, where no model counter is at hand. */
+/** Estimate one token per four characters when a model counter is unavailable. */
 export const estimateCount: CountEffect = (text) => Effect.succeed(Math.ceil(text.length / 4))
 
 /**
@@ -222,7 +221,7 @@ export const pageTokens = (asked: unknown) =>
 
 /**
  * Where one page of `text` from character `start` ends: as much as fits `maxTokens`, cut at a
- * line end where the page has one (as reference-harness's excerpts are), never empty.
+ * line end where possible. The page is never empty.
  */
 export const pageEnd = (text: string, start: number, maxTokens: number, count: CountEffect) =>
   Effect.gen(function* () {
@@ -239,7 +238,7 @@ export const pageEnd = (text: string, start: number, maxTokens: number, count: C
     return line >= start ? line + 1 : low
   })
 
-/** One page of a text, with reference-harness's note on where it stopped and how to read on. */
+/** One page of text, with a note on where it stopped and how to read on. */
 export const pageOf = (text: string, what: string, offset: unknown, maxTokens: number, count: CountEffect) =>
   Effect.gen(function* () {
     const asked = typeof offset === "number" && Number.isFinite(offset) ? Math.floor(offset) : 0

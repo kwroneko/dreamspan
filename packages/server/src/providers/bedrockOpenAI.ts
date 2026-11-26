@@ -13,8 +13,7 @@
 //   automatically only (shims.ts strips markers there).
 //
 // Sources: https://docs.aws.amazon.com/bedrock/latest/userguide/inference-responses-api.html,
-// https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html, and reference-harness's
-// ARCHITECTURE "Cache control" (the same markers). Not yet checked
+// and https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html. Not yet checked
 // against a live Bedrock account: recorded shapes only (ARCHITECTURE §6 "OpenAI on AWS Bedrock").
 import { Effect } from "effect"
 import { bedrockAuthHeaders, bedrockSecretsOf, messageOf, requestUrl } from "./bedrock.ts"

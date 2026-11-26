@@ -60,7 +60,7 @@ Phases 0 to 6 are built, and so is most of phase 7 except the items listed under
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
 - Settle the open stack questions: ~~client framework~~ (React), ~~server framework~~ (Effect HTTP), ~~a time-boxed Cordis evaluation~~ (not adopted).
 - **Data model and schema** (drafted in [DATA-MODEL.md](DATA-MODEL.md); DESIGN §3, §4, §6.2): message graph (slots with parents, threads, path selection), versions with provenance and status, state events, layered entities (base, variant, override, revisions), notes, connections and models, rollouts, summaries over path segments, changesets, drafts with undo history.
-- Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue (as in reference-harness).
+- Server skeleton: typed operations (every UI action is an operation), WebSocket subscriptions, per-entity optimistic concurrency, single-writer SQLite queue.
 - Users and auth: separate users with per-user ownership in every query; a trusted reverse-proxy header (Authelia `Remote-User`) mapped to a user, plus built-in login.
 - ~~Provider layer~~: built (ARCHITECTURE.md §6, [PROVIDERS.md](PROVIDERS.md)). The settings UI, user cost formulas, per-API cache handling and ledger rollups followed (PROVIDERS.md status line).
 - ~~Exposure safety~~ (DESIGN §11): built, except the password branch, which comes with built-in login.
@@ -68,7 +68,7 @@ Phases 0 to 6 are built, and so is most of phase 7 except the items listed under
 ## Phase 1: Import and compatibility core
 **Status (2026-10-30): built.** Card formats and export, preset import (model settings imported separately and explicitly), macros, lorebook import, the full ST folder mapping with its report, and the stock-ST differential harness (`npm run test:st`). Folder import doesn't import keys or connection settings.
 
-- Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX (reference-harness already uses `character-card-utils` and the PNG chunk libraries).
+- Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX.
 - Preset import: chat-completion presets, the prompt manager model, markers, injections, regex, sampler mapping, plus the import report.
 - Macro engine with expansion based on where text came from.
 - Lorebook import (activation and placement come in phase 2).
@@ -107,7 +107,7 @@ Phases 0 to 6 are built, and so is most of phase 7 except the items listed under
 ## Phase 3: LCM
 **Status (2026-10-30): built.** Summary storage and lineage, planning and worker execution, direct and tool output, refusal handling, condensation, stale repair, editable revisions, the boundary, rail and request views, and explicit enable/adopt/approved backfill with estimates. Built since: per-summary details (model, times, attempts, tokens, cost, request link), summaries kept per view for separate contexts, and workshop transcript summaries. Open: a dedicated summarizer model.
 
-- Port the reference-harness §9b design: tiers, eager thresholds, worker pool, condensation, lineage, failure placeholders. Summaries over path segments.
+- Implement hierarchical summarization with tiers, eager thresholds, worker pool, condensation, lineage, failure placeholders. Summaries over path segments.
 - Summarization with the preset loaded and a summarization tail prompt. Idle-time jobs while the cache is warm.
 - Stale handling on edits. Editable summaries with versions.
 - UI: boundary divider, coverage rail, summaries in the context view.
@@ -117,7 +117,7 @@ Phases 0 to 6 are built, and so is most of phase 7 except the items listed under
 **Status (2026-11-20): built.** AGENTIC.md units U1 to U10 and the resume requirement (its §12) are built (ARCHITECTURE §16 "Agent rollouts", "Decision models"). Not built, by decision (AGENTIC §10 "Left for later"): the per-character orchestration mode with presence-cut summaries, per-agent private state, and automatic mid-stream resampling of a broken turn. The orchestration mode registry has the one `default` planner; card swap is a card layout setting.
 
 - Timeline/rollout separation: fork per turn, a commit pipeline for both output contracts.
-- pi-agent-core with reference-harness-style persistence: context snapshot, flushed transcript, invisible mid-rollout resume, editing a step and then resuming.
+- pi-agent-core with durable rollout state: context snapshot, flushed transcript, invisible mid-rollout resume, editing a step and then resuming.
 - RP tools: `expand_summary`, summary and chat search, lorebook lookup, notes, presence. Tool effect classes; chat-state effects attached to versions.
 - Live display of steps (expanded, then collapsed, with a sticky preference), the inline "N steps" element, the run inspector, and the activity panel.
 - Optional decision models (Jev) for lorebook inclusion and presence.

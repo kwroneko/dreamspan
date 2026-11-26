@@ -1,7 +1,7 @@
 # Client framework evaluation
 
 **Status**: React is [D] (owner, 2026-10-10). Implemented portions obsolete as proposals (2026-10-30; ARCHITECTURE §5, §12, §14): Vite, React Compiler, TanStack Router/Virtual, AtomRpc data, semantic tokens without the default palette, the enforced `src/ui/` boundary, Base UI primitives, CodeMirror editing and Streamdown rendering. The Chromium performance harness is built; WebKit, phone-class CPUs and performance budgets in CI remain unbuilt. Other optional stack choices (Query, TanStack Form, React Aria, Tiptap) and broader design-system/performance proposals are not implied by those implementations. Original proposal revision 2: 2026-10-10; [P] provenance is retained.
-**Owner's framing [D]**: UI quality for real users is the most important thing, and the client framework is one of the main stack decisions. reference-harness's console stack (SvelteKit + bits-ui) was a minor choice for an admin monitoring UI, so it isn't the default here.
+**Owner's framing [D]**: UI quality for real users is the most important thing, and the client framework is one of the main stack decisions.
 
 ---
 

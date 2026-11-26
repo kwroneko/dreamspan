@@ -75,7 +75,7 @@ export interface KindTransportRequest {
   readonly aside?: typeof globalThis.fetch
 }
 
-/** One decision request on the wire (reference-harness's System-One body), sent with the connection's fetch. */
+/** One System-One decision request, sent with the connection's fetch. */
 export interface DecisionWire {
   readonly decide: (request: {
     readonly baseUrl: string

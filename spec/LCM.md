@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: User-formula estimates in §2.11 are built (U12, 2026-10-28; obsolete as an implementation plan, see ARCHITECTURE.md §6). Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–7 are implemented and obsolete as implementation proposals (2026-10-30; ARCHITECTURE §16); what is not built is listed under its section and in §5. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: User-formula estimates in §2.11 are built (U12, 2026-10-28; obsolete as an implementation plan, see ARCHITECTURE.md §6). Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–7 are implemented and obsolete as implementation proposals (2026-10-30; ARCHITECTURE §16); what is not built is listed under its section and in §5. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open.
 
 **Built** (planperf1, 2026-11-14; obsolete as implementation work): the existing §2.1–§2.2 and queue/maintenance behavior now uses transaction-local batched path/freshness proofs, a bounded immutable-lineage cache and an isolated maintenance reader. Selection and job policy are unchanged; ARCHITECTURE §3 and §16 record the implementation and bounds. No Proposed decision is promoted to Decided. Planning indexes change the baseline and require a fresh deploy.
 
@@ -13,31 +13,30 @@ Scope:
 
 ---
 
-## 1. What carries over unchanged
+## 1. Summarization design
 
-| From reference-harness | Ref |
-|---|---|
-| Lineage: L1 records its ordered inputs (`summary_inputs`), higher levels their ordered children (`summary_parents`); a condensation job stores its explicit child list. | §1 Tables; §1 What a summary covers |
-| Completion is atomic: summary, lineage, supersessions and the job's completion in one transaction, rolled back if the job row isn't updated. | §1; §6 |
-| Eager L1 generation off the build path. A chunk takes whole messages until about 4,000 tokens (`leaf_input`), with a 600-token target (`leaf_target`). A single message over 1.5× `leaf_input` is clipped for the summarizer with a marker. | §2 Knobs; §3 Prompt assembly |
-| L1 is cutoff-addressed (prior summaries as continuity, the chunk as material); L2+ is input-addressed (exactly its children). The rendered inputs are checked against the declared ones before the request. | §3 Prompt assembly |
-| Ordinary condensation: fanout 5, target 800; condensed children leave the pool; runs split at failed ranges. | §2 Ordinary fanout condensation |
-| Budget absorption and bootstrap, which reduce the original children again rather than a parent's prose. | §2 Budget-driven eager condensation |
-| The durable queue: claim by compare-and-set with the attempt counted at claim, `max_retries` 2, a best-effort draft salvaged as `truncated` with a sentence-boundary clip, startup reset of `processing` jobs, a drain that refunds the attempt. | §3 Queue; §6 |
-| Use / wait / omit: a build over its maximum escalates the covering job and waits, with one 120 s deadline across waits. A timeout fails the build, not the job. | §4 Live overflow |
-| Greedy coverage preferring higher levels; superseded summaries excluded; duplication preferred to losing raw text when lineage is inconsistent. | §4 Coverage selection |
-| A running generation keeps the summary selection it started with; a summary landing meanwhile affects only later contexts. | §4 Cache breakpoints |
-| Usage per request in the ledger, separate from the estimated `token_count` stored on a summary. | §3 Refusals, bad output and accounting |
+| Mechanism |
+|---|
+| Lineage: L1 records its ordered inputs (`summary_inputs`), higher levels their ordered children (`summary_parents`); a condensation job stores its explicit child list. |
+| Completion is atomic: summary, lineage, supersessions and the job's completion in one transaction, rolled back if the job row isn't updated. |
+| Eager L1 generation off the build path. A chunk takes whole messages until about 4,000 tokens (`leaf_input`), with a 600-token target (`leaf_target`). A single message over 1.5× `leaf_input` is clipped for the summarizer with a marker. |
+| L1 is cutoff-addressed (prior summaries as continuity, the chunk as material); L2+ is input-addressed (exactly its children). The rendered inputs are checked against the declared ones before the request. |
+| Ordinary condensation: fanout 5, target 800; condensed children leave the pool; runs split at failed ranges. |
+| Budget absorption and bootstrap, which reduce the original children again rather than a parent's prose. |
+| The durable queue: claim by compare-and-set with the attempt counted at claim, `max_retries` 2, a best-effort draft salvaged as `truncated` with a sentence-boundary clip, startup reset of `processing` jobs, a drain that refunds the attempt. |
+| Use / wait / omit: a build over its maximum escalates the covering job and waits, with one 120 s deadline across waits. A timeout fails the build, not the job. |
+| Greedy coverage preferring higher levels; superseded summaries excluded; duplication preferred to losing raw text when lineage is inconsistent. |
+| A running generation keeps the summary selection it started with; a summary landing meanwhile affects only later contexts. |
+| Usage per request in the ledger, separate from the estimated `token_count` stored on a summary. |
 
-Token counts here use the assembler's estimate (four characters a token, three a message), where reference-harness uses gpt-tokenizer (ref §2 Related controls).
+Token counts use the assembler's estimate of one token per four characters plus three per message.
 
 ---
 
-## 2. Differences
+## 2. Integration with chat and its branches
 
 ### 2.1 Summaries over path segments in a branching graph
 
-reference-harness keys summaries by timeline (ref §1 What a summary covers) and shares them across views only by copying rows (ref §5 Summary mirroring).
 Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): shared primary-parent chains, on-path selection, freshness/level/newness preference, continuous root coverage and a cursor independent of the raw budget. Selection uses indexed ending-slot candidates over the path, with shared freshness memoization; no summary copying between branches.
 - **[P]** Chunks end at branch points when they can (DATA-MODEL §8.2). A chunk that would cross a slot with two or more live children ends at that slot, unless that leaves it under a quarter of `leaf_input`. The shared segment then gets summaries both branches use.
 - **[P]** A branch made later inside a summarized chain doesn't contain that chain. Its path uses the summaries before the fork, and the planner summarizes on from there.
@@ -46,7 +45,6 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 ### 2.2 Edits, swipes, deletes and restores under a summary
 
-reference-harness records event ids only. A covered edit or delete leaves its summaries as they were, and they stay current (ref §5; §8 item 7).
 Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries): nullable effective version and amendment pins, child revision pins, recursive derived freshness, and stale fallback only without a fresh candidate at that endpoint. Edits, swipes, deletes, restores and hides change no summary rows.
 - Implemented (ARCHITECTURE §16, condensation and stale summaries): re-summarizing writes a new summary row over the same chain with the new inputs; the stale one stays, and a swipe back makes it fresh again with no request. It runs only with the next reply, for summaries the path uses, once per affected summary; a hand-written stale summary is flagged, never replaced.
 - Re-summarizing runs at `idle` class (§2.5). "Re-summarize" and Retry are rerun requests (`SetSummaryRerun`) that the next reply's planning answers; no click generates (ARCHITECTURE §16).
@@ -58,18 +56,17 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 ### 2.3 Summarizing through the user's preset
 
-reference-harness runs a separate agent session with a summary editor tool and its own tail, and accepts only a draft written through the tool (ref §3 Prompt assembly; §3 Editor and success criterion).
 - **[D]** Summarizing through the user's own preset must be supported, and is likely to work very well (DESIGN §8, owner 2026-10-12): the conversation is cut at the point to summarize to; an instruction is appended as a system message where the provider takes one mid-chat, as a user message otherwise; the reply is the summary; it shares the cache prefix with the normal conversation.
 - **[P]** A summarization request is the normal assembly as if the chat ended at the chunk's last slot, followed by the **summarization tail**. Same preset, cards, notes, lorebooks and summary layer; history from the cursor to the cut.
-  - For L1, the layer is the coverage up to the chunk's start (ref §3: prior summaries are continuity).
+  - For L1, the layer is the coverage up to the chunk's start so earlier summaries supply continuity.
   - For a condensation, the layer is cut after its last child, with no history, and the tail names the children ("parts 6 to 10").
 - **[P]** It uses ST's `quiet` generation type, as ST's Summarize extension does, so preset prompts trigger as they do there. The prefill, the speaker's tail directive and the one-turn direction are left out.
 - **[P]** The tail is the last message. It's a system message where the model's capabilities say mid-chat system messages are taken, otherwise the user's. Today `wire.ts` turns later system messages into the user's for some providers; this adds a capability flag, defaulting per provider kind and overridable per model.
 - **[P]** Tail text, in order: a per-chat override in `lcm.settings`, the user's default, a built-in default. Implemented (ARCHITECTURE §13/§16): the ST importer keeps the Summarize extension's prompt (`extension_settings.memory.prompt`) and mapped settings, fills an unset user default and preserves later edits; `{{words}}` expands to the job target. The tail says what it's for and asks for at most `target` words, in the story's language and voice. (The owner's preset needed a line acknowledging summary instructions, DESIGN §8 [D]; a tail that names its purpose serves the same end.)
 - **[P]** The summarizer resolves its preset and model through the existing scoped bindings (`preset.binding` and `model.binding` with scope `summarizer`, DATA-MODEL §5.3), defaulting to the narrator's. Another model or preset loses the shared cache, and the cost estimate says so.
-- **[P]** The reply is the summary, without its reasoning. `max_tokens` is the target × 2.5, reference-harness's overage factor (ref §2 Knobs). A reply cut by length is salvaged as `truncated` (ref §6).
+- **[P]** The reply is the summary, without its reasoning. `max_tokens` is the target × 2.5. A reply cut by length is salvaged as `truncated`.
 - **What's cached [P].** By construction the request matches the live one through the preset prefix and the summary layer, so with explicit breakpoints (Anthropic) those are cache reads. The chunk is read from cache only by providers with automatic prefix caching, and only up to the first in-chat injection. Summarization requests put no marker on the chunk, since nothing reuses it.
-- reference-harness's tool-based summarizer can be offered once rollouts have tools (phase 4). See question 1.
+- A tool-based summarizer can be offered once rollouts have tools (phase 4). See question 1.
 - Why: the owner's ST workflow already works this way (DESIGN §8 [D]); chat-mode models may have no tool support; the cache is shared.
 
 ### 2.4 Refusal detection
@@ -78,25 +75,24 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 
 ### 2.5 Idle-time jobs while the cache is warm
 
-reference-harness has no idle class or idle gate for summaries (ref §4 Idle-time work).
 - **[D]** LCM work runs in the gap after a reply while the cache is still warm, which also refreshes it, depending on settings and provider (DESIGN §8.1).
 - **[P]** When a reply finishes, the planner runs for its chat. Jobs it creates while the cache-warmth estimate (ARCHITECTURE §15) says warm get class `idle`, otherwise `background`. The pool claims `interactive`, then `idle`, then `background`, oldest first.
 - **[P]** An idle job reads the prefix and layer the reply just cached, pays only for its chunk, and its read refreshes those cache entries. On Anthropic it refreshes only those, not the reply's history marker.
-- **[P]** Per chat, L1 jobs run one at a time in path order: each needs the previous summary as continuity, and reuses the layer its predecessor cached. reference-harness can run one timeline's jobs at once when `worker_count` > 1 (ref §3 Queue). Condensations may run beside L1s. Across chats, a pool of 2 per user by default.
+- **[P]** Per chat, L1 jobs run one at a time in path order: each needs the previous summary as continuity, and reuses the layer its predecessor cached. Condensations may run beside L1s. Across chats, a pool of 2 per user by default.
 - **[P]** The planner runs on: a message appended; a reply finished; a version selected, added, deleted or restored; a message hidden or shown; a summary completed; LCM settings changed; startup, for chats with LCM on. It's coalesced per chat, 250 ms after the last trigger, like the cache estimate.
 - **[P]** A per-user setting turns spending ahead off: LCM jobs then start only when a send would otherwise have to wait.
 
 ### 2.6 The window and batched boundary advances
 
 - **[D]** The baseline includes rich, compact and summary tiers with target/max hysteresis, and an eager threshold below the compact maximum (DESIGN §8).
-- **[P]** reference-harness's rich and compact tiers render events differently. Here they differ once versions have a context form (DESIGN §10.2): rich sends `content`, compact sends `context_form` when it's set. Until then they coincide, and the verbatim window is one tier.
+- **[P]** Rich and compact tiers differ once versions have a context form (DESIGN §10.2): rich sends `content`, compact sends `context_form` when it's set. Until then they coincide, and the verbatim window is one tier.
 - **[P]** The window's maximum, `window_max`, is the history budget the assembler already computes: context, less the response, the fixed prompts, the lore allowance and the layer allowance. Defaults:
-  - **keep:** the newest 50% of `window_max` is never summarized (reference-harness's rich target);
+  - **keep:** the newest 50% of `window_max` is never summarized;
   - **trigger:** when the window passes keep + 25%, the planner enqueues enough chunks to bring it back to keep, as one **batch**;
-  - **runway:** the last 25% is room for a batch to finish before a send has to wait. It must hold at least two chunks. reference-harness only documents this (ref §2 Exact trigger points); here a setting that breaks it is refused.
+  - **runway:** the last 25% is room for a batch to finish before a send has to wait. It must hold at least two chunks. Settings that provide less runway are refused.
 - **[P]** A batch's summaries become selectable together, when its last job ends. The cursor, and the cache rewrite that comes with moving it, then moves once per batch instead of once per chunk. Over `window_max`, finished summaries are used at once.
 - Example: a 32k window keeps 16k, summarizes 8k (two chunks) at a time, and rewrites its cached history about every 8k tokens of story. A 120k window does so about every 30k.
-- **[P]** The layer allowance has a target of 15% of the context and a maximum of 25%. Budget absorption engages above the maximum; reference-harness has it off by default (ref §2). With fanout 5 the layer grows with the logarithm of the story's length, about 10k tokens for a 750k-token story, so it rarely engages.
+- **[P]** The layer allowance has a target of 15% of the context and a maximum of 25%. Budget absorption engages above the maximum. With fanout 5 the layer grows with the logarithm of the story's length, about 10k tokens for a 750k-token story, so it rarely engages.
 - **[P]** Omit, made concrete: over `window_max` with no job covering the window's oldest part, or after the wait times out, the oldest verbatim messages past the budget are left out through the stepped fallback (ARCHITECTURE §15), and the context reports the range ("Messages 40–52 left out: not summarized yet"). This is the normal state while a backfill runs.
 - **[P]** While a send waits, its version shows "Summarizing messages 40–52…". Stop ends the wait, not the job.
 
@@ -110,11 +106,10 @@ reference-harness has no idle class or idle gate for summaries (ref §4 Idle-tim
 
 ### 2.8 Failure placeholders
 
-reference-harness synthesizes a placeholder from a failed job row and never persists it. It omits the range's raw messages at once, treats the failure as terminal, and needs an operator to delete the job row before the range can be retried (ref §6).
 - **[D]** Failure placeholders are part of the baseline (DESIGN §8).
 - Implemented (ARCHITECTURE §16): a failed L1 is a summary row with status `failed`, its inputs, its error and an empty revision; it is held while its inputs are unchanged, stale after an edit or swipe inside the range, and Retry and Retry with… are rerun requests on it (`SetSummaryRerun`). A failed row never replaces messages that fit.
 - Implemented (ARCHITECTURE §16): the assembler sends "[Messages 40–52 could not be summarized.]" only when the window would pass `window_max` and raw history must leave. The marker consumes budget, is reported as an assembly issue and its failure range is pinned for exact rebuilds. The divider, rail and summary panel already show failures (slice 7).
-- A failed condensation leaves its children selected, as in reference-harness. It gets a failed row too, so it shows (implemented, slice 5).
+- A failed condensation leaves its children selected. It gets a failed row too, so it shows (implemented, slice 5).
 
 ### 2.9 How summaries enter the context
 
@@ -138,7 +133,7 @@ Implemented in [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summar
 ### 2.12 Settings and plain chat mode
 
 - Implemented: chat-wide initial `lcm.settings`, enabled for new chats and disabled for newly imported chats, with an optional tail (ARCHITECTURE §16). **[P]** Further knob overrides and user defaults arrive with the planner and enable flow.
-- **[D]** Plain chat mode has no drill-down and no search (DESIGN §8). **[P]** The layer is always bare in phase 3, like reference-harness's generation layer; reference-harness's live layer adds expansion handles and a note (ref §4 Coverage selection).
+- **[D]** Plain chat mode has no drill-down and no search (DESIGN §8). **[P]** Phase 3 sends the layer without expansion handles.
 - Not carried over: the diary layer, donor mirroring (path sharing replaces it), recency labels, the summary editor tool (phase 4).
 
 ### 2.13 UI
@@ -165,7 +160,7 @@ Moved to [ARCHITECTURE §16](../ARCHITECTURE.md#16-lcm-hierarchical-summaries), 
 
 **Writer** (`ops.ts`, each one synchronous transaction with no other work inside):
 - `EnqueueSummaries`: one batch of jobs. It re-checks each chain by walking parents from its last slot (bounded by the chunk), and relies on the unique index for one live job per chain and level.
-- `ClaimSummaryJob`: pending to processing, by class then age, counting the attempt (ref §3 Queue).
+- `ClaimSummaryJob`: pending to processing, by class then age, counting the attempt.
 - `StartSummaryRollout`: the rollout (kind `summarize` or `condense`, its class) and its frozen snapshot.
 - `CompleteSummary`: summary, revision, inputs or lineage with child revisions, supersessions on absorption, the job completed and the rollout finished with its usage. It refuses inputs that aren't the job's chain in order.
 - `FailSummaryAttempt`: a retry (pending, the error, the rejected draft) or the end (a failed summary with its error); the rollout finished either way.
@@ -237,8 +232,8 @@ Each slice moves its part of this document into ARCHITECTURE.md in the same comm
 
 Only questions whose answer changes what gets built.
 
-1. **Which summarizer is the default?** Through your preset with a tail prompt (§2.3), or reference-harness's tool-based summarizer with its own prompt? DESIGN §8 says both "may be the default". *Recommendation:* the preset path, the only one built in phase 3. It shares the cache, needs no tools and is your ST workflow. The tool-based one becomes an option with phase 4's rollouts.
+1. **Which summarizer is the default?** Through your preset with a tail prompt (§2.3), or a tool-based summarizer with its own prompt? DESIGN §8 says both "may be the default". *Recommendation:* the preset path, the only one built in phase 3. It shares the cache, needs no tools and is your ST workflow. The tool-based one becomes an option with phase 4's rollouts.
 2. **A summary you edited goes stale. Replace it automatically, or keep your text and flag it?** *Recommendation:* keep it and flag it, with Re-summarize one click away. Replacing it would take your edit out of the context without asking.
-3. **A summary fails. Placeholder at once, or keep the raw messages until the window overflows?** reference-harness drops the raw messages at once. *Recommendation:* keep them verbatim while they fit, and show the failure with Retry and Retry with… The placeholder replaces them only when the window would overflow. You have time to retry with another model before anything is lost from the context.
+3. **A summary fails. Placeholder at once, or keep the raw messages until the window overflows?** *Recommendation:* keep them verbatim while they fit, and show the failure with Retry and Retry with… The placeholder replaces them only when the window would overflow. You have time to retry with another model before anything is lost from the context.
 4. **Is LCM on by default for new chats?** It's off for imported ones (DESIGN §8.1 [D]); new chats aren't decided. *Recommendation:* on. A new chat costs nothing until it outgrows its window. (Workshops now start LCM the same way as new story chats; [WORKSHOP-CONTEXT.md](WORKSHOP-CONTEXT.md) §2.4.)
 5. **Older images — decided in DESIGN §10.2a; built (U22), obsolete as a question.** ARCHITECTURE §§12, 16. The original recommendation: summarize them as text. Images in the window are sent; images in a summarized range are sent to the summarizer with their chunk when its model has vision, so the summary describes them, and they leave the context with the rest of the range. Nothing else needs building.

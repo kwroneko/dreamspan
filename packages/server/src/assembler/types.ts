@@ -161,7 +161,7 @@ interface Samplers {
   readonly seed: number
 }
 
-/** Why a cache breakpoint is where it is (DESIGN §5.5, reference-harness's scheme). */
+/** Why a cache breakpoint is where it is (DESIGN §5.5). */
 type BreakpointReason = "prefix" | "summary" | "history" | "pinned"
 
 export interface AssembledRequest {

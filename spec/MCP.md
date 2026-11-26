@@ -8,7 +8,7 @@
   2. Every connection can be turned on or off per chat as an override, in story chats and workshops alike, whatever the account default.
   3. Build order: remote HTTP first, then sign-in (OAuth), local programs (stdio) last, keeping stdio admin-only behind the startup switch.
 
-Today the app has no MCP client, storage or UI. This spec designs it as deltas from reference-harness `latest` (`src/mcp/`, `src/tools/side-effects.ts`, `src/agent/dynamic-tools.ts`) and from what this app already builds: frozen tool offers, receipts, approvals and grants, effect classes, the data-only result boundary, dynamic tool loading, Resume, the run inspector and credentials.
+Today the app has no MCP client, storage or UI. This design builds on what this app already builds: frozen tool offers, receipts, approvals and grants, effect classes, the data-only result boundary, dynamic tool loading, Resume, the run inspector and credentials.
 
 ## 0. Summary
 
@@ -21,9 +21,9 @@ Today the app has no MCP client, storage or UI. This spec designs it as deltas f
 - **Resources, prompts, sampling and elicitation are later.** The client declares none of them.
 - **Baseline impact:** four new tables (`mcp_connections`, `mcp_connection_shares`, `mcp_uses`, `mcp_calls`) and their indexes and triggers (§12). Per-chat enablement, workshop grants, approvals, receipts, effects and transcripts fit existing tables.
 
-## 1. Deltas from reference-harness
+## 1. MCP design choices
 
-| reference-harness (`latest`) | Here | Why |
+| Design option considered | Proposed design | Why |
 |---|---|---|
 | Servers in the operator's TOML (`[mcp.servers.<key>]`: `url`, `transport`, `headers`, `effects`, `enabled`) | Rows the user adds in Settings (§2), per user, optionally shared by an admin (§3) | A multi-user web app; most settings change from inside the app (DESIGN §9 [D]) |
 | Streamable HTTP and SSE only | The same two, plus stdio for admins where the instance allows it (§2.2), plus sign-in with the server (OAuth, §2.4) | Most community servers are local programs; popular remote ones sign in with OAuth |
@@ -45,7 +45,7 @@ Today the app has no MCP client, storage or UI. This spec designs it as deltas f
 
 - **Transport.** "Streamable HTTP" (the default; MCP 2025-03-26 and later) or "SSE (older servers)" (the 2024-11-05 HTTP+SSE transport). No automatic fallback between them: the user picks, and Check says which one answered if the other fails ("This server answers the older SSE transport. Switch to it?").
 - **Through the app's network.** Requests go through `Network.fetchFor` (ARCHITECTURE §3.12): the instance proxy and an admin's forced proxy (DESIGN §9 [D]), the bypass list, the connection's own proxy override (as provider connections have, collapsed under Advanced), same-origin redirects only, a key never over a plain-`http` custom proxy. Local addresses are allowed, as local models are (DESIGN §9 [D]). The SDK's transports take a `fetch` function; this is the app's (to verify against the pinned version in M1).
-- **Library.** `@modelcontextprotocol/sdk`, pinned exactly (1.32.2 is the newest past the cooldown on 2026-11-16, published 2026-10-23), as reference-harness uses its 1.x client. Wrapped in Effect 4 services on the main thread: the client does network work only, and every storage operation goes through `db/ops.ts` in the workers.
+- **Library.** `@modelcontextprotocol/sdk`, pinned exactly (1.32.2 is the newest past the cooldown on 2026-11-16, published 2026-10-23). Wrapped in Effect 4 services on the main thread: the client does network work only, and every storage operation goes through `db/ops.ts` in the workers.
 - **Client identity.** `initialize` sends `clientInfo { name: "dreamspan", version }` and capabilities `{}`: no `sampling`, `roots` or `elicitation`. A request the server sends anyway gets JSON-RPC error −32601 and a logged warning (§11).
 
 ### 2.2 Local programs (stdio): admins only, and only where the instance allows it
@@ -159,13 +159,13 @@ No call asks first: the enable is the consent ([D]). Every switch's hover says w
 
 **Built; obsolete** (ARCHITECTURE §3.12e).
 
-One client per (connection, user), created at the first call of a run that reaches it, kept while used, closed after 5 idle minutes, on a connection edit (its `cache_revision` advances), when the connection stops being usable, and at shutdown. A Streamable HTTP `Mcp-Session-Id` lives only in memory. A server may lose it (restart, timeout); reference-harness's `isSessionTerminatedError` detects that.
+One client per (connection, user), created at the first call of a run that reaches it, kept while used, closed after 5 idle minutes, on a connection edit (its `cache_revision` advances), when the connection stops being usable, and at shutdown. A Streamable HTTP `Mcp-Session-Id` lives only in memory. A server may lose it (restart, timeout).
 
 ### 7.2 Reconnecting without repeating a change
 
 **Built; obsolete** (ARCHITECTURE §3.12e).
 
-On a dead session the client reconnects once (shared by concurrent callers, as reference-harness's `reconnect`). The call is sent again only when the failure proves the server didn't process it: an HTTP 404 on the session id, or a 400 saying the session isn't initialized, both received as the response to the call itself. A transport error after the request was sent, a timeout or any message-text match leaves the call failed, returning "The connection to <name> dropped. It may still have happened." for the model to decide whether to call again. Each attempt is its own `mcp_calls` row.
+On a dead session the client reconnects once (shared by concurrent callers). The call is sent again only when the failure proves the server didn't process it: an HTTP 404 on the session id, or a 400 saying the session isn't initialized, both received as the response to the call itself. A transport error after the request was sent, a timeout or any message-text match leaves the call failed, returning "The connection to <name> dropped. It may still have happened." for the model to decide whether to call again. Each attempt is its own `mcp_calls` row.
 
 ### 7.3 Timeouts and cancellation
 

@@ -21,11 +21,11 @@ import type { DecisionPoint } from "../engine.ts"
  */
 const NEXT_RECENT = 6
 const NEXT_MESSAGE_CHARS = 1_200
-/** Choice options some decision models take at most (reference-harness's survey: Tev1, 20). */
+/** Some decision models, including Tev1, accept at most 20 choices. */
 const MAX_CANDIDATES = 20
 /**
- * The point's deadline: it holds the reply up. Decision models answer in 0.3–1.2 s (p50,
- * reference-harness's survey); past 3 s the wait outgrows what a better pick is worth, and Auto decides.
+ * The point's deadline holds the reply up. Decision models answer in 0.3–1.2 s (p50).
+ * Past 3 s the wait outgrows what a better pick is worth, and Auto decides.
  */
 export const NEXT_TIMEOUT_MS = 3_000
 

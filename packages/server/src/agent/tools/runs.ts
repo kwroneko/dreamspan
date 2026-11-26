@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { toolDataBody, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
-// The way back to a run's tool results (spec/WORKSHOP-CONTEXT.md §3.2), reference-harness's
-// read_session_transcript as a delta: a message's own steps, read from the run that wrote it.
+// Read a message's tool results from the run that wrote it (spec/WORKSHOP-CONTEXT.md §3.2).
 // Causal: only messages on the path before the one being generated, each cut at its own post.
 import { Type } from "@earendil-works/pi-ai"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"

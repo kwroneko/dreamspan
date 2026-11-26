@@ -1,5 +1,5 @@
-// Workshop turn continuity is a delta from reference-harness's loadCompletedSessionMaterial:
-// retain the frozen request and the WHOLE transcript; verify the shown path before reuse.
+// To continue a workshop turn, retain the frozen request and the whole transcript.
+// Verify the shown path before reuse.
 import { isDeepStrictEqual } from "node:util"
 import type { UserId } from "@dreamspan/shared/domain.ts"
 import type { PathWindow } from "@dreamspan/shared/chatApi.ts"

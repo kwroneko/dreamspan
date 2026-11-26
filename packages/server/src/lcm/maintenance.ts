@@ -7,7 +7,7 @@ import type { Summary } from "@dreamspan/shared/lcm.ts"
 interface MaintenanceSettings {
   readonly fanout: number
   readonly condenseTarget: number
-  /** An eager condensation needs at least this many children (reference-harness's eager_condense_min_children). */
+  /** An eager condensation needs at least this many children. */
   readonly eagerMinChildren: number
   /** An absorbing summary never has more children than this (eager_absorb_max_children). */
   readonly absorbMaxChildren: number
@@ -258,7 +258,7 @@ export const planMaintenance = (input: MaintenanceInput): Maintenance => {
 }
 
 /**
- * One budget job, as reference-harness picks it: oldest run first, never the run holding the newest
+ * Pick one budget job: oldest run first, skipping the run holding the newest
  * summary; absorb the run into the generated parent beside it (the left one first), or else start
  * the next level from the oldest few. Either must be worth twice the condensation target.
  */

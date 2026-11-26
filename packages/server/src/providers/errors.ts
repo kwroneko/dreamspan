@@ -1,6 +1,5 @@
 // Typed provider errors (spec/PROVIDERS.md §7.1). Classified from pi-ai's final message,
-// the HTTP status seen by onResponse, and pi-ai's own overflow and retry checks, rather
-// than tagged inside error strings as reference-harness must do under pi-agent-core.
+// the HTTP status seen by onResponse, and pi-ai's own overflow and retry checks.
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow"
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"

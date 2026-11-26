@@ -1,13 +1,10 @@
 // export_to_file (spec/WORKSHOP-CARDS.md §4.3 point 2, unit C2c): a card's field, a lorebook
 // entry, a preset prompt or a whole item written as text to the working folder, so search_files
 // and bash can work on all of it. Nothing comes back from the file into the item except through
-// the edit tools. Delta from reference-harness's `export_text` / `export_card_json` views of its card
-// tool (`src/tools/character-card.ts`): a tool of its own among the file tools rather than a view,
-// so it's offered exactly where write_file is and the read tools' definitions never change; it
-// reads library items (a head, any revision, or an attached one) rather than workspace card files;
-// and it writes through the file tools' own path (`makeFileTools`), so the Files capability,
-// the working folder, quota, versions and Undo are theirs. Like reference-harness's, it never replaces a
-// file: a taken name gets " (2)".
+// the edit tools. Export is its own file tool, offered wherever write_file is available, so
+// the read tools' definitions never change. It reads library heads, revisions and attachments.
+// It writes through `makeFileTools`, using the same Files capability, working folder, quota,
+// versions and Undo. A taken name gets " (2)" to avoid overwriting the file.
 import { Type } from "@earendil-works/pi-ai"
 import type { LibraryRef, RefId, RevisionId } from "@dreamspan/shared/library.ts"
 import type { RolloutEffectRecord } from "@dreamspan/shared/workshopApi.ts"
