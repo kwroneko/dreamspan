@@ -11,21 +11,12 @@ import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { Writer } from "./Database.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
-import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
+import { filesQuotaMediaIds, workshopMediaCharge } from "./workshopImportMedia.ts"
 
 /** The Files quota counts each media row once, including when several paths or imports hold it. */
 const versionBytes = (sql: SqlClient.SqlClient, userId: string, sha256?: string) =>
   sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
-    WHERE m.id IN (
-      SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL
-      UNION
-      SELECT media_id FROM media_refs WHERE owner_user_id = ${userId} AND files_quota = 1
-      UNION
-      SELECT i.media_id FROM drafts d JOIN composer_images i ON i.draft_id = d.id
-        WHERE d.user_id = ${userId} AND i.staged = 1 AND i.status = 'active'
-      UNION
-      SELECT media_id FROM swept_composer_files WHERE user_id = ${userId}
-    )
+    WHERE m.id IN (${filesQuotaMediaIds(sql, userId)})
     ${sha256 === undefined ? sql`` : sql`AND m.sha256 = ${sha256}`}`.pipe(Effect.map(([row]) => row?.bytes ?? 0))
 
 export const makeFileVersionWriteHandlers = Effect.gen(function* () {
@@ -332,9 +323,6 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
       sql<AttachmentPublication>`SELECT token, user_id AS userId, path, device, inode FROM attachment_publications
         ${userId === undefined ? sql`` : sql`WHERE user_id = ${userId}`}`.pipe(query("ListAttachmentPublications")),
     WorkshopImportBytes: ({ userId, media }) =>
-      newWorkshopImportMedia(sql, userId, media).pipe(
-        Effect.map((rows) => rows.reduce((total, row) => total + row.addedBytes, 0)),
-        query("WorkshopImportBytes")
-      )
+      workshopMediaCharge(sql, userId, media).pipe(query("WorkshopImportBytes"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

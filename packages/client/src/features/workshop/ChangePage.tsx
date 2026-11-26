@@ -5,14 +5,24 @@
 // "Compared with now" sets the turn's result beside the item as it is. A revert that conflicts
 // (or `resolve=1` in the URL) shows the conflicting fields as they are now and as they were before
 // the change, with Keep now / Take before for each, then Revert the rest.
-import { CARD_SKILLS_UNIT, changedUnits, unitKey, unitPath } from "@dreamspan/shared/changeReversal.ts"
+import {
+  CARD_SKILLS_UNIT,
+  changedUnits,
+  isPortraitField,
+  PORTRAIT_UNIT,
+  portraitValue,
+  unitKey,
+  unitPath
+} from "@dreamspan/shared/changeReversal.ts"
 import type { Doc, EntityKind, RefId } from "@dreamspan/shared/library.ts"
+import { avatarCropOf } from "@dreamspan/shared/media.ts"
 import type { ReversalOutcome } from "@dreamspan/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link, useLocation } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
+import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { revisionName } from "../../ui/RevisionEntry.tsx"
@@ -129,6 +139,57 @@ function FieldAction({
   )
 }
 
+function PortraitComparison({
+  before,
+  after,
+  beforeLabel,
+  afterLabel,
+  actions,
+  defaultOpen
+}: Pick<Parameters<typeof FieldComparison>[0], "beforeLabel" | "afterLabel" | "actions"> & {
+  before: unknown
+  after: unknown
+  defaultOpen?: true
+}) {
+  const portrait = (doc: unknown, label: string) => {
+    const value = portraitValue(doc)
+    return (
+      <div className="flex flex-col items-start gap-1 text-sm">
+        <span className="text-muted">{label}</span>
+        {value ? (
+          <Avatar
+            id={value.avatar_media_id}
+            name="Portrait"
+            alt={`${label} portrait`}
+            mediaId={value.avatar_media_id}
+            crop={avatarCropOf(value.avatar_media_id, value.avatar_crop)}
+            size="xl"
+          />
+        ) : (
+          <span>No portrait</span>
+        )}
+      </div>
+    )
+  }
+  return (
+    <FieldComparison
+      label="Portrait"
+      change={{ path: ["avatar_media_id"], before, after }}
+      doc={{}}
+      beforeLabel={beforeLabel}
+      afterLabel={afterLabel}
+      actions={actions}
+      defaultOpen={defaultOpen ?? false}
+      comparison={
+        <div className="flex flex-wrap gap-4">
+          {portrait(before, beforeLabel)}
+          {portrait(after, afterLabel)}
+        </div>
+      }
+    />
+  )
+}
+
 function Comparisons({
   kind,
   before,
@@ -149,10 +210,24 @@ function Comparisons({
 }) {
   if (changes.length === 0) return <p className="p-2 text-sm text-muted">No fields differ.</p>
   const shown = new Set<string>()
-  const units = actions && kind === "card" ? changedUnits(before, after) : undefined
+  const units = kind === "card" ? changedUnits(before, after) : undefined
   return (
     <div aria-label="What changed" className="flex min-w-0 flex-col gap-2">
       {changes.map((change) => {
+        if (kind === "card" && isPortraitField(change.path[0])) {
+          if (shown.has(PORTRAIT_UNIT) || !units?.includes(PORTRAIT_UNIT)) return null
+          shown.add(PORTRAIT_UNIT)
+          return (
+            <PortraitComparison
+              key={PORTRAIT_UNIT}
+              before={before}
+              after={after}
+              beforeLabel={beforeLabel}
+              afterLabel={afterLabel}
+              actions={actions?.(PORTRAIT_UNIT)}
+            />
+          )
+        }
         const unit = unitOfPath(change.path, units)
         const first = !shown.has(unit)
         shown.add(unit)
@@ -229,18 +304,31 @@ function Resolve({
       </p>
       {left.map((conflict) => {
         const path = unitPath(conflict.field)
+        const portrait = conflict.field === PORTRAIT_UNIT
+        const label = portrait ? "Portrait" : fieldLabel(kind, {}, path)
+        const afterLabel = redo ? "Before this revert" : "Before this change"
         return (
           <div key={conflict.field} className="flex min-w-0 flex-col gap-2" data-conflict={conflict.field}>
-            <FieldComparison
-              label={fieldLabel(kind, {}, path)}
-              change={{ path, before: conflict.now, after: conflict.before }}
-              doc={{}}
-              beforeLabel="Now"
-              afterLabel={redo ? "Before this revert" : "Before this change"}
-              defaultOpen
-            />
+            {portrait ? (
+              <PortraitComparison
+                before={conflict.now}
+                after={conflict.before}
+                beforeLabel="Now"
+                afterLabel={afterLabel}
+                defaultOpen
+              />
+            ) : (
+              <FieldComparison
+                label={label}
+                change={{ path, before: conflict.now, after: conflict.before }}
+                doc={{}}
+                beforeLabel="Now"
+                afterLabel={afterLabel}
+                defaultOpen
+              />
+            )}
             <Segmented
-              label={`What to do with ${fieldLabel(kind, {}, path)}`}
+              label={`What to do with ${label}`}
               value={choices[conflict.field] ?? "now"}
               onValueChange={(value) => setChoices((all) => ({ ...all, [conflict.field]: value }))}
               options={[

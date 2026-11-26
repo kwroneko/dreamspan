@@ -62,6 +62,7 @@ export function FieldComparison({
   beforeLabel,
   afterLabel,
   actions,
+  comparison,
   defaultOpen = false
 }: {
   label: string
@@ -72,6 +73,7 @@ export function FieldComparison({
   settingLines?: SettingLines | undefined
   /** Buttons on the field's line (a change view's Revert this field); clicking them doesn't fold it. */
   actions?: ReactNode
+  comparison?: ReactNode
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -104,17 +106,18 @@ export function FieldComparison({
       </Tooltip>
       {open && (
         <div className="mt-2">
-          {text ? (
-            <ValueDiff
-              before={change.before}
-              after={change.after}
-              beforeLabel={beforeLabel}
-              afterLabel={afterLabel}
-              rich
-            />
-          ) : (
-            <ReadableDiff before={change.before} after={change.after} {...(lines ? { lines } : {})} />
-          )}
+          {comparison ??
+            (text ? (
+              <ValueDiff
+                before={change.before}
+                after={change.after}
+                beforeLabel={beforeLabel}
+                afterLabel={afterLabel}
+                rich
+              />
+            ) : (
+              <ReadableDiff before={change.before} after={change.after} {...(lines ? { lines } : {})} />
+            ))}
         </div>
       )}
     </details>

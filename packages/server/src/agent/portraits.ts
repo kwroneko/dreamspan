@@ -12,6 +12,7 @@ export interface PortraitMedia {
   readonly byteSize: number
   readonly width: number | null
   readonly height: number | null
+  readonly maxAddedBytes: number
 }
 
 export interface PortraitSource {
@@ -22,7 +23,7 @@ export interface PortraitSource {
    * `commit` with it while the file is held from the media sweep. Fails with an Error
    * whose message tells the agent what to fix.
    */
-  readonly apply: <A, E>(
+  readonly apply: <A extends { readonly addedBytes: number }, E>(
     ctx: ToolContext,
     path: string,
     commit: (media: PortraitMedia) => Effect.Effect<A, E>

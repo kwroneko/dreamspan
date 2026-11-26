@@ -482,7 +482,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     /** Records a file in media storage for the user; the same bytes are one row for everyone. */
     const recordMedia = (
       userId: string,
-      file: { sha256: string; mime: string; byteSize: number; width: number | null; height: number | null }
+      file: { sha256: string; mime: string; byteSize: number; width: number | null; height: number | null },
+      verifiedImage?: true
     ) =>
       Effect.gen(function* () {
         yield* sql`INSERT INTO media_assets ${sql.insert({
@@ -495,6 +496,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           path: mediaPath(file.sha256),
           created_at: Date.now()
         })} ON CONFLICT (sha256) DO NOTHING`
+        if (verifiedImage)
+          yield* sql`UPDATE media_assets SET mime = ${file.mime}, width = ${file.width}, height = ${file.height}
+            WHERE sha256 = ${file.sha256} AND mime = 'application/octet-stream'`
         const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${file.sha256}`
         yield* sql`INSERT INTO media_refs ${sql.insert({ media_id: row!.id, owner_user_id: userId })} ON CONFLICT DO NOTHING`
         return row!.id
@@ -552,8 +556,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
-      RecordMessageImage: ({ userId, media }) =>
-        recordMedia(userId, media).pipe(transaction(sql, "RecordMessageImage")),
+      RecordMessageImage: ({ userId, media, verifiedImage }) =>
+        recordMedia(userId, media, verifiedImage).pipe(transaction(sql, "RecordMessageImage")),
       StImportCharacterNote: ({
         userId,
         cardEntityId,

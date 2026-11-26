@@ -501,7 +501,7 @@ describe("workshop preset and lorebook documents", () => {
           expectedRowVersion: (yield* api.OpenEditor({ refId: preset.id })).ref.rowVersion,
           doc: { ...approved.doc, regex: [{ ...script, find_regex: "new" }], html_scripts_approved: true }
         })
-        assert.isString(raw)
+        assert.isString(raw.text)
         assert.strictEqual((yield* api.OpenEditor({ refId: preset.id })).doc.html_scripts_approved, false)
         const restored = yield* f.run(
           "restore_revision",
@@ -527,17 +527,16 @@ describe("workshop preset and lorebook documents", () => {
             (p) => p.identifier === "html"
           )!.enabled
         )
-        const rawCreation = JSON.parse(
-          yield* f.writer.AgentCreateEntity({
-            userId: f.user.id,
-            rolloutId: f.rolloutId,
-            toolCallId: "raw-create",
-            kind: "preset",
-            label: "Raw executable preset",
-            doc: { ...approved.doc, regex: [{ ...script, replace_string: "<script>newCode()</script>" }] },
-            tags: []
-          })
-        ) as { id: RefId }
+        const { text: rawCreationText } = yield* f.writer.AgentCreateEntity({
+          userId: f.user.id,
+          rolloutId: f.rolloutId,
+          toolCallId: "raw-create",
+          kind: "preset",
+          label: "Raw executable preset",
+          doc: { ...approved.doc, regex: [{ ...script, replace_string: "<script>newCode()</script>" }] },
+          tags: []
+        })
+        const rawCreation = JSON.parse(rawCreationText) as { id: RefId }
         const rawCreated = yield* api.OpenEditor({ refId: rawCreation.id })
         assert.isFalse(rawCreated.doc.regex_approved)
         assert.isTrue((rawCreated.doc.regex as RegexScript[])[0]!.disabled)

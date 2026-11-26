@@ -5,15 +5,16 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import sharp from "sharp"
-import { readdir } from "node:fs/promises"
+import { readdir, writeFile } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import type { ChatEvent } from "@dreamspan/shared/chatApi.ts"
 import type { AttachedFile } from "@dreamspan/shared/files.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { unquoteToolData } from "./support/toolData.ts"
 
 const toolCall = (name: string, args: unknown, id: string) => [
@@ -45,9 +46,9 @@ const call = (path: string, init?: RequestInit) =>
     const port = yield* serverPort
     return yield* Effect.promise(() => fetch(`http://127.0.0.1:${port}${path}`, init))
   })
-const upload = (folder: string, name: string, bytes: Uint8Array) =>
+const upload = (folder: string, name: string, bytes: Uint8Array, conflict: "keep" | "replace" = "keep") =>
   Effect.gen(function* () {
-    const uploaded = yield* call(`/files/upload?path=${encodeURIComponent(`${folder}/${name}`)}&conflict=keep`, {
+    const uploaded = yield* call(`/files/upload?path=${encodeURIComponent(`${folder}/${name}`)}&conflict=${conflict}`, {
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
       body: bytes
@@ -113,10 +114,12 @@ describe("card portraits from an image", () => {
           slotId: null,
           change: { _tag: "WorkshopFolder", path: "/files/cards" }
         })
-        const jpeg = yield* attach(
-          yield* upload("/files/cards", "attached.jpg", yield* Effect.promise(() => picture("jpeg", "#3366aa")))
-        )
-        yield* upload("/files/cards", "second.png", yield* Effect.promise(() => picture("png", "#aa6633")))
+        const jpegBytes = yield* Effect.promise(() => picture("jpeg", "#3366aa"))
+        const jpeg = yield* attach(yield* upload("/files/cards", "attached.jpg", jpegBytes))
+        yield* upload("/files/cards", "attached.jpg", new Uint8Array(1), "replace")
+        const pngBytes = yield* Effect.promise(() => picture("png", "#aa6633"))
+        yield* upload("/files/cards", "second.png", pngBytes)
+        assert.strictEqual((yield* api.GetFilesUsage({ fresh: true })).versionsBytes, jpegBytes.byteLength)
         yield* upload("/files/cards", "notes.txt", new TextEncoder().encode("Not a picture."))
         steps = [
           [
@@ -195,8 +198,157 @@ describe("card portraits from an image", () => {
         const undone = yield* api.OpenEditor({ refId })
         assert.strictEqual(yield* shown(undone.doc.avatar_media_id as string), "image/jpeg")
         assert.notStrictEqual(undone.doc.avatar_media_id, now.doc.avatar_media_id)
+        const versionsBytes = jpegBytes.byteLength + pngBytes.byteLength
+        assert.strictEqual((yield* api.GetFilesUsage({ fresh: true })).versionsBytes, versionsBytes)
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id
+        const pruned = yield* writer.PruneFileVersions({ userId, before: Date.now() + 1, limit: 100 })
+        assert.strictEqual(pruned.attachments, 1)
+        assert.strictEqual(pruned.versions, 1)
+        assert.strictEqual((yield* api.GetFilesUsage({ fresh: true })).versionsBytes, versionsBytes)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     },
     180_000
   )
+})
+
+describe("portrait source authorization and quota", () => {
+  for (const scenario of ["quota", "files ask", "both ask", "files off", "side workshop", "host folder"] as const) {
+    it.live(
+      scenario,
+      () => {
+        const host = tempDir("portrait-host")
+        const config = testConfig({ hostFolders: [host] })
+        return Effect.gen(function* () {
+          let steps: Array<[string, unknown]> = []
+          const requests: Array<{
+            messages: Array<{ role: string; content?: string }>
+            tools?: Array<{ function: { name: string } }>
+          }> = []
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((r, res) => {
+                const b = r.body as unknown as { messages: Array<{ role: string; content?: string }> }
+                if (!JSON.stringify(b.messages).includes("PORTRAIT TASK"))
+                  return sse(res, completionChunks(["Ready."], {}))
+                requests.push(b)
+                const done = b.messages.filter((m) => m.role === "tool").length
+                const step = steps[done]
+                if (!step) return sse(res, completionChunks(["Done."], {}))
+                sse(res, toolCall(step[0], step[1], `portrait_${done}`))
+              })
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const api = yield* client()
+          yield* generateReply(api, {
+            connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "every" } },
+            model: { context: 200000, vision: true }
+          })
+
+          const story = scenario === "side workshop" ? yield* api.CreateChat({ title: "Side workshop story" }) : null
+          const chat = yield* api.CreateWorkshop({ title: "Portrait probe", ...(story ? { attachTo: story.id } : {}) })
+          const png = yield* Effect.promise(() => picture("png", "#9966aa"))
+          const used = () => api.GetFilesUsage({ fresh: true })
+          const userId = (yield* api.Whoami()).id as UserId
+          const path =
+            scenario === "host folder" ? join(host, "portrait.png") : yield* upload("/files", "portrait.png", png)
+          if (scenario === "host folder") {
+            yield* Effect.promise(() => writeFile(path, png))
+            yield* api.ChangeCast({
+              chatId: chat.id,
+              slotId: null,
+              change: { _tag: "WorkshopFolder", path: host, host: true }
+            })
+          }
+          if (scenario === "files ask" || scenario === "both ask" || scenario === "files off")
+            yield* api.SetWorkshopGrant({
+              chatId: chat.id,
+              capability: "files",
+              mode: scenario === "files off" ? "off" : "ask"
+            })
+          if (scenario === "both ask")
+            yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+          if (scenario === "quota") {
+            const before = yield* used()
+            yield* api.SetFilesQuota({ userId, quotaBytes: Math.max(before.usedBytes, 1024 * 1024) })
+            if (before.usedBytes < 1024 * 1024) {
+              yield* upload("/files", "filler.txt", new Uint8Array(1024 * 1024 - before.usedBytes))
+            }
+          }
+          const before = yield* used()
+          if (scenario === "quota") assert.strictEqual(before.usedBytes, before.quotaBytes)
+          const existing =
+            scenario === "both ask"
+              ? yield* api.CreateCard({ name: "Portrait Probe", label: "Portrait Probe" })
+              : undefined
+          if (existing) yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.cards", mode: "allow" })
+          steps = existing
+            ? [["edit_card", { card: existing.id, portrait: path }]]
+            : [["create_card", { name: "Portrait Probe", portrait: path }]]
+          if (scenario === "side workshop")
+            steps.push(
+              ["create_card", { name: "Plain Card" }],
+              ["edit_card", { card: "Plain Card", changes: [{ field: "description", text: "Still editable." }] }]
+            )
+          const events: Array<ChatEvent> = []
+          yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+            Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+            Effect.forkScoped
+          )
+          yield* eventually(() => events.length > 0)
+          const sent = yield* posted(
+            api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: chat.activeLeafSlotId,
+              branch: false,
+              content: "PORTRAIT TASK: make a card with this picture."
+            })
+          )
+          const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+          const id = reply.entry.version.id
+          if (scenario === "files ask" || scenario === "both ask") {
+            const approval = () =>
+              events
+                .flatMap((event) => (event._tag === "Steps" && event.versionId === id ? event.steps : []))
+                .flatMap((step) => (step.kind === "tool" && step.approval ? [step.approval] : []))
+                .at(-1)
+            yield* eventually(() => approval() !== undefined || finished(events, id) !== undefined)
+            const prompt = approval()
+            assert.isDefined(prompt, "A portrait source must be approved before the card is written")
+            const { rolloutId, toolCallId, digest, once, rows, changes } = prompt!
+            assert.isTrue(once)
+            assert.isTrue(rows.some((row) => row.value === path) || changes?.some((row) => row.after === path))
+            if (existing) assert.isNull((yield* api.OpenEditor({ refId: existing.id })).doc.avatar_media_id)
+            else
+              assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((card) => card.label === "Portrait Probe"))
+            yield* api.AnswerToolApproval({ rolloutId, toolCallId, digest, answer: "allow" })
+          }
+          yield* eventually(() => finished(events, id) !== undefined, 120_000)
+          assert.strictEqual(finished(events, id)!.status, "complete")
+          const results = requests
+            .at(-1)!
+            .messages.filter((m) => m.role === "tool")
+            .map((m) => unquoteToolData(m.content ?? ""))
+
+          const after = yield* used()
+          const photos = (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Portrait Probe")
+          if (scenario === "host folder" || scenario === "files ask" || scenario === "both ask") {
+            assert.include(results[0], '"revision"')
+            assert.lengthOf(photos, 1)
+            assert.strictEqual(after.versionsBytes - before.versionsBytes, png.byteLength)
+          } else {
+            assert.lengthOf(photos, 0)
+            assert.strictEqual(after.usedBytes, before.usedBytes)
+            if (scenario === "side workshop") {
+              assert.isFalse(requests[0]?.tools?.some((tool) => tool.function.name === "read_file"))
+              assert.include(results[1], '"entityId"')
+              assert.include(results[2], '"revision"')
+            }
+          }
+        }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+      },
+      60_000
+    )
+  }
 })
