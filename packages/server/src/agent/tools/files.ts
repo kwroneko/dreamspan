@@ -24,6 +24,7 @@ import { isMediaPath } from "../../db/media.ts"
 import { storeMedia } from "../../importer/mediaFiles.ts"
 import { describeImage } from "../../importer/images.ts"
 import { prepareAvatarThumbnails } from "../../importer/prepareThumbnails.ts"
+import { withWorkshopMediaQuota } from "./workshopMediaQuota.ts"
 import type { PortraitSource } from "../portraits.ts"
 import {
   FilePathRefused,
@@ -439,21 +440,22 @@ export const makeFileTools = (deps: FileToolDeps) => {
     return resolved
   }
 
-  const authorize = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
+  const authorize = (ctx: ToolContext, capability: string, use?: "import" | "portrait") =>
     deps.reader.AuthorizePluginTool({
       userId: ctx.userId,
       rolloutId: ctx.rolloutId,
       toolCallId: ctx.toolCallId,
       capability,
-      requireApproval: cardFileImport === true,
-      ...(cardFileImport ? { requireFiles: true as const } : {}),
+      requireApproval: use === "import",
+      ...(use ? { requireFiles: true as const } : {}),
       ...(ctx.approvalDigest ? { digest: ctx.approvalDigest } : {})
     })
 
   /** The capability's standing, checked again at the call; the account; its folders made. */
-  const proof = (ctx: ToolContext, capability: string, cardFileImport?: true) =>
+  const proof = (ctx: ToolContext, capability: string, use?: "import" | "portrait") =>
     Effect.gen(function* () {
-      const actor = yield* authorize(ctx, capability, cardFileImport)
+      const actor = yield* authorize(ctx, capability, use)
+      ctx.cache.set(ACTOR_KEY, actor)
       const env = accountEnv(deps, actor.id)
       yield* attempt(() => prepareAccount(env))
       return { actor, env }
@@ -593,11 +595,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
       cardFileImport?: true
     ) =>
     (ctx: ToolContext, args: Record<string, unknown>): Effect.Effect<ToolOutput> =>
-      proof(ctx, capability, cardFileImport).pipe(
-        Effect.flatMap(({ actor, env }) => {
-          ctx.cache.set(ACTOR_KEY, actor)
-          return run(ctx, args, env, actor)
-        }),
+      proof(ctx, capability, cardFileImport ? "import" : undefined).pipe(
+        Effect.flatMap(({ actor, env }) => run(ctx, args, env, actor)),
         Effect.catchCause((cause) => {
           const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
           const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
@@ -1185,14 +1184,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     id: "files",
     apply: (ctx, path, commit) =>
       Effect.gen(function* () {
-        // Only the Files switch is checked: the call itself is what the user approved.
-        const grants = yield* ctx.reader.WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })
-        if (grants.some((grant) => grant.capability === "files" && grant.mode === "off"))
-          return yield* Effect.fail(
-            new FilePathRefused("Files are off in this workshop, so the picture can't be read.")
-          )
-        const env = accountEnv(deps, ctx.userId)
-        yield* attempt(() => prepareAccount(env))
+        const { env } = yield* proof(ctx, "library.write", "portrait")
         const place = yield* readPlace(ctx, env, path)
         const read = yield* attempt(() => readRegularFile(place.hostRoot, place.segments, PORTRAIT_MAX_BYTES))
         if (read.truncated)
@@ -1209,18 +1201,18 @@ export const makeFileTools = (deps: FileToolDeps) => {
               `${place.full} isn't a PNG, JPEG, GIF or WebP image, so it can't be a portrait. Read the path with read_file to check what it is.`
             )
           )
-        if (deps.formats && !(yield* deps.formats.validateImage(bytes)))
+        if (!deps.formats || !(yield* deps.formats.validateImage(bytes)))
           return yield* Effect.fail(
             new FilePathRefused(`${place.full} couldn't be decoded as an image (it may be damaged or too large).`)
           )
         const media = { sha256: sha256(bytes), byteSize: bytes.byteLength, ...image }
-        const done = yield* deps.holding(
-          [media.sha256],
-          Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit(media))
+        const done = yield* withWorkshopMediaQuota(ctx, deps.quota, [media], "save a portrait", (maxAddedBytes) =>
+          deps.holding(
+            [media.sha256],
+            Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit({ ...media, maxAddedBytes }))
+          )
         )
-        // The thumbnails of the default cutout, as the editor's Replace picture makes them.
-        if (deps.formats)
-          yield* prepareAvatarThumbnails(deps.formats, deps.dataDir, [{ role: "avatar", sha256: media.sha256 }])
+        yield* prepareAvatarThumbnails(deps.formats, deps.dataDir, [{ role: "avatar", sha256: media.sha256 }])
         return done
       }).pipe(
         Effect.catchCause((cause) => {

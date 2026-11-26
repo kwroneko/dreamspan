@@ -44,6 +44,54 @@ const ownedRollout = (sql: Sql, userId: string, rolloutId: string) =>
     return row
   })
 
+/** The same gate runs before a file read and, for portraits, inside the card transaction. */
+export const authorizePluginTool = (
+  sql: Sql,
+  {
+    userId,
+    rolloutId,
+    toolCallId,
+    capability,
+    digest,
+    requireApproval,
+    requireFiles,
+    rollback
+  }: Parameters<Parameters<typeof ReadOps.of>[0]["AuthorizePluginTool"]>[0]
+) =>
+  Effect.gen(function* () {
+    const run = yield* ownedRollout(sql, userId, rolloutId)
+    const [chat] = yield* sql`SELECT 1 FROM chats c WHERE c.id = ${run.chat_id} AND c.kind = 'workshop'
+          AND NOT EXISTS (SELECT 1 FROM state_events WHERE chat_id = c.id AND key = 'workshop.attached')`
+    const [user] = yield* sql<
+      typeof User.Type
+    >`SELECT id,handle,display_name AS displayName,role FROM users WHERE id = ${userId} AND disabled_at IS NULL`
+    if (!chat || !user || run.status !== "running")
+      return yield* new ApprovalRefused({
+        message: requireFiles
+          ? "This call needs a running, standalone workshop with Files."
+          : "Plugin tools need a running, standalone workshop."
+      })
+    const grants = yield* sql<{
+      capability: string
+      mode: "off" | "ask" | "allow"
+    }>`SELECT capability,mode FROM workshop_grants WHERE chat_id = ${run.chat_id}
+          AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+    const standing = new Map(grants.map((g) => [g.capability, g.mode]))
+    const mode = resolveMode({ workshopCapabilities, capabilityDefaults }, standing, capability, "outside")
+    if (mode === "off") return yield* new ApprovalRefused({ message: "This capability is off in this workshop." })
+    const filesMode = requireFiles
+      ? resolveMode({ workshopCapabilities, capabilityDefaults }, standing, "files", "outside")
+      : "allow"
+    if (filesMode === "off") return yield* new ApprovalRefused({ message: "Files are off in this workshop." })
+    if (requireApproval || filesMode === "ask" || (mode === "ask" && !rollback)) {
+      const [approval] =
+        yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}
+            AND capability = ${capability} AND digest = ${digest ?? ""} AND status = 'used' AND (answer = 'allow' OR (${requireApproval || requireFiles ? 1 : 0} = 0 AND answer = 'allow_chat'))`
+      if (!approval) return yield* new ApprovalRefused({ message: "This exact call needs your approval." })
+    }
+    return new User(user)
+  })
+
 const approvalCapabilityOff = Effect.fnUntraced(function* (
   sql: Sql,
   userId: string,
@@ -255,47 +303,7 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ${target ?? ""}
             AND (expires_at IS NULL OR expires_at > ${now}) ORDER BY capability`
       }).pipe(query("WorkshopGrants")),
-    AuthorizePluginTool: ({
-      userId,
-      rolloutId,
-      toolCallId,
-      capability,
-      digest,
-      requireApproval,
-      requireFiles,
-      rollback
-    }) =>
-      Effect.gen(function* () {
-        const run = yield* ownedRollout(sql, userId, rolloutId)
-        const [chat] = yield* sql`SELECT 1 FROM chats c WHERE c.id = ${run.chat_id} AND c.kind = 'workshop'
-          AND NOT EXISTS (SELECT 1 FROM state_events WHERE chat_id = c.id AND key = 'workshop.attached')`
-        const [user] = yield* sql<
-          typeof User.Type
-        >`SELECT id,handle,display_name AS displayName,role FROM users WHERE id = ${userId} AND disabled_at IS NULL`
-        if (!chat || !user || run.status !== "running")
-          return yield* new ApprovalRefused({ message: "Plugin tools need a running, standalone workshop." })
-        const grants = yield* sql<{
-          capability: string
-          mode: "off" | "ask" | "allow"
-        }>`SELECT capability,mode FROM workshop_grants WHERE chat_id = ${run.chat_id}
-          AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        const mode = resolveMode(
-          { workshopCapabilities, capabilityDefaults },
-          new Map(grants.map((g) => [g.capability, g.mode])),
-          capability,
-          "outside"
-        )
-        if (mode === "off") return yield* new ApprovalRefused({ message: "This capability is off in this workshop." })
-        if (requireFiles && grants.some((grant) => grant.capability === "files" && grant.mode === "off"))
-          return yield* new ApprovalRefused({ message: "Files are off in this workshop." })
-        if (requireApproval || (mode === "ask" && !rollback)) {
-          const [approval] =
-            yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}
-            AND capability = ${capability} AND digest = ${digest ?? ""} AND status = 'used' AND (answer = 'allow' OR (${requireApproval ? 1 : 0} = 0 AND answer = 'allow_chat'))`
-          if (!approval) return yield* new ApprovalRefused({ message: "This exact call needs your approval." })
-        }
-        return new User(user)
-      }).pipe(query("AuthorizePluginTool")),
+    AuthorizePluginTool: (input) => authorizePluginTool(sql, input).pipe(query("AuthorizePluginTool")),
     ToolApprovalFor: ({ userId, rolloutId, toolCallId, digest }) =>
       Effect.gen(function* () {
         yield* ownedRollout(sql, userId, rolloutId)

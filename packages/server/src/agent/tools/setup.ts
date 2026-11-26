@@ -151,8 +151,15 @@ const portrait = Type.Optional(
       "A picture for the card's portrait (avatar): a path you can read with read_file, such as a message attachment's /attachments/<id> or a /files path. PNG, JPEG, GIF or WebP. Replaces the portrait, with the default cutout."
   })
 )
+const mustAskForPortrait = (ctx: ToolContext, args: { readonly portrait?: string }) =>
+  args.portrait === undefined
+    ? Effect.succeed(false)
+    : ctx.reader
+        .WorkshopGrants({ userId: ctx.userId, chatId: ctx.chatId, now: Date.now() })
+        .pipe(Effect.map((grants) => grants.some((grant) => grant.capability === "files" && grant.mode === "ask")))
+
 /** Sets the portrait while `save` writes the card, or refuses before anything is written. */
-const withPortrait = <A, E>(
+const withPortrait = <A extends { readonly addedBytes: number }, E>(
   ctx: ToolContext,
   path: string | undefined,
   save: (media?: PortraitMedia) => Effect.Effect<A, E>
@@ -201,8 +208,13 @@ const createCard: RolloutTool<CreateArgs> = {
     "Creates a card in the library, with one agent revision. Use first_message for her greeting. portrait sets the card's picture from an image you can read (an attachment's /attachments/<id> or a /files path; PNG, JPEG, GIF or WebP). Returns its library and entity ids. Undo moves it to the bin if untouched.",
   parameters: Type.Object({ name, ...cardFields, portrait, message }, strict),
   summarize: ({ name }) => name,
+  mustAsk: mustAskForPortrait,
   describe: (_ctx, args) =>
-    Effect.succeed({ title: `Create the card “${args.name}”`, rows: rowsOf(args, ["name", "message"]) }),
+    Effect.succeed({
+      title: `Create the card “${args.name}”`,
+      rows: rowsOf(args, ["name", "message"]),
+      ...(args.portrait === undefined ? {} : { once: true })
+    }),
   execute: (ctx, args) =>
     !Schema.is(LibraryLabel)(args.name)
       ? Effect.succeed({
@@ -211,29 +223,27 @@ const createCard: RolloutTool<CreateArgs> = {
         })
       : safely(
           withPortrait(ctx, args.portrait, (media) =>
-            ctx.writer
-              .AgentCreateEntity({
-                ...key(ctx),
-                ...(media ? { portrait: media } : {}),
-                kind: "card",
-                label: args.name,
-                doc: {
-                  ...newCardDoc(args.name),
-                  nickname: args.nickname ?? "",
-                  description: args.description ?? "",
-                  personality: args.personality ?? "",
-                  scenario: args.scenario ?? "",
-                  first_mes: args.first_message ?? "",
-                  alternate_greetings: args.alternate_greetings ?? [],
-                  mes_example: args.example_messages ?? "",
-                  system_prompt: args.system_prompt ?? "",
-                  tags: args.tags ?? []
-                },
-                tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])],
-                ...given(args.message)
-              })
-              .pipe(Effect.map((text) => ({ text })))
-          )
+            ctx.writer.AgentCreateEntity({
+              ...key(ctx),
+              ...(media ? { portrait: media } : {}),
+              kind: "card",
+              label: args.name,
+              doc: {
+                ...newCardDoc(args.name),
+                nickname: args.nickname ?? "",
+                description: args.description ?? "",
+                personality: args.personality ?? "",
+                scenario: args.scenario ?? "",
+                first_mes: args.first_message ?? "",
+                alternate_greetings: args.alternate_greetings ?? [],
+                mes_example: args.example_messages ?? "",
+                system_prompt: args.system_prompt ?? "",
+                tags: args.tags ?? []
+              },
+              tags: [...new Set([...(args.tags ?? []), ...(args.persona ? ["persona"] : [])])],
+              ...given(args.message)
+            })
+          ).pipe(Effect.map(({ text }) => ({ text })))
         )
 }
 const fields = [
@@ -343,6 +353,7 @@ const editCard: RolloutTool<{
     strict
   ),
   summarize: ({ card }) => card,
+  mustAsk: mustAskForPortrait,
   // The saved card's fields as they are and as the edit would leave them.
   describe: (ctx, args) =>
     Effect.gen(function* () {
@@ -366,7 +377,12 @@ const editCard: RolloutTool<{
           before: saved.doc.avatar_media_id ? "the current picture" : "no picture",
           after: args.portrait
         })
-      return { title, rows: [], changes: [...changes, ...result.skillPreviews] }
+      return {
+        title,
+        rows: [],
+        changes: [...changes, ...result.skillPreviews],
+        ...(args.portrait === undefined ? {} : { once: true })
+      }
     }),
   execute: (ctx, args) =>
     safely(
@@ -380,7 +396,7 @@ const editCard: RolloutTool<{
         const result = changed(saved.doc, args.changes ?? [])
         if ("error" in result) return { text: result.error, isError: true }
         const doc = result.doc
-        const text = yield* withPortrait(ctx, args.portrait, (media) =>
+        const { text } = yield* withPortrait(ctx, args.portrait, (media) =>
           ctx.writer.AgentReviseEntity({
             ...writing,
             refId: ref.id,
@@ -616,7 +632,7 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
           const fresh = yield* prepare(ctx, args)
           const cached = ctx.cache.get(`approval:document:${ctx.toolCallId}`) as typeof fresh | undefined
           const { saved, doc } = cached ?? fresh
-          const text = yield* ctx.writer.AgentReviseEntity({
+          const { text } = yield* ctx.writer.AgentReviseEntity({
             ...(yield* writeKey(ctx, saved.ref)),
             refId: saved.ref.id,
             expectedRowVersion: saved.ref.rowVersion,
@@ -678,12 +694,12 @@ const editCardNote: RolloutTool<CardNoteEdit> = {
           (ctx.cache.get(`approval:card-note:${ctx.toolCallId}`) as
             Effect.Success<ReturnType<typeof prepareCardNote>> | undefined) ?? (yield* prepareCardNote(ctx, args))
         return {
-          text: yield* ctx.writer.AgentReviseEntity({
+          text: (yield* ctx.writer.AgentReviseEntity({
             ...(yield* writeKey(ctx, saved.cardRef)),
             refId: saved.ref.id,
             expectedRowVersion: saved.ref.rowVersion,
             doc: { ...saved.doc, content: args.content }
-          })
+          })).text
         }
       })
     )
@@ -758,12 +774,12 @@ const editLibraryNote: RolloutTool<LibraryNoteEdit> = {
           (ctx.cache.get(`approval:library-note:${ctx.toolCallId}`) as
             Effect.Success<ReturnType<typeof prepareLibraryNote>> | undefined) ?? (yield* prepareLibraryNote(ctx, args))
         return {
-          text: yield* ctx.writer.AgentReviseEntity({
+          text: (yield* ctx.writer.AgentReviseEntity({
             ...(yield* writeKey(ctx, prepared.saved.ref)),
             refId: prepared.saved.ref.id,
             expectedRowVersion: prepared.saved.ref.rowVersion,
             doc: prepared.doc
-          })
+          })).text
         }
       })
     )

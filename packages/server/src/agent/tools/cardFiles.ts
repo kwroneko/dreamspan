@@ -15,8 +15,8 @@ import type { Formats } from "../../importer/Formats.ts"
 import { storeMedia } from "../../importer/mediaFiles.ts"
 import { prepareAvatarThumbnails } from "../../importer/prepareThumbnails.ts"
 import { FilePathRefused, readRegularFile } from "../../files/safePath.ts"
-import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
-import { withFileTree } from "../../files/treeLocks.ts"
+import type { FilesQuota } from "../../files/quota.ts"
+import { withWorkshopMediaQuota } from "./workshopMediaQuota.ts"
 import { type CountEffect, estimateCount, visibleDoc } from "../libraryView.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import { pagedView, VIEWS } from "./library.ts"
@@ -305,37 +305,7 @@ export const makeCardFileTools = (deps: CardFileToolDeps) => {
                 return saved as { ref?: { id: string; label: string; kind: string }; addedBytes: number }
               })
             )
-          const quota = deps.quota
-          const saved =
-            quota && media.length > 0
-              ? yield* withFileTree(
-                  ctx.userId,
-                  Effect.gen(function* () {
-                    const what = "import card media"
-                    const requested = media.map(({ sha256, byteSize }) => ({ sha256, byteSize }))
-                    const adding = yield* ctx.reader.WorkshopImportBytes({ userId: ctx.userId, media: requested })
-                    const usage = yield* quota.check(ctx.userId, adding, what)
-                    const reservation = quota.hold(ctx.userId, "outside-files")
-                    let committed = false
-                    return yield* Effect.gen(function* () {
-                      if (!reservation.reserve(adding, usage.quotaBytes))
-                        return yield* Effect.fail(
-                          new QuotaExceeded(quota.overMessage(usage.usedBytes + adding, usage.quotaBytes, what))
-                        )
-                      const result = yield* save(adding)
-                      reservation.landed(undefined, result.addedBytes)
-                      committed = true
-                      return result
-                    }).pipe(
-                      Effect.ensuring(
-                        Effect.sync(() => {
-                          if (!committed) reservation.release()
-                        })
-                      )
-                    )
-                  }).pipe(Effect.uninterruptible)
-                )
-              : yield* save(quota ? 0 : Number.MAX_SAFE_INTEGER)
+          const saved = yield* withWorkshopMediaQuota(ctx, deps.quota, media, "import card media", save)
           yield* prepareAvatarThumbnails(formats(), deps.dataDir, parsed.media)
           const { ref } = saved
           if (!ref) throw new ToolInputRefused("The card file could not be imported. Try again.")

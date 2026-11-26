@@ -601,7 +601,8 @@ const AgentPortrait = Schema.Struct({
   mime: Schema.String,
   byteSize: Schema.Int,
   width: Schema.NullOr(Schema.Int),
-  height: Schema.NullOr(Schema.Int)
+  height: Schema.NullOr(Schema.Int),
+  maxAddedBytes: Schema.Natural
 })
 
 /** A stored file, at `path` under the data directory. */
@@ -2971,7 +2972,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       message: Schema.optionalKey(AgentMessage),
       portrait: Schema.optionalKey(AgentPortrait)
     },
-    success: Schema.String,
+    success: Schema.Struct({ text: Schema.String, addedBytes: Schema.Natural }),
     error: Schema.Union([NotFound, InvalidDocument, EffectUndoRefused, StorageError])
   }),
   Rpc.make("AgentReviseEntity", {
@@ -2996,7 +2997,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       message: Schema.optionalKey(AgentMessage),
       portrait: Schema.optionalKey(AgentPortrait)
     },
-    success: Schema.String,
+    success: Schema.Struct({ text: Schema.String, addedBytes: Schema.Natural }),
     error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
   }),
   /**
@@ -4315,6 +4316,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("RecordMessageImage", {
     payload: {
       userId: UserId,
+      verifiedImage: Schema.optionalKey(Schema.Literal(true)),
       media: Schema.Struct({
         sha256: Sha256,
         mime: Schema.String,

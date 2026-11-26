@@ -6,6 +6,7 @@
 // writer, the files host and the client compute the same thing.
 import { CARD_SKILLS_NAMESPACE } from "./cardSkills.ts"
 import { canonicalJson } from "./editing.ts"
+import { avatarCropOf } from "./media.ts"
 import { merge3 } from "./merge.ts"
 
 type Path = ReadonlyArray<string>
@@ -47,6 +48,22 @@ export const unitPath = (key: string): Path => {
 
 export const CARD_SKILLS_UNIT = unitKey(["extensions", CARD_SKILLS_NAMESPACE, "skills"])
 
+const PORTRAIT_FIELDS = ["avatar_media_id", "avatar_crop"] as const
+export const PORTRAIT_UNIT = unitKey(PORTRAIT_FIELDS)
+
+export const isPortraitField = (field: unknown) => field === "avatar_media_id" || field === "avatar_crop"
+
+/** Old reversal records stored the image and cutout separately. */
+export const portraitReversalUnit = (key: string) =>
+  PORTRAIT_FIELDS.some((field) => unitKey([field]) === key) ? PORTRAIT_UNIT : key
+
+export const portraitValue = (doc: unknown) => {
+  const mediaId = isObject(doc) ? own(doc, "avatar_media_id") : undefined
+  if (typeof mediaId !== "string") return undefined
+  const stored = (doc as Record<string, unknown>).avatar_crop
+  return { avatar_media_id: mediaId, ...(avatarCropOf(mediaId, stored) === null ? {} : { avatar_crop: stored }) }
+}
+
 const skillNamespace = (extensions: unknown) =>
   isObject(extensions) ? own(extensions, CARD_SKILLS_NAMESPACE) : undefined
 const skillValue = (extensions: unknown) => {
@@ -76,7 +93,10 @@ export const changedUnits = (before: unknown, after: unknown): ReadonlyArray<str
   const b = isObject(before) ? before : {}
   const a = isObject(after) ? after : {}
   const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])]
+  const firstPortraitField = keys.find(isPortraitField)
   return keys.flatMap((key) => {
+    if (isPortraitField(key))
+      return key === firstPortraitField && !same(portraitValue(b), portraitValue(a)) ? [PORTRAIT_UNIT] : []
     const x = own(b, key)
     const y = own(a, key)
     if (same(x, y)) return []
@@ -109,6 +129,7 @@ const findIn = (list: ReadonlyArray<unknown>, segment: string) => {
 
 /** A field's value in a document; undefined where it has none. */
 const unitValue = (doc: unknown, key: string): unknown => {
+  if (key === PORTRAIT_UNIT) return portraitValue(doc)
   const [top, element] = unitPath(key)
   if (top === undefined || !isObject(doc)) return undefined
   const value = own(doc, top)
@@ -142,6 +163,10 @@ const withUnit = (
   value: unknown,
   source: unknown
 ): Record<string, unknown> => {
+  if (key === PORTRAIT_UNIT) {
+    const { avatar_media_id: _image, avatar_crop: _crop, ...rest } = doc
+    return { ...rest, ...portraitValue(value) }
+  }
   const [top, element] = unitPath(key)
   if (top === undefined) return doc
   const sourceValue = isObject(source) ? own(source, top) : undefined
@@ -253,6 +278,11 @@ const mergeGreetings = (changed: unknown, now: unknown, original: unknown) => {
 }
 
 const mergeUnit = (field: string, changed: unknown, now: unknown, original: unknown) => {
+  if (field === PORTRAIT_UNIT) {
+    if (same(now, changed)) return { value: original, conflicts: [] }
+    if (same(now, original) || same(changed, original)) return { value: now, conflicts: [] }
+    return { value: now, conflicts: [field] }
+  }
   const [top, element] = unitPath(field)
   if (element === ORDER_UNIT && Array.isArray(changed) && Array.isArray(now) && Array.isArray(original)) {
     const shared = new Set(commonOrder(changed, new Set(now)).filter((key) => original.includes(key)))
@@ -354,6 +384,7 @@ export const combinedFileEdits = (
 
 /** A unit as the assistant names it: "description", "entries uid=3". */
 export const unitName = (unit: string) => {
+  if (unit === PORTRAIT_UNIT) return "avatar_media_id"
   if (unit === CARD_SKILLS_UNIT) return unitPath(unit).join(".")
   const [field, part] = unitPath(unit)
   return part === undefined ? (field ?? "") : `${field} ${part === ORDER_UNIT ? "order" : part}`
@@ -363,4 +394,8 @@ export const unitName = (unit: string) => {
 export const pickedUnits = (units: ReadonlyArray<string>, names: ReadonlyArray<string> | undefined) =>
   names === undefined
     ? units
-    : units.filter((unit) => names.some((n) => n === unitName(unit) || n === (JSON.parse(unit) as Array<string>)[0]))
+    : units.filter((unit) =>
+        names.some(
+          (n) => n === unitName(unit) || n === unitPath(unit)[0] || (unit === PORTRAIT_UNIT && isPortraitField(n))
+        )
+      )

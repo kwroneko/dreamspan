@@ -6,12 +6,14 @@
 // (it's on disk) and records here through `RecordFileReversal`.
 import {
   CARD_SKILLS_UNIT,
+  PORTRAIT_UNIT,
   changedUnits,
   docOfUnits,
   matchesReversalHead,
   pickedUnits,
   planGroupedReversal,
   planReversal,
+  portraitReversalUnit,
   type ReversalPatch,
   revertedFields,
   type ReversalPlan,
@@ -129,6 +131,9 @@ export const insertReversal = (
     return id
   })
 
+const reversalUnits = (kind: string, fields: ReadonlyArray<string>): ReadonlyArray<string> =>
+  kind === "entity" ? [...new Set(fields.map(portraitReversalUnit))] : fields
+
 /**
  * The effects with their reversal state (`reversion`), from their records oldest first: the
  * fields whose latest record is a revert, all their fields, and the reverts holding those.
@@ -158,7 +163,7 @@ export const withReversions = (sql: SqlClient.SqlClient, effects: ReadonlyArray<
       const records = own.map((r) => ({
         id: r.id,
         action: r.action,
-        fields: JSON.parse(r.fields_json) as Array<string>
+        fields: reversalUnits(effect.targetKind, JSON.parse(r.fields_json) as Array<string>)
       }))
       const standing = revertedFields(records)
       // The revert each standing field's latest record is, newest first.
@@ -171,7 +176,7 @@ export const withReversions = (sql: SqlClient.SqlClient, effects: ReadonlyArray<
         ...effect,
         reversion: {
           fields: [...standing],
-          of: JSON.parse(own.at(-1)!.of_json) as Array<string>,
+          of: reversalUnits(effect.targetKind, JSON.parse(own.at(-1)!.of_json) as Array<string>),
           reversals: records
             .filter((r) => holding.has(r.id))
             .map((r) => r.id)
@@ -199,15 +204,19 @@ const standingCoverage = (sql: SqlClient.SqlClient, record: ReversalRow, selecte
         CROSS JOIN json_each(y.fields_json) taken
         WHERE y.rollout_id = x.rollout_id AND y.tool_call_id = x.tool_call_id AND y.seq = x.seq
           AND (newer.created_at, newer.rowid) > (original.created_at, original.rowid)
-          AND taken.value = field.value
+          AND (taken.value = field.value OR (
+            original.target_kind = 'entity'
+            AND taken.value IN ${sql.in([unitKey(["avatar_media_id"]), unitKey(["avatar_crop"]), PORTRAIT_UNIT])}
+            AND field.value IN ${sql.in([unitKey(["avatar_media_id"]), unitKey(["avatar_crop"]), PORTRAIT_UNIT])}
+          ))
       )
       GROUP BY x.rollout_id, x.tool_call_id, x.seq`
     const effects = rows.map((row): CoveredEffect => ({
       rolloutId: row.rollout_id,
       toolCallId: row.tool_call_id,
       seq: row.seq,
-      of: JSON.parse(row.of_json) as Array<string>,
-      fields: JSON.parse(row.fields_json) as Array<string>
+      of: reversalUnits(record.target_kind, JSON.parse(row.of_json) as Array<string>),
+      fields: reversalUnits(record.target_kind, JSON.parse(row.fields_json) as Array<string>)
     }))
     const chosen = selected
       ? effects.filter(
@@ -215,7 +224,9 @@ const standingCoverage = (sql: SqlClient.SqlClient, record: ReversalRow, selecte
         )
       : effects
     const covered = new Set(chosen.flatMap((effect) => effect.fields))
-    const fields = (JSON.parse(record.fields_json) as Array<string>).filter((field) => covered.has(field))
+    const fields = reversalUnits(record.target_kind, JSON.parse(record.fields_json) as Array<string>).filter((field) =>
+      covered.has(field)
+    )
     return { fields, effects }
   })
 
@@ -411,6 +422,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           const standing = yield* withReversions(sql, ordered)
           const covered: Array<CoveredEffect> = []
           const patches: Array<ReversalPatch> = []
+          const selected = options.fields?.map(portraitReversalUnit)
           for (const effect of standing) {
             const original = yield* revisionDoc(ref.entity_id, effect.undo!.before)
             const changed = yield* revisionDoc(ref.entity_id, effect.undo!.head)
@@ -420,7 +432,7 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
               (unit) =>
                 !reverted.includes(unit) &&
                 !(unit === CARD_SKILLS_UNIT && reverted.includes(unitKey(["extensions"]))) &&
-                (!options.fields || options.fields.includes(unit))
+                (!selected || selected.includes(unit))
             )
             patches.push({ original, changed, fields })
             covered.push({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq, of, fields })
@@ -454,7 +466,8 @@ export const makeChangeReversalWriteHandlers = (ops: { readonly EditRef: EditRef
           const head = yield* lib.ownedRef(userId, ref.id)
           if (head.entity_id !== record.target_id) return yield* new NotFound({ entity: "ref", id: ref.id })
           const coverage = yield* standingCoverage(sql, record, effect)
-          const fields = options.fields ? coverage.fields.filter((f) => options.fields!.includes(f)) : coverage.fields
+          const selected = options.fields?.map(portraitReversalUnit)
+          const fields = selected ? coverage.fields.filter((field) => selected.includes(field)) : coverage.fields
           const plan = planReversal({
             original:
               record.head_before === null
@@ -594,7 +607,7 @@ export const makeChangeReversalReadHandlers = Effect.gen(function* () {
             targetKind: r.target_kind,
             kind: r.kind,
             label: r.label,
-            fields: JSON.parse(r.fields_json) as Array<string>
+            fields: reversalUnits(r.target_kind, JSON.parse(r.fields_json) as Array<string>)
           })),
           binned: binned.flatMap((b) => {
             const name = /^Created the (?:card|lorebook|preset) (.*)$/s.exec(b.title)?.[1]

@@ -128,6 +128,45 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("rechecks the current Files grant before committing a previously authorized portrait", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const key = { userId: f.user.id, rolloutId: f.rolloutId, toolCallId: "portrait" }
+      const name = "Uncommitted portrait"
+      yield* f.reader.AuthorizePluginTool({
+        ...key,
+        capability: "library.write",
+        requireFiles: true,
+        requireApproval: false
+      })
+      for (const mode of ["ask", "off"] as const) {
+        yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "files", mode })
+        const result = yield* Effect.flip(
+          f.writer.AgentCreateEntity({
+            ...key,
+            kind: "card",
+            label: name,
+            doc: newCardDoc(name),
+            tags: [],
+            portrait: {
+              sha256: "a".repeat(64),
+              mime: "image/png",
+              width: 80,
+              height: 120,
+              byteSize: 128,
+              maxAddedBytes: 128
+            }
+          })
+        )
+        assert.strictEqual(result._tag, "EffectUndoRefused")
+      }
+      assert.isFalse((yield* api.ListLibrary({ kind: "card" })).some((card) => card.label === name))
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("the writer checks a positioned library item's grant before creating a revision", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -1109,7 +1148,7 @@ describe("workshop setup effects", () => {
             html_approved: true
           }
         })
-        assert.isString(grant)
+        assert.isString(grant.text)
         const current = yield* api.OpenEditor({ refId: id })
         assert.notInclude(current.doc.agent_editable_fields ?? [], "description")
         assert.notStrictEqual(current.doc.regex_approved, true)

@@ -44,7 +44,8 @@ import {
   workshopCapabilities
 } from "../agent/capabilities.ts"
 import { visibleDoc } from "../agent/libraryView.ts"
-import { newWorkshopImportMedia } from "./workshopImportMedia.ts"
+import { markWorkshopMediaCharged, workshopMediaCharge } from "./workshopImportMedia.ts"
+import { authorizePluginTool } from "./workshopGrants.ts"
 import { insertReversal, recordAssistantRevertUndo, revisionReversal } from "./changeReversals.ts"
 import { CARD_SKILLS_UNIT, changedUnits, unitName, unitPath, valuesOfUnits } from "@dreamspan/shared/changeReversal.ts"
 import { sharedNote } from "./sharedNotes.ts"
@@ -91,6 +92,7 @@ type Key = {
   readonly refId?: RefId
   readonly librarySight?: LibraryWriteSight
   readonly cardFileImport?: { readonly maxAddedBytes: number }
+  readonly portrait?: { readonly maxAddedBytes: number }
   readonly expectedRefs?: ReadonlyArray<{
     readonly refId: RefId
     readonly rowVersion: number
@@ -625,24 +627,39 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           return yield* new EffectUndoRefused({ message: "This workshop run is no longer running." })
         // Check the current permission in the same transaction as the change. An Off choice
         // or a new Ask-first choice in another tab cannot race the main-thread permit.
-        const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
-          FROM workshop_grants WHERE chat_id = (SELECT chat_id FROM rollouts WHERE id = ${key.rolloutId})
-            AND owner_user_id = ${key.userId} AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
-        const mode = resolveMode(
-          { workshopCapabilities, capabilityDefaults },
-          new Map(grants.map((g) => [g.capability, g.mode])),
-          capability,
-          "library"
-        )
-        if (mode === "off" || (key.cardFileImport && grants.some((g) => g.capability === "files" && g.mode === "off")))
-          return yield* new EffectUndoRefused({ message: "This capability is turned off in this workshop." })
-        if (mode === "ask" || key.cardFileImport) {
-          const [approval] = yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${key.rolloutId}
-            AND tool_call_id = ${key.toolCallId} AND capability = ${capability}
-            AND digest = ${key.approvalDigest ?? null} AND status = 'used'
-            AND (${key.cardFileImport ? 1 : 0} = 0 OR answer = 'allow')`
-          if (!approval)
-            return yield* new EffectUndoRefused({ message: "This change needs a current approval. Ask again." })
+        if (key.portrait || key.cardFileImport) {
+          yield* authorizePluginTool(sql, {
+            userId: key.userId,
+            rolloutId: key.rolloutId,
+            toolCallId: key.toolCallId,
+            capability,
+            requireFiles: true,
+            requireApproval: key.cardFileImport !== undefined,
+            ...(key.approvalDigest === undefined ? {} : { digest: key.approvalDigest })
+          }).pipe(
+            Effect.catchTag("ApprovalRefused", (error) =>
+              Effect.fail(new EffectUndoRefused({ message: error.message }))
+            )
+          )
+        } else {
+          const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+            FROM workshop_grants WHERE chat_id = (SELECT chat_id FROM rollouts WHERE id = ${key.rolloutId})
+              AND owner_user_id = ${key.userId} AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+          const mode = resolveMode(
+            { workshopCapabilities, capabilityDefaults },
+            new Map(grants.map((g) => [g.capability, g.mode])),
+            capability,
+            "library"
+          )
+          if (mode === "off")
+            return yield* new EffectUndoRefused({ message: "This capability is turned off in this workshop." })
+          if (mode === "ask") {
+            const [approval] = yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${key.rolloutId}
+              AND tool_call_id = ${key.toolCallId} AND capability = ${capability}
+              AND digest = ${key.approvalDigest ?? null} AND status = 'used'`
+            if (!approval)
+              return yield* new EffectUndoRefused({ message: "This change needs a current approval. Ask again." })
+          }
         }
         for (const expected of key.expectedRefs ?? []) {
           const ref = yield* lib.ownedRef(key.userId, expected.refId)
@@ -698,6 +715,21 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           yield* sql`INSERT INTO rollout_effects ${sql.insert({ rollout_id: key.rolloutId, tool_call_id: key.toolCallId, seq, kind: effect.kind, target_kind: effect.targetKind, target_id: effect.targetId, title: effect.title, undo_json: effect.undo === null ? null : JSON.stringify(effect.undo), created_at: at })}`
         return result
       }).pipe(transaction(sql, "WorkshopEffect"))
+    const recordPortrait = Effect.fnUntraced(function* (
+      userId: UserId,
+      portrait: NonNullable<Parameters<Handlers["AgentCreateEntity"]>[0]["portrait"]>
+    ) {
+      const addedBytes = yield* workshopMediaCharge(sql, userId, [portrait])
+      if (addedBytes > portrait.maxAddedBytes)
+        return yield* refuseOperation("Available Files storage changed while saving the portrait. Try again.")
+      const avatar_media_id = yield* ops.RecordMessageImage({
+        userId,
+        media: portrait,
+        verifiedImage: true
+      })
+      yield* markWorkshopMediaCharged(sql, userId, [portrait.sha256])
+      return { avatar_media_id, addedBytes }
+    })
     const checkDocument = (doc: unknown) =>
       Buffer.byteLength(JSON.stringify(doc), "utf8") <= limits.documentBytes
         ? Effect.void
@@ -976,14 +1008,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     ])
                       if (typeof json === "string") yield* checkDocument(JSON.parse(json))
                   }
-                  const newMedia = input.cardFileImport
-                    ? yield* newWorkshopImportMedia(
-                        sql,
-                        input.userId,
-                        (payload as Parameters<Handlers["ImportFile"]>[0]).media
-                      )
+                  const chargedMedia = input.cardFileImport
+                    ? (payload as Parameters<Handlers["ImportFile"]>[0]).media
                     : []
-                  const addedBytes = newMedia.reduce((total, row) => total + row.addedBytes, 0)
+                  const addedBytes = input.cardFileImport
+                    ? yield* workshopMediaCharge(sql, input.userId, chargedMedia)
+                    : 0
                   if (input.cardFileImport && addedBytes > input.cardFileImport.maxAddedBytes)
                     return yield* refuseOperation("Available Files storage changed while importing. Try again.")
                   const origin = `${input.rolloutId}:${input.toolCallId}`
@@ -1002,9 +1032,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   ) as { id: RefId }
                   if (input.operation === "ImportFile" && (result as { created: boolean }).created !== true)
                     return yield* refuseOperation("Import this file from the library page.")
-                  if (newMedia.length)
-                    yield* sql`UPDATE media_refs SET files_quota = 1 WHERE owner_user_id = ${input.userId}
-                      AND media_id IN (SELECT id FROM media_assets WHERE sha256 IN ${sql.in(newMedia.map((row) => row.sha256))})`
+                  yield* markWorkshopMediaCharged(
+                    sql,
+                    input.userId,
+                    chargedMedia.map((file) => file.sha256)
+                  )
                   const first = yield* creation(made.id)
                   const effects = [first]
                   // A card's Undo answers for the notes that came with it (`createUndoer`).
@@ -1187,8 +1219,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               : refuse(error instanceof Error ? error.message : "This operation could not be saved.")
           )
         ),
-      AgentCreateEntity: (input) =>
-        receipted(
+      AgentCreateEntity: (input) => {
+        let addedBytes = 0
+        return receipted(
           input,
           "library.write",
           Effect.gen(function* () {
@@ -1208,11 +1241,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            // A portrait's file is recorded for the user, as the editor's Replace picture records it.
-            const portrait = input.portrait
-              ? { avatar_media_id: yield* ops.RecordMessageImage({ userId: input.userId, media: input.portrait }) }
-              : {}
-            const doc = { ...safeAgentDocument(input.kind, {}, valid.doc), ...portrait }
+            const doc = { ...safeAgentDocument(input.kind, {}, valid.doc) }
+            if (input.portrait) {
+              const picture = yield* recordPortrait(input.userId, input.portrait)
+              doc.avatar_media_id = picture.avatar_media_id
+              addedBytes = picture.addedBytes
+            }
             yield* checkDocument(doc)
             const { ref } = yield* ops.CreateEntity({
               userId: input.userId,
@@ -1233,22 +1267,23 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               effects: [yield* creation(ref.id)]
             }
           })
-        ),
-      AgentReviseEntity: (input) =>
-        receipted(
+        ).pipe(Effect.map((text) => ({ text, addedBytes })))
+      },
+      AgentReviseEntity: (input) => {
+        let addedBytes = 0
+        return receipted(
           input,
           "library.write",
           Effect.gen(function* () {
             yield* checkDocument(input.doc)
             const before = yield* lib.ownedRef(input.userId, input.refId)
-            // A new picture takes the default cutout, never the old picture's (§14.5c).
-            const { avatar_crop: _cut, ...uncut } = input.doc
-            const doc = input.portrait
-              ? {
-                  ...uncut,
-                  avatar_media_id: yield* ops.RecordMessageImage({ userId: input.userId, media: input.portrait })
-                }
-              : input.doc
+            const doc = { ...input.doc }
+            if (input.portrait) {
+              const picture = yield* recordPortrait(input.userId, input.portrait)
+              doc.avatar_media_id = picture.avatar_media_id
+              delete doc.avatar_crop
+              addedBytes = picture.addedBytes
+            }
             const change = yield* ops.EditRef({
               userId: input.userId,
               refId: input.refId,
@@ -1282,7 +1317,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     ]
             }
           })
-        ),
+        ).pipe(Effect.map((text) => ({ text, addedBytes })))
+      },
       AgentRevertRevision: (input) =>
         receipted(
           input,
