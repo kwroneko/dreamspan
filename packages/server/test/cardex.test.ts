@@ -932,6 +932,24 @@ describe("v1 as card sources", () => {
         }),
         {}
       )
+      assert.deepStrictEqual(
+        detailMetadata({
+          earlier_origins: [
+            { listing: { path: "/o/unknown/1", source: "generic", source_label: "Other" } },
+            { listing: { path: "/o/unknown/2", source: "unrecognized" } },
+            { listing: { path: "/o/unknown/3" } },
+            { listing: { path: "/o/chub/4", source: "chub" } },
+            { listing: { path: "/o/unknown/5", source: "generic", source_label: "Example Archive" } }
+          ]
+        }).earlierOrigins?.map(({ label }) => label),
+        [
+          "Earlier listing",
+          "Earlier listing",
+          "Earlier listing",
+          "Earlier listing on Chub",
+          "Earlier listing on Example Archive"
+        ]
+      )
     })
   )
 

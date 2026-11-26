@@ -27,7 +27,7 @@ export const useCanOpenBeside = () => useSyncExternalStore(subscribe, () => matc
 export const OPEN_BESIDE_HINT =
   "Opens it in the frame on the right, adding one if there's none. Alt-click a link to do the same."
 
-/** A card's own page beside (owner, 2026-11-24): its editor, or a card source's read-only page. */
+/** A library card's editor beside (owner, 2026-11-24). */
 export const PAGE_BESIDE_HINT = "Open this card's page in the pane next to this one."
 
 /** A card source's card (or your copy of it) in the full editor beside (owner, 2026-11-24), for reading card after card. */

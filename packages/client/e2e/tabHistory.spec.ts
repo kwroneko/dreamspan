@@ -158,17 +158,17 @@ test("the next card replacing a preview tab beside is a step in that tab", async
     ((await tiles.nth(i).getByRole("link").first().getAttribute("aria-label")) ?? "").replace(/^Open /, "")
   const first = await nameOf(0)
   const second = await nameOf(1)
-  const viewBeside = async (i: number) => {
+  const editBeside = async (i: number) => {
     await tiles.nth(i).getByRole("link").first().click({ button: "right" })
-    await page.getByRole("menuitem", { name: /^View beside/ }).click()
+    await page.getByRole("menuitem", { name: /^Edit beside/ }).click()
   }
-  await viewBeside(0)
+  await editBeside(0)
   await expect(frames(page)).toHaveCount(2)
   const side = frames(page).nth(1)
   await expect(side.locator("[data-tab]")).toHaveCount(1)
   await expect(side.locator("[data-tab]").first()).toContainText(first)
   await disabled(back(side))
-  await viewBeside(1)
+  await editBeside(1)
   await expect(side.locator("[data-tab]")).toHaveCount(1)
   await expect(side.locator("[data-tab]").first()).toContainText(second)
   await enabled(back(side))

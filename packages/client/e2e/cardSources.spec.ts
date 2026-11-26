@@ -1,9 +1,9 @@
 // Browsing a card source (spec/CARD-SOURCES.md phase 2) against the fake archive, which holds
 // synthetic cards only: nothing reaches it until the cardex option is opened; then the search,
 // the source's sorts, the generated Filters panel and its chips, pages as the grid scrolls, a
-// card's page and the recently viewed row, an error with Retry, on home and in the side panel.
+// card's editor and the recently viewed row, an error with Retry, on home and in the side panel.
 // The user's own cards never show among the results. Phase 3: a click opens the card's draft
-// chat, whose first send adds it; Inspect's page adds one without a chat; an edit in the draft
+// chat, whose first send adds it; the full editor adds one without a chat; an edit in the draft
 // chat's character tab, saved, adds one too; each shows as held.
 import { createServer } from "node:net"
 import { expect, test, type Page } from "@playwright/test"
@@ -261,23 +261,19 @@ for (const width of [1440, 390])
         await expect(tiles(main).first()).toHaveAttribute("data-held", "true")
         await expect(tiles(main).first().getByLabel("You have this card", { exact: true })).toBeVisible()
 
-        // Inspect: a card's page, where Add to my cards adds it without a chat.
+        // Opening the editor keeps the card outside the library until Add to my cards.
         const second = tiles(main).nth(1)
         const name = (await second.getByRole("link").getAttribute("aria-label"))!.replace(/^Open /, "")
         await second.getByRole("link").click({ button: "right" })
-        await page.getByRole("menuitem", { name: "Inspect", exact: true }).click()
+        await expect(page.getByRole("menuitem", { name: /^(View(?: beside)?|Inspect)$/ })).toHaveCount(0)
+        await page.getByRole("menuitem", { name: "Open in the editor", exact: true }).click()
         await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
-        await expect(page.getByText("On cardex. It isn't in your cards.", { exact: true })).toBeVisible()
-        await expect(page.getByRole("heading", { name: "Description · 40 tokens", exact: true })).toBeVisible()
-        await expect(
-          // The site's name is cardex's own label for it.
-          page.getByRole("link", { name: /^Earlier listing on \S/ })
-        ).toHaveAttribute("href", /\/o\//)
+        await expect(page.getByText("From cardex · not in your cards", { exact: true })).toBeVisible()
         await expect(page.getByRole("link", { name: "Start a chat", exact: true })).toBeVisible()
         await page.getByRole("button", { name: "Add to my cards", exact: true }).click()
         await expect(page.getByText(`Added ${name} to your cards.`, { exact: true })).toBeVisible()
-        await expect(page.getByText("On cardex. You have it in your cards.", { exact: true })).toBeVisible()
-        await expect(page.getByRole("link", { name: "Open your card", exact: true })).toBeVisible()
+        await expect(page).toHaveURL(/\/library\/[0-9a-f-]{36}/)
+        await expect(page.locator("[data-read-only-card]")).toHaveCount(0)
         expect(await labels()).toEqual([...before, tried, name].sort())
         await expectLayout(page, info, `remote-card-${width}-${theme}`, { scope: "main" })
         await page.screenshot({ path: info.outputPath("card-added.png") })
@@ -286,7 +282,8 @@ for (const width of [1440, 390])
         const recent = main.locator("[data-source-recent]")
         await expect(recent).toContainText("Recently viewed on cardex")
         await recent.locator("summary").click()
-        await expect(recent.getByRole("link").filter({ hasText: name })).toBeVisible()
+        const seen = recent.getByRole("link").filter({ hasText: name })
+        await expect(seen).toHaveAttribute("href", /\/library\/src%3Acardex%3A/)
 
         // The draft chat's character tab is the card editor on the source's copy: a change is
         // kept as a draft, and Save adds the card with it as its revision 2.

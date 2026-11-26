@@ -14,6 +14,7 @@ export function Popover({
   onOpenChange,
   trigger,
   triggerLabel,
+  alternateTrigger,
   triggerDisabled = false,
   title,
   children,
@@ -31,10 +32,12 @@ export function Popover({
   keepMounted = false
 }: {
   open: boolean
-  onOpenChange: (open: boolean) => void
+  onOpenChange: (open: boolean, trigger?: "primary" | "alternate") => void
   /** What the trigger button shows. */
   trigger: ReactNode
   triggerLabel: string
+  /** A second button that opens the same panel at the primary button. */
+  alternateTrigger?: { content: ReactNode; label: string; hint: ReactNode } | undefined
   /** Unavailable triggers stay in place and keep their explanation on hover and focus. */
   triggerDisabled?: boolean
   title: string
@@ -64,6 +67,8 @@ export function Popover({
   /** Stays mounted, hidden, while closed: what its controls opened (a dialog, say) stays open. */
   keepMounted?: boolean
 }) {
+  const primaryTrigger = useRef<HTMLButtonElement>(null)
+  const alternateButton = useRef<HTMLButtonElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const focusOnOpen = () =>
     [
@@ -76,27 +81,39 @@ export function Popover({
         element.getClientRects().length > 0
     ) ?? true
   const away = useAway()
-  const button = (
-    <BasePopover.Trigger
-      aria-label={triggerLabel}
-      disabled={triggerDisabled}
-      render={<BaseButton focusableWhenDisabled />}
-      className={`${triggerClassName} data-disabled:pointer-events-auto! data-disabled:opacity-40`}
-    >
-      {trigger}
-    </BasePopover.Trigger>
-  )
+  const triggerButton = (content: ReactNode, label: string, tooltip: ReactNode, alternate = false) => {
+    const button = (
+      <BasePopover.Trigger
+        ref={alternate ? alternateButton : primaryTrigger}
+        aria-label={label}
+        disabled={triggerDisabled}
+        render={<BaseButton focusableWhenDisabled />}
+        className={`${triggerClassName} data-disabled:pointer-events-auto! data-disabled:opacity-40`}
+      >
+        {content}
+      </BasePopover.Trigger>
+    )
+    return tooltip === undefined ? (
+      button
+    ) : (
+      <Tooltip label={tooltip} side={hintSide}>
+        {button}
+      </Tooltip>
+    )
+  }
   return (
-    <BasePopover.Root open={open && !away} onOpenChange={(next) => onOpenChange(next)}>
-      {hint === undefined ? (
-        button
-      ) : (
-        <Tooltip label={hint} side={hintSide}>
-          {button}
-        </Tooltip>
-      )}
+    <BasePopover.Root
+      open={open && !away}
+      onOpenChange={(next, { trigger }) => {
+        if (next && alternateTrigger) onOpenChange(next, trigger === alternateButton.current ? "alternate" : "primary")
+        else onOpenChange(next)
+      }}
+    >
+      {triggerButton(trigger, triggerLabel, hint)}
+      {alternateTrigger && triggerButton(alternateTrigger.content, alternateTrigger.label, alternateTrigger.hint, true)}
       <BasePopover.Portal keepMounted={keepMounted}>
         <BasePopover.Positioner
+          anchor={alternateTrigger ? primaryTrigger : undefined}
           data-layout-overlay="Popover floats above the page"
           className="z-50 outline-none"
           side={side}
@@ -118,7 +135,7 @@ export function Popover({
                 {title}
               </BasePopover.Title>
               {titleAside}
-              {closeButton && <WindowClose onClick={() => onOpenChange(false)} />}
+              {closeButton && <WindowClose hint="Closes this popover." onClick={() => onOpenChange(false)} />}
             </div>
             <TitledContainer title={title}>{children}</TitledContainer>
           </BasePopover.Popup>

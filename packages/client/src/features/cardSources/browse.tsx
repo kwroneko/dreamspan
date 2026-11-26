@@ -4,13 +4,14 @@
 // Nothing here contacts a source unless its option is open: every call below needs a
 // source id, which is null otherwise (§5.1).
 import { useAtomValue } from "@effect/atom-react"
-import type {
-  RemoteSummary,
-  SourceCapabilities,
-  SourceFilter,
-  SourceFilterValue,
-  SourceInfo,
-  SourceQuery
+import {
+  remoteEntityId,
+  type RemoteSummary,
+  type SourceCapabilities,
+  type SourceFilter,
+  type SourceFilterValue,
+  type SourceInfo,
+  type SourceQuery
 } from "@dreamspan/shared/cardSources.ts"
 import { Link, useNavigate, useRouter } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -32,7 +33,6 @@ import {
   EDITOR_BESIDE_HINT,
   OPEN_BESIDE_HINT,
   OPEN_NEW_TAB_HINT,
-  PAGE_BESIDE_HINT,
   openBeside,
   openPageBeside,
   useCanOpenBeside
@@ -69,7 +69,7 @@ export function useSourceList(): ReadonlyArray<SourceInfo> | null {
 const capabilities = new Map<string, SourceCapabilities>()
 
 /** A source's capabilities, asked once per page load; nothing is asked while `sourceId` is null. */
-export function useCapabilities(sourceId: string | null) {
+function useCapabilities(sourceId: string | null) {
   const call = useSourceCall()
   const [state, setState] = useState<{
     id: string | null
@@ -496,10 +496,6 @@ export const clearFilters = (browse: SourceBrowse) => {
   })
 }
 
-/** The link to a remote card's page (§3.5). */
-const cardLink = (sourceId: string, remoteId: string) =>
-  ({ to: "/sources/$sourceId/cards/$remoteId", params: { sourceId, remoteId } }) as const
-
 /** The link to a remote card's draft chat (§4.2): what a click on its tile opens. */
 const chatLink = (sourceId: string, remoteId: string) =>
   ({ to: "/sources/$sourceId/cards/$remoteId/chat", params: { sourceId, remoteId } }) as const
@@ -519,10 +515,7 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const [menu, setMenu] = useState(false)
   const info = browse.info!
   const view = cardSourceViews.get(info.id)
-  const link = cardLink(info.id, card.remoteId)
   const chat = chatLink(info.id, card.remoteId)
-  // The card's read-only page (Inspect's): View beside.
-  const pageHref = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
   const canBeside = useCanOpenBeside()
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
@@ -534,10 +527,11 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const [flash, setFlash] = useState(false)
   const mine =
     added ?? (card.held ? { entityId: card.held.entityId, refId: card.held.refId, archived: card.held.archived } : null)
+  const editorHref = mine ? `/library/${encodeURIComponent(mine.refId)}` : remoteEditorHref(info.id, card.remoteId)
   // What a click opens: your card's chat, else the draft chat. Open beside and a new browser tab open it too.
   const entity = mine?.entityId as EntityId | undefined
   const heldChat = entity === undefined ? null : character.link(entity)
-  const clickHref = heldChat === null ? `${pageHref}/chat` : router.buildLocation(heldChat).href
+  const clickHref = router.buildLocation(heldChat ?? chat).href
   const openMine = () => {
     if (entity !== undefined) character.open(entity)
   }
@@ -638,16 +632,6 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open your card
           </MenuItem>
         ) : null}
-        {/* Your card's editor beside, as the Library's Edit beside (owner, 2026-11-24). */}
-        {mine !== null && canBeside && (
-          <MenuItem
-            icon="edit"
-            description={EDITOR_BESIDE_HINT}
-            onClick={() => openPageBeside(`/library/${encodeURIComponent(mine.refId)}`)}
-          >
-            Edit beside
-          </MenuItem>
-        )}
         {mine === null && (
           <MenuItem
             icon="chat"
@@ -669,37 +653,15 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         >
           Open in a new browser tab
         </MenuItem>
-        {/* The card's read-only page beside, to inspect many cards (owner, 2026-11-24). */}
+        <MenuItem
+          icon="edit"
+          description={mine ? `Opens your copy of ${card.name} in the card editor.` : REMOTE_EDITOR_HINT}
+          onClick={() => void navigate({ href: editorHref })}
+        >
+          Open in the editor
+        </MenuItem>
         {canBeside && (
-          <MenuItem icon="eye" description={PAGE_BESIDE_HINT} onClick={() => openPageBeside(pageHref)}>
-            View beside
-          </MenuItem>
-        )}
-        {mine === null && (
-          <MenuItem
-            icon="eye"
-            description={`Shows ${card.name}'s definitions without starting a chat.`}
-            onClick={() => void navigate(link)}
-          >
-            Inspect
-          </MenuItem>
-        )}
-        {mine === null && (
-          <MenuItem
-            icon="edit"
-            description={REMOTE_EDITOR_HINT}
-            onClick={() => void navigate({ href: remoteEditorHref(info.id, card.remoteId) })}
-          >
-            Open in the editor
-          </MenuItem>
-        )}
-        {/* The editor beside, as the side pane's preview tab, to read card after card (owner, 2026-11-24). */}
-        {mine === null && canBeside && (
-          <MenuItem
-            icon="edit"
-            description={EDITOR_BESIDE_HINT}
-            onClick={() => openPageBeside(remoteEditorHref(info.id, card.remoteId))}
-          >
+          <MenuItem icon="edit" description={EDITOR_BESIDE_HINT} onClick={() => openPageBeside(editorHref)}>
             Edit beside
           </MenuItem>
         )}
@@ -710,15 +672,6 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             onClick={addToMine}
           >
             Add to my cards
-          </MenuItem>
-        )}
-        {mine !== null && (
-          <MenuItem
-            icon="search"
-            description={`Shows ${card.name} on ${info.name}, not your copy.`}
-            onClick={() => void navigate(link)}
-          >
-            Show on {info.name}
           </MenuItem>
         )}
         {card.url !== undefined && (
@@ -1081,14 +1034,17 @@ function RecentRow({ browse }: { browse: SourceBrowse }) {
         <ul className="flex min-w-0 gap-2 overflow-x-auto p-2">
           {recent.map((r) => (
             <li key={r.remoteId} className="w-16 shrink-0">
-              <Tooltip label={`Shows ${r.name} again.`}>
+              <Tooltip label={`Opens ${r.name} in the ${r.kind === "lorebook" ? "lorebook" : "card"} editor.`}>
                 <Link
                   {...(r.kind === "lorebook"
                     ? {
                         to: "/sources/$sourceId/lorebooks/$remoteId" as const,
                         params: { sourceId: info.id, remoteId: r.remoteId }
                       }
-                    : cardLink(info.id, r.remoteId))}
+                    : {
+                        to: "/library/$refId" as const,
+                        params: { refId: remoteEntityId(info.id, r.remoteId) }
+                      })}
                   className="flex flex-col items-center gap-1 text-center text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
                   <Avatar

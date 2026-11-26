@@ -105,6 +105,17 @@ const bad = (message = "cardex sent something this app can't read") =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+const textOf = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+
+/** Cardex groups unrecognized sites under Other. An earlier listing may still have a named site. */
+const earlierSite = (label: unknown, source: unknown) => {
+  const explicit = textOf(label)
+  if (explicit && !["other", "generic"].includes(explicit.toLowerCase())) return explicit
+  const id = textOf(source)
+  if (!id || id === "generic" || !Object.hasOwn(CARDEX_SITE_LABELS, id)) return undefined
+  return CARDEX_SITE_LABELS[id]
+}
+
 /** A URL cardex gave (absolute, or a path on its origin), kept only when it is on that origin. */
 const onOrigin = (origin: string, raw: string | null | undefined) => {
   if (!raw) return undefined
@@ -177,13 +188,11 @@ export const detailMetadata = (
                 : undefined)
         const url = onOrigin(origin, ref)
         if (!url) return []
-        const site =
-          typeof listing?.source_label === "string"
-            ? listing.source_label
-            : typeof listing?.source === "string"
-              ? (CARDEX_SITE_LABELS[listing.source] ?? listing.source)
-              : "archive"
-        return [{ label: `Earlier listing on ${site}`, url }]
+        const site = earlierSite(
+          listing?.source_label,
+          listing?.source ?? (isRecord(entry.origin) ? entry.origin.source : undefined)
+        )
+        return [{ label: site ? `Earlier listing on ${site}` : "Earlier listing", url }]
       })
     : []
   return {
@@ -753,8 +762,6 @@ const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): 
 const FAMILY_MAX = 60
 const FAMILY_ORIGINS = 3
 
-const textOf = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
-
 /** A creator's `site/handle` from v1's creator path, `/u/<site>/<handle>`. */
 const creatorQueryOf = (creator: unknown) => {
   if (!isRecord(creator)) return undefined
@@ -801,7 +808,7 @@ const relativeOf = (
     name: (textOf(fields.name) ?? slug).slice(0, 300),
     ...(creator ? { creator: creator.slice(0, 200) } : {}),
     ...(creatorQuery ? { creatorQuery } : {}),
-    ...(siteName ? { site: CARDEX_SITE_LABELS[siteName] ?? siteName } : {}),
+    ...(siteName ? { site: relation === "earlier" ? siteName : (CARDEX_SITE_LABELS[siteName] ?? siteName) } : {}),
     ...(label ? { versionLabel: label.slice(0, 40) } : {}),
     ...(at === undefined ? {} : { at }),
     ...(typeof fields.current === "boolean" ? { current: fields.current } : {}),
@@ -882,15 +889,23 @@ export const familyOf = (
   for (const entry of Array.isArray(detail.earlier_origins) ? detail.earlier_origins.filter(isRecord) : []) {
     const listing = isRecord(entry.listing) ? entry.listing : null
     const was = isRecord(entry.origin) ? entry.origin : null
+    const slug = was?.card_slug ?? listing?.card_slug
+    // A former listing can now serve a newer version of the viewed card.
+    const history = Array.isArray(listing?.versions) ? listing.versions.filter(isRecord) : []
+    const newer = history.some((version) => version.slug === remoteId && version.is_current === false)
+      ? history.find((version) => version.slug === slug && version.is_current === true)
+      : undefined
     add(
       relativeOf(
-        "earlier",
+        newer ? "version" : "earlier",
         {
-          slug: was?.card_slug ?? listing?.card_slug,
+          slug,
           name: listing?.name,
           creator: listing?.author,
-          site: listing?.source ?? was?.source,
-          at: entry.active_from,
+          site: earlierSite(listing?.source_label, listing?.source ?? was?.source),
+          at: newer?.active_from ?? entry.active_from,
+          current: newer?.is_current,
+          versionLabel: isRecord(newer?.meta) ? newer.meta.character_version : undefined,
           thumb: isRecord(listing?.cover) ? listing.cover.thumb_url : undefined
         },
         origin

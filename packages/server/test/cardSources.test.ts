@@ -1551,6 +1551,9 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       // An older version opens like any card.
       const opened = yield* api.SourceCard({ sourceId: "cardex", remoteId: older.remoteId })
       assert.strictEqual(opened.summary.name, card.name)
+      const ofOlder = yield* api.SourceFamily({ sourceId: "cardex", remoteId: older.remoteId })
+      const newer = ofOlder.items.find((item) => item.remoteId === card.slug)
+      assert.deepStrictEqual([newer?.relation, newer?.versionLabel, newer?.current], ["version", "1.0", true])
     })
   )
 })

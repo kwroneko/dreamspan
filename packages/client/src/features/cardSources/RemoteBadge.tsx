@@ -63,29 +63,49 @@ export function RemoteCardLine({
 }) {
   const from = remoteOf(card.entityId)
   const sourceName = useSourceName()
-  const adopt = useAdoptRemote()
-  const [adding, setAdding] = useState(false)
   if (!from) return null
   const name = sourceName(from.sourceId)
   return (
     <div data-remote-card-line className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
       <p className="min-w-0 text-sm text-muted">From {name} · not in your cards</p>
-      <Button
-        variant="secondary"
-        disabled={adding}
-        hint={`Adds ${card.name} to your cards, with any changes made here, without starting a chat.`}
-        onClick={() => {
-          setAdding(true)
-          void Promise.resolve(beforeAdd?.())
-            .then(() => adopt(from.sourceId, name, from.remoteId))
-            .then((added) => {
-              setAdding(false)
-              if (added) onAdded?.(added.entityId, added.refId)
-            })
-        }}
-      >
-        Add to my cards
-      </Button>
+      <AddRemoteCardButton from={from} cardName={card.name} beforeAdd={beforeAdd} onAdded={onAdded} />
     </div>
+  )
+}
+
+export function AddRemoteCardButton({
+  from,
+  cardName,
+  beforeAdd,
+  onAdded,
+  className
+}: {
+  from: NonNullable<ReturnType<typeof remoteOf>>
+  cardName: string
+  beforeAdd?: (() => Promise<unknown>) | undefined
+  onAdded?: ((entityId: string, refId: string) => void) | undefined
+  className?: string
+}) {
+  const sourceName = useSourceName()
+  const adopt = useAdoptRemote()
+  const [adding, setAdding] = useState(false)
+  return (
+    <Button
+      disabled={adding}
+      focusableWhenDisabled
+      className={className}
+      hint={`Adds ${cardName} to your cards${beforeAdd ? ", with any changes made here," : ""} without starting a chat.`}
+      onClick={() => {
+        setAdding(true)
+        void Promise.resolve(beforeAdd?.())
+          .then(() => adopt(from.sourceId, sourceName(from.sourceId), from.remoteId))
+          .then((added) => {
+            if (added) onAdded?.(added.entityId, added.refId)
+          })
+          .finally(() => setAdding(false))
+      }}
+    >
+      Add to my cards
+    </Button>
   )
 }

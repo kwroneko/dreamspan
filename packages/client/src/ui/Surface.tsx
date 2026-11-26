@@ -82,15 +82,17 @@ const badgeTones: Record<Tone, string> = {
 export function Badge({
   tone = "neutral",
   size = "md",
+  wrap = false,
   children
 }: {
   tone?: Tone
   size?: "md" | "sm"
+  wrap?: boolean
   children: ReactNode
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border text-xs font-medium whitespace-nowrap ${size === "sm" ? "h-4 px-1.5 leading-none" : "h-5 px-2"} ${badgeTones[tone]}`}
+      className={`inline-flex items-center rounded-full border text-xs font-medium ${wrap ? "min-h-5 max-w-full px-2 [overflow-wrap:anywhere]" : size === "sm" ? "h-4 px-1.5 leading-none whitespace-nowrap" : "h-5 px-2 whitespace-nowrap"} ${badgeTones[tone]}`}
     >
       {children}
     </span>
