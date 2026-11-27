@@ -13,8 +13,13 @@ import { globalRegexAtom } from "./data.ts"
 const decodeScripts = Schema.decodeUnknownExit(Schema.Array(RegexScript))
 
 function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
+  // Keep the latest revision we just wrote until globalRegexAtom's refresh catches up,
+  // so toggling switches in quick succession never flickers or sends a stale revision.
+  const [latest, setLatest] = useState<GlobalRegex | null>(null)
+  const currentSaved = latest !== null && latest.revision > saved.revision ? latest : saved
+  const savedJson = JSON.stringify(currentSaved)
   // A draft kept on the server, like other account settings, so a reload doesn't lose it.
-  const durable = useUserDraft("global-regex", "Global regex scripts", JSON.stringify(saved))
+  const durable = useUserDraft("global-regex", "Global regex scripts", savedJson)
   const values = JSON.parse(durable.text) as GlobalRegex
   const action = useAction()
   // The script just added opens; which are open is URL state (ScriptItem's place), so a reload keeps them.
@@ -26,6 +31,71 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
   }
   const change = (index: number, patch: Partial<RegexScript>) =>
     edit(values.scripts.map((script, i) => (i === index ? { ...script, ...patch } : script)))
+  const toggle = async (index: number, on: boolean) => {
+    const script = values.scripts[index]
+    if (!script) return
+    const disabled = !on
+    const nextDraftScripts = values.scripts.map((entry, i) => (i === index ? { ...entry, disabled } : entry))
+    const exists = currentSaved.scripts.some((entry) => entry.id === script.id)
+    // Newly added scripts and drafts behind another tab's revision stay in the draft until saved.
+    if (!exists || values.revision !== currentSaved.revision) {
+      edit(nextDraftScripts)
+      return
+    }
+    const nextSavedScripts = currentSaved.scripts.map((entry) =>
+      entry.id === script.id ? { ...entry, disabled } : entry
+    )
+    if (decodeScripts(nextSavedScripts)._tag === "Failure") {
+      edit(nextDraftScripts)
+      return
+    }
+    setMessage(null)
+    const label = script.name || "Unnamed script"
+    const status = disabled ? `Turned off “${label}”.` : `Turned on “${label}”.`
+    const hasDraft = durable.text !== savedJson
+    if (!hasDraft) {
+      const result = await action.run(
+        (client) => client("SetGlobalRegex", { scripts: nextSavedScripts, expectedRevision: currentSaved.revision }),
+        ["globalRegex"]
+      )
+      if (result.ok) {
+        setLatest(result.value)
+        setMessage(status)
+      }
+      return
+    }
+    if (JSON.stringify(nextDraftScripts) === JSON.stringify(nextSavedScripts)) {
+      let revision = currentSaved.revision
+      const ok = await durable.commit(
+        durable.text,
+        async () => {
+          const result = await action.run(
+            (client) =>
+              client("SetGlobalRegex", { scripts: nextSavedScripts, expectedRevision: currentSaved.revision }),
+            ["globalRegex"]
+          )
+          if (result.ok) {
+            revision = result.value.revision
+            setLatest(result.value)
+          }
+          return result.ok
+        },
+        (text) => JSON.stringify({ ...JSON.parse(text), revision })
+      )
+      if (ok) setMessage(status)
+      return
+    }
+    // Other unsaved edits remain in the draft; save only this script's on/off state and advance the draft's revision.
+    const result = await action.run(
+      (client) => client("SetGlobalRegex", { scripts: nextSavedScripts, expectedRevision: currentSaved.revision }),
+      ["globalRegex"]
+    )
+    if (result.ok) {
+      setLatest(result.value)
+      durable.setText(JSON.stringify({ ...values, scripts: nextDraftScripts, revision: result.value.revision }))
+      setMessage(status)
+    }
+  }
   const move = (index: number, by: -1 | 1) => {
     const next = [...values.scripts]
     const [script] = next.splice(index, 1)
@@ -48,7 +118,10 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
           (client) => client("SetGlobalRegex", { scripts: values.scripts, expectedRevision: values.revision }),
           ["globalRegex"]
         )
-        if (result.ok) revision = result.value.revision
+        if (result.ok) {
+          revision = result.value.revision
+          setLatest(result.value)
+        }
         return result.ok
       },
       (text) => JSON.stringify({ ...JSON.parse(text), revision })
@@ -65,18 +138,18 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
       }}
     >
       <UserDraftStatus draft={durable} history />
-      {values.revision !== saved.revision && (
+      {values.revision !== currentSaved.revision && (
         <Alert tone="warning" title="The global scripts changed in another tab or device">
           <p>
             Your changes are based on an earlier version. Saved now:{" "}
-            {saved.scripts.map((script) => script.name || "Unnamed script").join(", ") || "no scripts"}.
+            {currentSaved.scripts.map((script) => script.name || "Unnamed script").join(", ") || "no scripts"}.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
               hint="When you save, your list replaces the saved one."
               onClick={() => {
                 action.clearError()
-                durable.setText(JSON.stringify({ ...values, revision: saved.revision }))
+                durable.setText(JSON.stringify({ ...values, revision: currentSaved.revision }))
               }}
             >
               Keep my changes over them
@@ -109,6 +182,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
                   binding={{ kind: "local", script, change: (patch) => change(index, patch) }}
                   place={`regex-script:global:${script.id}`}
                   opening={added === script.id}
+                  onToggle={(on) => void toggle(index, on)}
                   actions={
                     <>
                       <Button

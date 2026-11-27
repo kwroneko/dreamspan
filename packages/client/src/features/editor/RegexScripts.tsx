@@ -423,6 +423,7 @@ export function ScriptItem({
   binding,
   place,
   opening = false,
+  onToggle,
   actions
 }: {
   script: RegexScript
@@ -432,6 +433,8 @@ export function ScriptItem({
   place: string
   /** Opens it now: search went to one of its fields, or it was just added. */
   opening?: boolean
+  /** Overrides the row's on/off switch (e.g. GlobalRegexPage saving saved scripts immediately). */
+  onToggle?: (on: boolean) => void
   /** Under the fields: delete, and moves in a list that orders its scripts. */
   actions: ReactNode
 }) {
@@ -444,9 +447,11 @@ export function ScriptItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opening])
   const setOn = (on: boolean) =>
-    binding.kind === "store"
-      ? binding.store.setValue([...binding.at, "disabled"], !on)
-      : binding.change({ disabled: !on })
+    onToggle
+      ? onToggle(on)
+      : binding.kind === "store"
+        ? binding.store.setValue([...binding.at, "disabled"], !on)
+        : binding.change({ disabled: !on })
   return (
     <li className="flex flex-col gap-2 py-2">
       <div className="flex items-center justify-between gap-2">

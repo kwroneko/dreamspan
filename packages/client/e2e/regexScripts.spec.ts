@@ -202,6 +202,26 @@ for (const width of [1440, 390])
         markdown_only: true,
         run_on_edit: true
       })
+      // Toggling a saved global script saves its on/off state immediately without clicking Save.
+      const savedSwitch = list.getByRole("switch", { name: `Run ${name}`, exact: true })
+      await savedSwitch.click()
+      await expect(savedSwitch).not.toBeChecked()
+      await expect
+        .poll(async () => {
+          const current = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetGlobalRegex())
+          return current.scripts.find((script) => script.name === name)?.disabled
+        })
+        .toBe(true)
+      await page.reload()
+      await expect(list.getByRole("switch", { name: `Run ${name}`, exact: true })).not.toBeChecked()
+      await list.getByRole("switch", { name: `Run ${name}`, exact: true }).click()
+      await expect(list.getByRole("switch", { name: `Run ${name}`, exact: true })).toBeChecked()
+      await expect
+        .poll(async () => {
+          const current = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetGlobalRegex())
+          return current.scripts.find((script) => script.name === name)?.disabled
+        })
+        .toBe(false)
       await context.close()
     })
 
