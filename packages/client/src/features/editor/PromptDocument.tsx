@@ -723,7 +723,7 @@ const withOpen = (opened: Opened, id: string, open: boolean): Opened => {
 
 /** The large editor's outline of names, beside the document: resizable, its width in the browser tab's URL. */
 function Outline({ children }: { children: ReactNode }) {
-  const { ref, width, min, max, change, reset } = useInnerPanelWidth("presetOutline", 240, 140, 560, 480)
+  const { ref, width, min, max, change, reset } = useInnerPanelWidth("presetOutline", 240, 170, 560, 480)
   return (
     <nav
       ref={ref}
@@ -918,6 +918,13 @@ export function PromptDocument({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goTo])
   const setOrder = (next: ReadonlyArray<PromptOrderEntry>) => writePresetOrder(store, next)
+  const setPromptEnabled = (identifier: string, enabled: boolean) =>
+    writePresetOrder(
+      store,
+      presetOrder(store.value(["prompts"]) as PresetPrompt[], store.value(["order"]) as PromptOrderEntry[]).map((e) =>
+        e.identifier === identifier ? { ...e, enabled } : e
+      )
+    )
   const move = (from: number, to: number) => {
     const next = [...order]
     next.splice(to, 0, ...next.splice(from, 1))
@@ -1284,12 +1291,44 @@ export function PromptDocument({
                 items={order}
                 itemKey={(e) => e.identifier}
                 itemLabel={(e) => names.get(e.identifier) ?? e.identifier}
+                itemClassName={(e) =>
+                  `${e.enabled ? "text-text" : "text-muted opacity-55"} ${e.identifier === "chatHistory" ? "font-semibold" : ""}`
+                }
                 label="Outline order"
                 namesAsHandles
                 onSelect={(e) => jump(e.identifier)}
                 onMove={move}
               >
-                {(_e, handle) => handle}
+                {(e, handle) => {
+                  const label = names.get(e.identifier) ?? e.identifier
+                  return (
+                    <div
+                      data-outline-item={e.identifier}
+                      data-enabled={e.enabled ? "true" : "false"}
+                      className="flex min-w-0 items-center gap-1 rounded-md hover:bg-surface-raised"
+                    >
+                      {handle}
+                      {e.identifier === "newestMessage" ? (
+                        <span aria-hidden="true" className="w-7 shrink-0" />
+                      ) : (
+                        <span className="flex w-7 shrink-0 items-center justify-center pr-1">
+                          <Tooltip label={e.enabled ? `Stops sending ${label}.` : `Sends ${label}.`}>
+                            <span className="inline-flex">
+                              <Switch
+                                size="mini"
+                                labelHidden
+                                checked={e.enabled}
+                                onCheckedChange={(enabled) => setPromptEnabled(e.identifier, enabled)}
+                              >
+                                <span className="sr-only">Toggle {label}</span>
+                              </Switch>
+                            </span>
+                          </Tooltip>
+                        </span>
+                      )}
+                    </div>
+                  )
+                }}
               </SortableList>
             </Outline>
             {list}

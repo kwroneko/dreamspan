@@ -49,6 +49,7 @@ export function SortableList<Item>({
   items,
   itemKey,
   itemLabel,
+  itemClassName,
   onMove,
   label,
   namesAsHandles = false,
@@ -59,6 +60,8 @@ export function SortableList<Item>({
   itemKey: (item: Item) => string
   /** Names the item in its handle's label: "Move <label>". */
   itemLabel: (item: Item) => string
+  /** Extra classes for the handle button (e.g. enabled vs. disabled contrast in an outline). */
+  itemClassName?: (item: Item) => string
   onMove: (from: number, to: number) => void
   label: string
   namesAsHandles?: boolean
@@ -151,6 +154,7 @@ export function SortableList<Item>({
                 <SortableHandle
                   itemId={key}
                   itemLabel={itemLabel(item)}
+                  className={itemClassName?.(item)}
                   named={namesAsHandles}
                   hint={hint}
                   handlesRef={handlesRef}
@@ -173,6 +177,7 @@ const SortableHandle = memo(SortableHandleContent) as typeof SortableHandleConte
 function SortableHandleContent<Item>({
   itemId,
   itemLabel,
+  className,
   named,
   hint,
   handlesRef,
@@ -182,6 +187,7 @@ function SortableHandleContent<Item>({
 }: {
   itemId: string
   itemLabel: string
+  className?: string | undefined
   named: boolean
   hint: string
   handlesRef: RefObject<Map<string, HTMLButtonElement>>
@@ -205,7 +211,7 @@ function SortableHandleContent<Item>({
         aria-label={`Move ${itemLabel}`}
         data-layout-audit-ignore={named ? "inset: Named drag handle is the whole outline row" : undefined}
         aria-describedby={hint}
-        className={`${named ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
+        className={`${named ? "min-w-0 flex-1 gap-1.5 px-1.5 text-left text-xs" : "size-8 justify-center text-muted hover:bg-surface-raised hover:text-text"} flex min-h-8 shrink-0 cursor-grab touch-none items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing ${className ?? (named ? "text-muted hover:bg-surface-raised hover:text-text" : "")}`}
         onKeyDown={(event) => {
           const state = latestRef.current
           const index = state.items.findIndex((item) => state.itemKey(item) === itemId)
@@ -246,7 +252,14 @@ function SortableHandleContent<Item>({
           setDrag(null)
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+          className={named ? "shrink-0 text-muted opacity-65" : undefined}
+        >
           <circle cx="5.5" cy="3.5" r="1.25" />
           <circle cx="10.5" cy="3.5" r="1.25" />
           <circle cx="5.5" cy="8" r="1.25" />

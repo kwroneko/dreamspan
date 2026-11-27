@@ -221,6 +221,7 @@ export function Switch({
   labelHidden: hideLabel = false,
   disabled = false,
   compact = false,
+  size = "default",
   mixed = false
 }: {
   /** The values it stands for differ (several entries at once): the thumb sits in the middle. */
@@ -237,6 +238,8 @@ export function Switch({
   hint?: string | undefined
   /** A small, muted, centred row (a card's header), with its hint only in the tooltip. */
   compact?: boolean
+  /** `mini`: a compact 24×14 track for dense lists such as the preset outline. */
+  size?: "default" | "mini"
   /** An explanation shown elsewhere (a row's own line), read as its description. */
   describedBy?: string | undefined
   /** A switch beside its own visible title: keep its label out of the flex layout. */
@@ -254,9 +257,10 @@ export function Switch({
         {about}
       </AboutHint>
     ) : null)
+  const mini = size === "mini"
   const Row = help ? "div" : "label"
   const row = (
-    <Row className={`flex min-w-0 ${compact ? "items-center gap-2" : "items-start gap-3"}`}>
+    <Row className={`flex min-w-0 ${compact || mini ? "items-center gap-2" : "items-start gap-3"}`}>
       <BaseSwitch.Root
         id={id}
         disabled={disabled}
@@ -270,10 +274,10 @@ export function Switch({
                 .join(" ")
             }
           : {})}
-        className={`${compact ? "" : "mt-0.5"} flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
+        className={`${compact || mini ? "" : "mt-0.5"} ${mini ? "h-3.5 w-6 p-px" : "h-5 w-9 p-0.5"} flex shrink-0 rounded-full border border-border bg-surface-raised transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
       >
         <BaseSwitch.Thumb
-          className={`size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none ${mixed ? "translate-x-2 opacity-60" : ""}`}
+          className={`${mini ? "size-2.5 data-checked:translate-x-2.5" : "size-3.5 data-checked:translate-x-4"} rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:bg-accent-contrast motion-reduce:transition-none ${mixed ? (mini ? "translate-x-1 opacity-60" : "translate-x-2 opacity-60") : ""}`}
         />
       </BaseSwitch.Root>
       <ChoiceLabel

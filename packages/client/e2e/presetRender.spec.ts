@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { expect, test } from "@playwright/test"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectSaveState, NOTHING_TO_SAVE, UNSAVED } from "./support/saveRevision.ts"
 
@@ -107,3 +108,48 @@ for (const width of [1440, 390])
         (await page.evaluate(() => (window as unknown as { __handleRenders: number }).__handleRenders)) - handlesBefore
       ).toBe(0)
     })
+
+for (const theme of ["light", "dark"] as const)
+  test(`prompt outline shows enabled/disabled state and toggles inline: ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const data = readFileSync(new URL("../../server/test/fixtures/presets/default.json", import.meta.url))
+    const response = await page.request.post(`${server().url}/library/import?name=outline-toggle-${theme}.json`, {
+      data,
+      headers: { origin: server().url, "content-type": "application/octet-stream" }
+    })
+    expect(response.ok()).toBe(true)
+    const refId = ((await response.json()) as { library: { ref: { id: string } } }).library.ref.id
+    await page.goto(`${server().url}/library/${refId}`)
+    await expectSaveState(page, NOTHING_TO_SAVE)
+
+    const outline = page.getByRole("navigation", { name: "Prompt outline", exact: true })
+    await expect(outline).toBeVisible()
+
+    // Enabled prompt shows checked mini toggle and data-enabled="true".
+    const mainRow = outline.locator('[data-outline-item="main"]')
+    const mainToggle = outline.getByRole("switch", { name: "Toggle Main Prompt", exact: true })
+    await expect(mainRow).toHaveAttribute("data-enabled", "true")
+    await expect(mainToggle).toBeChecked()
+
+    // Toggling off in the outline updates both the outline row and the main prompt block switch.
+    await mainToggle.click()
+    await expect(mainRow).toHaveAttribute("data-enabled", "false")
+    await expect(mainToggle).not.toBeChecked()
+    await expect(page.getByRole("switch", { name: "Send Main Prompt", exact: true })).not.toBeChecked()
+    await expectSaveState(page, UNSAVED)
+
+    // Toggling back on from the main prompt block updates the outline row too.
+    await page.getByRole("switch", { name: "Send Main Prompt", exact: true }).click()
+    await expect(mainRow).toHaveAttribute("data-enabled", "true")
+    await expect(mainToggle).toBeChecked()
+
+    // Newest message is always on and has no switch in the outline.
+    const newestRow = outline.locator('[data-outline-item="newestMessage"]')
+    if ((await newestRow.count()) > 0) {
+      await expect(newestRow.getByRole("switch")).toHaveCount(0)
+    }
+
+    await expectLayout(page, info, `preset-outline-${theme}`, { scope: 'nav[aria-label="Prompt outline"]' })
+  })
