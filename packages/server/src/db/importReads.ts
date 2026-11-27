@@ -1,3 +1,4 @@
+import { mediaReferenceHeldBy } from "./media.ts"
 import { listed } from "./listedChats.ts"
 // Read handlers for importing and exporting library files (ARCHITECTURE.md §11).
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -32,9 +33,7 @@ export const makeImportReadHandlers = Effect.gen(function* () {
       : sql<{ path: string; mime: string; byteSize: number }>`
           SELECT m.path, m.mime, m.byte_size AS byteSize FROM media_assets m
           WHERE m.id = ${mediaId}
-            AND EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = m.id AND r.owner_user_id = ${userId})`.pipe(
-          Effect.map(([row]) => row)
-        )
+            AND ${mediaReferenceHeldBy(sql, "m.id", userId)}`.pipe(Effect.map(([row]) => row))
 
   const handlers = {
     GetCardImportNote: ({ userId, cardRefId }) =>

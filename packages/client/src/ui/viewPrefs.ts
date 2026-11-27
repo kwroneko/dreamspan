@@ -1,7 +1,7 @@
 // Account-owned viewer choices. Each account has its own query, including when users
 // sign out and back in in the same tab. Writes patch one choice in the writer transaction.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefs, type DisplayPrefsChange } from "@dreamspan/shared/chatApi.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { Effect } from "effect"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -14,6 +14,8 @@ const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined"
     ? null
     : new BroadcastChannel("dreamspan.displayPrefs")
+
+export const notifyDisplayPrefsChanged = () => channel?.postMessage("changed")
 
 const writesFor = Atom.family((_userId: string) => Atom.make(new PreferenceWrites()))
 const prefsFor = Atom.family((userId: string) =>
@@ -50,7 +52,11 @@ export function useViewPrefs() {
     if (AsyncResult.isSuccess(result) && !result.waiting) writes.confirm(result.value.revision)
   }, [writes, result, optimistic])
   return {
-    prefs: { ...prefs, ...optimistic },
+    prefs: {
+      ...prefs,
+      ...optimistic,
+      chatBackground: { ...prefs.chatBackground, ...optimistic.chatBackground }
+    } satisfies DisplayPrefs,
     ready: AsyncResult.isSuccess(result),
     pending: action.pending,
     error: action.error,
@@ -67,7 +73,7 @@ export function useViewPrefs() {
               Effect.tap(() =>
                 Effect.sync(() => {
                   acknowledge()
-                  channel?.postMessage("changed")
+                  notifyDisplayPrefsChanged()
                 })
               )
             ),

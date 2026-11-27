@@ -1,3 +1,4 @@
+import { BACKGROUNDS_KEY, BackgroundHolds, readBackgroundHolds } from "./backgroundMedia.ts"
 import { PluginPins } from "@dreamspan/shared/plugins.ts"
 import { ExternalMediaPrefs } from "@dreamspan/shared/externalMedia.ts"
 import { MediaHosts } from "@dreamspan/shared/savedMedia.ts"
@@ -44,6 +45,7 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   },
   { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
   { id: "media.saved.hosts", scope: "user", schema: MediaHosts },
+  { id: BACKGROUNDS_KEY, scope: "user", schema: BackgroundHolds },
   { id: "display", scope: "user", schema: DisplayPrefs, agent: { description: "How chats are displayed." } },
   // One-time notices shown, by notice. Nothing writes it since the impersonation notice was
   // removed (2026-11-21); kept registered so rows already stored still read.
@@ -212,6 +214,19 @@ export const writeSetting = Effect.fnUntraced(function* (
       expected: expectedRevision,
       actual: stored.revision
     })
+  // Other account setting writers (including settings undo) use the same ownership boundary.
+  if (key === "display" && Schema.is(DisplayPrefs)(value)) {
+    const choices = [value.chatBackground.mediaId, ...Object.values(value.chatBackgrounds)]
+    if (choices.some((id) => id !== null)) {
+      const gallery = new Set((yield* readBackgroundHolds(sql, scopeId)).map(({ mediaId }) => mediaId))
+      if (choices.some((id) => id !== null && !gallery.has(id)))
+        return yield* new StorageError({
+          operation: "writeSetting",
+          reason: "constraint",
+          message: "Chat backgrounds must belong to your gallery."
+        })
+    }
+  }
   const revision = stored.revision + 1
   yield* sql`INSERT INTO settings (scope, scope_id, key, value_json, revision, updated_at)
     VALUES (${scope}, ${scopeId}, ${key}, ${JSON.stringify(value)}, ${revision}, ${Date.now()})

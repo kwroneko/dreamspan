@@ -1,3 +1,4 @@
+import { ChatBackdrop } from "./ChatBackdrop.tsx"
 import { useCoverageRail, useSummariesInChat } from "./chatViewParams.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useSummariesOfUrl } from "./SummaryViewer.tsx"
@@ -1128,6 +1129,7 @@ function ChatSurface({
         >
           <SlotOutlet slot={chatColumns} props={{ wide }} />
           <div ref={chatMain} data-chat-main tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col">
+            <ChatBackdrop prefs={prefs} chatId={started ? view.chat?.id : undefined} />
             <ChatHeader
               session={session}
               view={view}

@@ -2,6 +2,12 @@
 // selection or a text carry the row version the client saw (StaleWrite otherwise); a new
 // message names the tip it was written under (LeafMoved otherwise).
 import { Schema } from "effect"
+import {
+  ChatBackground,
+  ChatBackgroundChange,
+  ChatBackgroundOverrides,
+  DEFAULT_CHAT_BACKGROUND
+} from "./chatBackgrounds.ts"
 import { RolloutStep } from "./agent.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem, CannotDeleteLastFork } from "./bin.ts"
@@ -146,6 +152,8 @@ const displayFields = {
   panelDepth: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
+  chatBackground: ChatBackground,
+  chatBackgrounds: ChatBackgroundOverrides,
   /**
    * "Message spacing": how much room messages take in a chat. `compact` tightens the gaps,
    * the text's line and paragraph spacing and the name row, and shows a message's version
@@ -213,6 +221,9 @@ export const DisplayPrefsChange = Schema.Struct({
   panelDepth: Schema.optionalKey(displayFields.panelDepth),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
+  chatBackground: Schema.optionalKey(ChatBackgroundChange),
+  chatBackgrounds: Schema.optionalKey(ChatBackgroundOverrides),
+  inheritChatBackground: Schema.optionalKey(ChatId),
   chatDensity: Schema.optionalKey(displayFields.chatDensity),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
@@ -248,6 +259,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   panelDepth: null,
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
+  chatBackground: DEFAULT_CHAT_BACKGROUND,
+  chatBackgrounds: {},
   chatDensity: "comfortable",
   presetSort: "name",
   modelSort: "name",
@@ -1033,7 +1046,11 @@ export class ChatApi extends RpcGroup.make(
   /** The user's display choices (reasoning shown open or folded while it streams). */
   Rpc.make("GetDisplayPrefs", { payload: {}, success: DisplayPrefs, error: ServerError }),
   /** Changes the user's display choices; answers with them as now stored. */
-  Rpc.make("SetDisplayPrefs", { payload: { prefs: DisplayPrefsChange }, success: DisplayPrefs, error: ServerError }),
+  Rpc.make("SetDisplayPrefs", {
+    payload: { prefs: DisplayPrefsChange },
+    success: DisplayPrefs,
+    error: Schema.Union([NotFound, ServerError])
+  }),
   /**
    * The alternates at `slotId`'s place (it and its siblings a path can reach), oldest first,
    * each with its first words as `forkId` (absent or null: the fork through it) shows them.

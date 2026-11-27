@@ -73,8 +73,7 @@ export const registerDisplay = () => [
     description: "Change how chats look and send, including colours and what Enter does.",
     order: 85,
     icon: "type",
-    component: DisplaySettings,
-    // The account's, so the same before the first send.
-    pending: DisplaySettings
+    component: ({ view }) => <DisplaySettings chatId={view.chat?.status === "pending" ? undefined : view.chat?.id} />,
+    pending: () => <DisplaySettings />
   })
 ]

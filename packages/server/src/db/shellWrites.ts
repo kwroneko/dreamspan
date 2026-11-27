@@ -1,3 +1,4 @@
+import { mediaReferenceHeldBy } from "./media.ts"
 import { refusePending, refusePendingOf } from "./chatKindPolicy.ts"
 import { splitGroups } from "./splitChats.ts"
 import { putUserSetting } from "./settings.ts"
@@ -68,7 +69,7 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
         if (mediaId !== null) {
           // Only an image the account already holds (an upload of theirs): never another account's file.
           const [held] = yield* sql<{ mime: string }>`SELECT m.mime FROM media_assets m
-            JOIN media_refs r ON r.media_id = m.id AND r.owner_user_id = ${userId} WHERE m.id = ${mediaId}`
+            WHERE m.id = ${mediaId} AND ${mediaReferenceHeldBy(sql, "m.id", userId)}`
           if (!held || !PICTURE_TYPES.has(held.mime)) return yield* new NotFound({ entity: "media", id: mediaId })
         }
         const [chat] = yield* sql<{ id: string; cover_media_id: string | null }>`SELECT id, cover_media_id FROM chats

@@ -1,3 +1,6 @@
+import { CHAT_BACKGROUNDS_ROUTE, CHAT_BACKGROUND_MEDIA_ROUTE } from "@dreamspan/shared/chatBackgrounds.ts"
+import { MAX_BACKGROUNDS } from "../db/backgroundMedia.ts"
+import { makeMediaLimits } from "../net/mediaLimits.ts"
 // Files into and out of the library over plain HTTP (ARCHITECTURE.md §11.4). RPC messages
 // are JSON, so a file would cross as base64: a third larger, and decoded whole on the main
 // thread. Both routes act as the user the session names, behind the same cross-site guard
@@ -47,7 +50,7 @@ import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@dreamspan/shared/stFolder.ts"
 import { StFileResult } from "@dreamspan/shared/stImportApi.ts"
 import { describeImage } from "./images.ts"
-import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
+import { discardMedia, readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { withSourceLink } from "./sourceLink.ts"
 import { readFile, stat } from "node:fs/promises"
@@ -963,131 +966,178 @@ export const layer = Layer.unwrap(
         )
       )
 
-    const uploadMessageImage = Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const user = yield* CurrentUser
-      if (request.headers["content-type"] !== "application/octet-stream") {
-        return jsonError(415, "expected application/octet-stream")
-      }
-      if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
-        return jsonError(413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
-      }
-      const message = NodeHttpServerRequest.toIncomingMessage(request)
-      const limits = {
-        maxBytes: MAX_AVATAR_BYTES,
-        idleMs: BODY_IDLE_MS,
-        deadline: Date.now() + BODY_DEADLINE_MS,
-        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
-        rateWindowMs: BODY_RATE_WINDOW_MS
-      }
-      return yield* oneAtATime(
-        user.id,
-        Effect.gen(function* () {
-          yield* firstBytes(message, limits)
-          const taken = yield* withPermitWithin(
-            uploads,
-            limits.deadline - Date.now(),
-            Effect.gen(function* () {
-              const body = yield* readBody(message, limits)
-              const image = describeImage(body)
-              if (!INLINE_IMAGES.has(image.mime)) {
-                return jsonError(415, "an image must be a PNG, JPEG, GIF or WebP image")
-              }
-              if (!(yield* formats.validateImage(body))) {
-                return jsonError(
-                  415,
-                  "The image couldn’t be read. Choose a complete PNG, JPEG, GIF or WebP up to 40 million pixels."
+    const backgroundLimits = makeMediaLimits()
+    const discardBackgroundBytes = (sha256: string) =>
+      discardMedia(
+        config.dataDir,
+        sha256,
+        Effect.suspend(() => (pending.has(sha256) ? Effect.succeed(true) : reader.IsMediaRecorded({ sha256 })))
+      )
+
+    const uploadImage = (background: boolean) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const user = yield* CurrentUser
+        if (request.headers["content-type"] !== "application/octet-stream") {
+          return jsonError(415, "expected application/octet-stream")
+        }
+        if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
+          return jsonError(413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
+        }
+        const name = fileNameFrom(new URL(request.url, "http://upload").searchParams.get("name")) || "Background"
+        const message = NodeHttpServerRequest.toIncomingMessage(request)
+        const limits = {
+          maxBytes: MAX_AVATAR_BYTES,
+          idleMs: BODY_IDLE_MS,
+          deadline: Date.now() + BODY_DEADLINE_MS,
+          minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+          rateWindowMs: BODY_RATE_WINDOW_MS
+        }
+        const transfer = oneAtATime(
+          user.id,
+          Effect.gen(function* () {
+            yield* firstBytes(message, limits)
+            const taken = yield* withPermitWithin(
+              uploads,
+              limits.deadline - Date.now(),
+              Effect.gen(function* () {
+                const body = yield* readBody(message, limits)
+                const image = describeImage(body)
+                if (!INLINE_IMAGES.has(image.mime)) {
+                  return jsonError(415, "an image must be a PNG, JPEG, GIF or WebP image")
+                }
+                if (!(yield* formats.validateImage(body))) {
+                  return jsonError(
+                    415,
+                    "The image couldn’t be read. Choose a complete PNG, JPEG, GIF or WebP up to 40 million pixels."
+                  )
+                }
+                const sha256 = createHash("sha256").update(body).digest("hex")
+                const media = { sha256, byteSize: body.byteLength, ...image }
+                const mediaId = yield* holding(
+                  [sha256],
+                  Effect.andThen(
+                    storeMedia(config.dataDir, sha256, body),
+                    background
+                      ? writer.RecordChatBackground({ userId: user.id, name, media })
+                      : writer.RecordMessageImage({ userId: user.id, media })
+                  )
                 )
-              }
-              const sha256 = createHash("sha256").update(body).digest("hex")
-              const change = yield* holding(
-                [sha256],
-                Effect.andThen(
-                  storeMedia(config.dataDir, sha256, body),
-                  writer.RecordMessageImage({
-                    userId: user.id,
-                    media: { sha256, byteSize: body.byteLength, ...image }
-                  })
-                )
-              )
-              return HttpServerResponse.jsonUnsafe({ mediaId: change })
+                if (mediaId === null) {
+                  yield* discardBackgroundBytes(sha256)
+                  return jsonError(409, `Your gallery already has ${MAX_BACKGROUNDS} backgrounds.`)
+                }
+                return HttpServerResponse.jsonUnsafe({ mediaId })
+              })
+            )
+            return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+          }).pipe(
+            Effect.catchTag("BodyRefused", ({ reason }) => {
+              const [status, text] =
+                reason === "too_large"
+                  ? ([413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`] as const)
+                  : BODY_REFUSALS[reason]
+              return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
             })
           )
-          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
-        }).pipe(
-          Effect.catchTag("BodyRefused", ({ reason }) => {
-            const [status, text] = BODY_REFUSALS[reason]
-            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
-          })
+        )
+        if (!background) return yield* transfer
+        const release = backgroundLimits.acquire(user.id)
+        if (!release) return jsonError(429, "Too many image uploads. Try again shortly.")
+        return yield* transfer.pipe(Effect.ensuring(Effect.sync(release)))
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logError("an image upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
         )
       )
+
+    const listBackgrounds = Effect.gen(function* () {
+      const user = yield* CurrentUser
+      const gallery = yield* reader.ListChatBackgrounds({ userId: user.id })
+      return HttpServerResponse.jsonUnsafe(gallery, { headers: { "cache-control": "no-store" } })
+    }).pipe(Effect.catch(() => Effect.succeed(jsonError(500, "the backgrounds couldn't be loaded"))))
+
+    const deleteBackground = Effect.gen(function* () {
+      const user = yield* CurrentUser
+      const mediaId = (yield* HttpRouter.params).id ?? ""
+      const discardedHash = yield* writer.DeleteChatBackground({ userId: user.id, mediaId })
+      if (discardedHash) yield* discardBackgroundBytes(discardedHash)
+      return HttpServerResponse.empty({ status: 204 })
     }).pipe(
-      Effect.catch((error) =>
-        Effect.logError("an image upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
-      )
+      Effect.uninterruptible,
+      Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such background"))),
+      Effect.catch(() => Effect.succeed(jsonError(500, "the background couldn't be removed")))
     )
 
     /** A stored image the user holds a reference to, for an `<img>` on this site only. */
-    const mediaFile = Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const user = yield* CurrentUser
-      const query = new URL(request.url, "http://media").searchParams
-      const mediaId = query.get("id") ?? ""
-      const file = yield* reader.GetMediaFile({ userId: user.id, mediaId, includeStaged: true })
-      // Only images a browser shows as images; anything else stored is never served inline.
-      if (!INLINE_IMAGES.has(file.mime)) return jsonError(404, "there's no such image")
-      const requested = query.get("w")
-      const width = requested === null ? Option.none<number>() : Schema.decodeUnknownOption(WidthQuery)(requested)
-      if (requested !== null && Option.isNone(width)) {
-        return jsonError(400, "w must be a positive pixel width")
-      }
-      // A portrait's cutout (§14.5c): `auto` (the default) or the chosen one, as `cropKey` names it.
-      const cropQuery = query.get("crop")
-      const crop = cropQuery === null ? undefined : parseCropKey(cropQuery)
-      if (cropQuery !== null && (crop === undefined || Option.isNone(width))) {
-        return jsonError(400, "crop must name a cutout inside the image, with a width")
-      }
-      const pictureQuery = query.get("picture")
-      const picture = pictureQuery === null ? null : parseCropKey(pictureQuery)
-      if (pictureQuery !== null && !picture) return jsonError(400, "picture must name a crop")
-      const derivative = picture
-        ? yield* thumbnail(file.path, 0, picture)
-        : Option.isNone(width)
-          ? null
-          : yield* thumbnail(file.path, mediaWidth(width.value), crop)
-      const path = derivative?.path ?? file.path
-      const original = derivative === null || derivative.original
-      const headers = {
-        "cache-control": "private, max-age=31536000, immutable",
-        "x-content-type-options": "nosniff",
-        etag: `"${path.split("/").pop()!}"`
-      }
-      const exists = yield* Effect.promise(() =>
-        stat(join(config.dataDir, path)).then(
-          () => true,
-          () => false
+    const mediaFile = (background = false) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const user = yield* CurrentUser
+        const query = new URL(request.url, "http://media").searchParams
+        const mediaId = (background ? (yield* HttpRouter.params).id : query.get("id")) ?? ""
+        const file = yield* reader.GetMediaFile({
+          userId: user.id,
+          mediaId,
+          includeStaged: true,
+          backgroundOnly: background
+        })
+        // Only images a browser shows as images; anything else stored is never served inline.
+        if (!INLINE_IMAGES.has(file.mime)) return jsonError(404, "there's no such image")
+        const requested = query.get("w")
+        const width = requested === null ? Option.none<number>() : Schema.decodeUnknownOption(WidthQuery)(requested)
+        if (requested !== null && Option.isNone(width)) {
+          return jsonError(400, "w must be a positive pixel width")
+        }
+        // A portrait's cutout (§14.5c): `auto` (the default) or the chosen one, as `cropKey` names it.
+        const cropQuery = query.get("crop")
+        const crop = cropQuery === null ? undefined : parseCropKey(cropQuery)
+        if (cropQuery !== null && (crop === undefined || Option.isNone(width))) {
+          return jsonError(400, "crop must name a cutout inside the image, with a width")
+        }
+        const pictureQuery = query.get("picture")
+        const picture = pictureQuery === null ? null : parseCropKey(pictureQuery)
+        if (pictureQuery !== null && !picture) return jsonError(400, "picture must name a crop")
+        const derivative = picture
+          ? yield* thumbnail(file.path, 0, picture)
+          : Option.isNone(width)
+            ? null
+            : yield* thumbnail(file.path, mediaWidth(width.value), crop)
+        const path = derivative?.path ?? file.path
+        const original = derivative === null || derivative.original
+        const headers = {
+          "cache-control": background ? "private, no-store" : "private, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+          etag: `"${path.split("/").pop()!}"`
+        }
+        const exists = yield* Effect.promise(() =>
+          stat(join(config.dataDir, path)).then(
+            () => true,
+            () => false
+          )
+        )
+        if (!exists) return jsonError(404, "there's no such image")
+        if (
+          request.headers["if-none-match"]
+            ?.split(",")
+            .some((tag) => tag.trim().replace(/^W\//, "") === headers.etag || tag.trim() === "*")
+        ) {
+          return HttpServerResponse.empty({ status: 304, headers })
+        }
+        const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, path)))
+        return HttpServerResponse.uint8Array(bytes, {
+          contentType: original ? file.mime : picture ? "image/png" : "image/webp",
+          headers
+        })
+      }).pipe(
+        Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such image"))),
+        Effect.catchTag("ThumbnailFailed", () => Effect.succeed(jsonError(404, "there's no such image"))),
+        Effect.catch((error) =>
+          Effect.logError("reading a media file failed", error).pipe(
+            Effect.as(jsonError(500, "the file can't be read"))
+          )
         )
       )
-      if (!exists) return jsonError(404, "there's no such image")
-      if (
-        request.headers["if-none-match"]
-          ?.split(",")
-          .some((tag) => tag.trim().replace(/^W\//, "") === headers.etag || tag.trim() === "*")
-      ) {
-        return HttpServerResponse.empty({ status: 304, headers })
-      }
-      const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, path)))
-      return HttpServerResponse.uint8Array(bytes, {
-        contentType: original ? file.mime : picture ? "image/png" : "image/webp",
-        headers
-      })
-    }).pipe(
-      Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such image"))),
-      Effect.catchTag("ThumbnailFailed", () => Effect.succeed(jsonError(404, "there's no such image"))),
-      Effect.catch((error) =>
-        Effect.logError("reading a media file failed", error).pipe(Effect.as(jsonError(500, "the file can't be read")))
-      )
-    )
 
     /**
      * Editor and composer drafts a page sends as it closes (`fetch` with `keepalive`), since its
@@ -1215,10 +1265,14 @@ export const layer = Layer.unwrap(
 
     return Layer.mergeAll(
       HttpRouter.add("POST", "/library/drafts", authenticated(accounts, leavingDrafts)),
-      HttpRouter.add("POST", "/chat/image", authenticated(accounts, uploadMessageImage)),
+      HttpRouter.add("POST", "/chat/image", authenticated(accounts, uploadImage(false))),
+      HttpRouter.add("GET", CHAT_BACKGROUNDS_ROUTE, authenticated(accounts, listBackgrounds)),
+      HttpRouter.add("POST", CHAT_BACKGROUNDS_ROUTE, authenticated(accounts, uploadImage(true))),
+      HttpRouter.add("DELETE", `${CHAT_BACKGROUNDS_ROUTE}/:id`, authenticated(accounts, deleteBackground)),
+      HttpRouter.add("GET", `${CHAT_BACKGROUND_MEDIA_ROUTE}/:id`, authenticated(accounts, mediaFile(true))),
       HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar())),
       HttpRouter.add("POST", "/library/gallery", authenticated(accounts, uploadAvatar(true))),
-      HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
+      HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile())),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
       HttpRouter.add("POST", "/library/chat-export", authenticated(accounts, exportChat)),

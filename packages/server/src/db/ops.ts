@@ -1,3 +1,4 @@
+import { ChatBackgroundGallery } from "@dreamspan/shared/chatBackgrounds.ts"
 import { DatabaseStartup } from "@dreamspan/shared/databaseStartup.ts"
 import {
   McpCall,
@@ -4379,6 +4380,26 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.String,
     error: StorageError
   }),
+  Rpc.make("RecordChatBackground", {
+    payload: {
+      userId: UserId,
+      name: Schema.String.check(Schema.isMaxLength(255)),
+      media: Schema.Struct({
+        sha256: Sha256,
+        mime: Schema.String,
+        byteSize: Schema.Int,
+        width: Schema.NullOr(Schema.Int),
+        height: Schema.NullOr(Schema.Int)
+      })
+    },
+    success: Schema.NullOr(Schema.String),
+    error: StorageError
+  }),
+  Rpc.make("DeleteChatBackground", {
+    payload: { userId: UserId, mediaId: Schema.String },
+    success: Schema.NullOr(Sha256),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** With `crop`, the cutout chosen for it (ARCHITECTURE.md §14.5c); without, the default. */
   Rpc.make("AddCardAsset", {
     payload: {
@@ -4917,7 +4938,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("SetDisplayPrefs", {
     payload: { userId: UserId, prefs: DisplayPrefsChange },
     success: DisplayPrefs,
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   // --- Card sources (spec/CARD-SOURCES.md §5.2): the account's choices, merged by source.
   Rpc.make("ChangeSourcePrefs", {
@@ -6104,6 +6125,7 @@ const ReadOpsOwn = RpcGroup.make(
       userId: UserId,
       mediaId: Schema.String,
       attachmentOnly: Schema.optionalKey(Schema.Boolean),
+      backgroundOnly: Schema.optionalKey(Schema.Boolean),
       includeStaged: Schema.optionalKey(Schema.Boolean)
     },
     success: StoredFile,
@@ -7277,6 +7299,7 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("ListChatBackgrounds", { payload: { userId: UserId }, success: ChatBackgroundGallery, error: StorageError }),
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   /** The account's card-source choices and recently viewed cards; the defaults where none are stored. */
   Rpc.make("GetSourcePrefs", { payload: { userId: UserId }, success: SourcePrefs, error: StorageError }),

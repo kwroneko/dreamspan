@@ -1,6 +1,6 @@
 // New image surfaces must inherit concealment and have an initials placeholder. This
-// catches a background URL (which an img selector cannot cover) or a raw feature image.
-// Images are only ever <img>; a file's own player may show another pixel element, which the
+// catches unregistered background URLs and raw feature images.
+// A file's own player may show another pixel element, which the
 // same root rule blurs or hides — those files are listed below, each with its reason.
 import { readdirSync, readFileSync } from "node:fs"
 import { resolve, relative } from "node:path"
@@ -22,7 +22,13 @@ it("keeps image pixels in the stock img surfaces covered by root CSS", () => {
   for (const file of files) {
     const source = readFileSync(file, "utf8")
     const path = relative(root, file)
-    expect(source, path).not.toMatch(/backgroundImage\s*:|background(?:-image)?\s*:[^;\n]*url\(/)
+    if (path === "features/chat/ChatBackdrop.tsx") {
+      // Tiling the wallpaper needs CSS. Its pixel layer has its own root concealment selector.
+      expect(source).toContain("data-wallpaper-pixels")
+      const css = readFileSync(resolve(root, "styles.css"), "utf8")
+      for (const mode of ["blur", "hide"])
+        expect(css).toMatch(new RegExp(`data-images="${mode}"[^\\n]*data-wallpaper-pixels`))
+    } else expect(source, path).not.toMatch(/backgroundImage\s*:|background(?:-image)?\s*:[^;\n]*url\(/)
     if (/<(?:canvas|video|picture|image)\b/.test(source)) pixels.push(path)
     if (file.endsWith(".tsx") && /<img\b/.test(source)) {
       images.push(path)

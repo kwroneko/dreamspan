@@ -1,6 +1,9 @@
 // Media files (DATA-MODEL §11): content-addressed under the data directory, recorded in
 // media_assets and reachable by a user only through their media_refs, or a copy they attached
 // from Files (`mediaHeldBy`).
+import { Effect } from "effect"
+import { uuidv7 } from "@dreamspan/shared/id.ts"
+import { backgroundHeldBy } from "./backgroundMedia.ts"
 import type { SqlClient } from "effect/sql"
 
 /** Where the file with this SHA-256 lives, relative to the data directory. */
@@ -17,13 +20,18 @@ export const attachmentHeldBy = (sql: SqlClient.SqlClient, column: string, userI
   sql`EXISTS (SELECT 1 FROM file_versions f WHERE f.media_id = ${sql.literal(column)}
     AND f.owner_user_id = ${userId} AND f.origin = 'attachment')`
 
+/** A durable account reference for media outside the gallery. */
+export const mediaReferenceHeldBy = (sql: SqlClient.SqlClient, column: string, userId: string) =>
+  sql`(EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = ${sql.literal(column)} AND r.owner_user_id = ${userId})
+    AND NOT ${backgroundHeldBy(sql, column, userId, true)})`
+
 /**
  * Whether `userId` holds the media in `column` (an SQL expression): a reference of theirs
  * (`media_refs`), or a copy they attached from Files (a `file_versions` row of origin
  * `attachment`, which goes when nothing names it, files/routes.ts `attach`).
  */
 export const mediaHeldBy = (sql: SqlClient.SqlClient, column: string, userId: string) =>
-  sql`(EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = ${sql.literal(column)} AND r.owner_user_id = ${userId})
+  sql`(${mediaReferenceHeldBy(sql, column, userId)}
     OR ${attachmentHeldBy(sql, column, userId)})`
 
 /**
@@ -54,3 +62,38 @@ export const discardUnheldMedia = (sql: SqlClient.SqlClient, mediaId: string) =>
     AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
     AND NOT EXISTS (SELECT 1 FROM swept_composer_files WHERE media_id = media_assets.id)
     RETURNING sha256`
+
+export interface MediaUpload {
+  readonly sha256: string
+  readonly mime: string
+  readonly byteSize: number
+  readonly width: number | null
+  readonly height: number | null
+}
+
+/** Records the shared bytes and reports whether this operation created the account's hold. */
+export const recordMediaReference = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: string,
+  file: MediaUpload,
+  verifiedImage?: true
+) {
+  yield* sql`INSERT INTO media_assets ${sql.insert({
+    id: uuidv7(),
+    sha256: file.sha256,
+    mime: file.mime,
+    width: file.width,
+    height: file.height,
+    byte_size: file.byteSize,
+    path: mediaPath(file.sha256),
+    created_at: Date.now()
+  })} ON CONFLICT (sha256) DO NOTHING`
+  if (verifiedImage)
+    yield* sql`UPDATE media_assets SET mime = ${file.mime}, width = ${file.width}, height = ${file.height}
+      WHERE sha256 = ${file.sha256} AND mime = 'application/octet-stream'`
+  const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${file.sha256}`
+  const mediaId = row!.id
+  const created = yield* sql`INSERT INTO media_refs ${sql.insert({ media_id: mediaId, owner_user_id: userId })}
+    ON CONFLICT DO NOTHING RETURNING media_id`
+  return { mediaId, created: created.length !== 0 }
+})

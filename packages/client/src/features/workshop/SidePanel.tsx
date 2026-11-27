@@ -34,6 +34,8 @@ import { usePlaceParam } from "../../usePlaceParam.ts"
 import { castView, CastContext } from "../chat/cast.ts"
 import { ChatPlaceScope, chatPlaceKey } from "../chat/chatPlace.ts"
 import { composerTextbox } from "../chat/composerFocus.ts"
+import { ChatBackdrop } from "../chat/ChatBackdrop.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { type Flashes, MessageList } from "../chat/ChatPage.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { NewBadge } from "../chat/ChatHeader.tsx"
@@ -456,6 +458,7 @@ function SideChatSurface({
   draft: SideDraftHost | null
 }) {
   const view: ChatView = useSyncExternalStore(session.subscribe, session.snapshot)
+  const { prefs } = useViewPrefs()
   // A new workshop's first turn started it: the tab shows it as any other, opening on what this
   // shows, with no loading state in between.
   const started = view.chat !== null && view.chat.status !== "pending"
@@ -561,6 +564,7 @@ function SideChatSurface({
             className="@container/chat flex min-h-0 flex-1 flex-col"
             style={{ ...kindRoot.style, "--chat-portrait-width": "48px" } as CSSProperties}
           >
+            {!changes && <ChatBackdrop prefs={prefs} chatId={started ? view.chat?.id : undefined} />}
             {header}
             {beside.length > 1 && (
               <SideBranchMenu session={session} view={view} beside={beside} shown={fork} onPick={onFork} />

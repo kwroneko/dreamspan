@@ -35,7 +35,9 @@ import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeLibraryReplaceWrites } from "./libraryReplaceWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
-import { mediaPath } from "./media.ts"
+import { mediaReferenceHeldBy, recordMediaReference, type MediaUpload } from "./media.ts"
+import { BACKGROUNDS_KEY, readBackgroundHolds } from "./backgroundMedia.ts"
+import { putUserSetting } from "./settings.ts"
 import { replacementConflict } from "./noteReplacementWrites.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { type FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
@@ -158,7 +160,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         ].filter((id) => id !== null && id !== undefined)
         for (const id of media) {
           const [held] = yield* sql<{ n: number }>`
-            SELECT count(*) AS n FROM media_refs WHERE media_id = ${String(id)} AND owner_user_id = ${userId}`
+            SELECT count(*) AS n FROM media_assets m WHERE m.id = ${String(id)} AND ${mediaReferenceHeldBy(sql, "m.id", userId)}`
           if (typeof id !== "string" || held!.n === 0) return yield* new NotFound({ entity: "media", id: String(id) })
         }
         const sharedScope = Predicate.isObject(doc.owner) ? doc.owner.shared : undefined
@@ -480,29 +482,20 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       })
 
     /** Records a file in media storage for the user; the same bytes are one row for everyone. */
-    const recordMedia = (
-      userId: string,
-      file: { sha256: string; mime: string; byteSize: number; width: number | null; height: number | null },
-      verifiedImage?: true
-    ) =>
-      Effect.gen(function* () {
-        yield* sql`INSERT INTO media_assets ${sql.insert({
-          id: uuidv7(),
-          sha256: file.sha256,
-          mime: file.mime,
-          width: file.width,
-          height: file.height,
-          byte_size: file.byteSize,
-          path: mediaPath(file.sha256),
-          created_at: Date.now()
-        })} ON CONFLICT (sha256) DO NOTHING`
-        if (verifiedImage)
-          yield* sql`UPDATE media_assets SET mime = ${file.mime}, width = ${file.width}, height = ${file.height}
-            WHERE sha256 = ${file.sha256} AND mime = 'application/octet-stream'`
-        const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${file.sha256}`
-        yield* sql`INSERT INTO media_refs ${sql.insert({ media_id: row!.id, owner_user_id: userId })} ON CONFLICT DO NOTHING`
-        return row!.id
-      })
+    const recordMedia = Effect.fnUntraced(function* (userId: string, file: MediaUpload, verifiedImage?: true) {
+      const { mediaId, created } = yield* recordMediaReference(sql, userId, file, verifiedImage)
+      if (!created) {
+        const gallery = yield* readBackgroundHolds(sql, userId)
+        if (gallery.some((entry) => entry.mediaId === mediaId && entry.galleryOnly))
+          yield* putUserSetting(
+            sql,
+            userId,
+            BACKGROUNDS_KEY,
+            gallery.map((entry) => (entry.mediaId === mediaId ? { ...entry, galleryOnly: false } : entry))
+          ).pipe(Effect.catchTag("StorageError", Effect.die))
+      }
+      return mediaId
+    })
 
     /**
      * ST's Character's Note as the card's first note: a new note, or a new import of the

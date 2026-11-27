@@ -1,3 +1,4 @@
+import { ChatBackdrop } from "./ChatBackdrop.tsx"
 import type { Draft } from "@dreamspan/shared/drafts.ts"
 import { useSidePanelPlace, useWorkbenchTab } from "../workbench/tab.tsx"
 import { greetingPick } from "@dreamspan/shared/greetings.ts"
@@ -476,6 +477,7 @@ function Pending({
       >
         <SlotOutlet slot={chatColumns} props={{ wide }} />
         <div ref={chatMain} data-chat-main tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col">
+          <ChatBackdrop prefs={prefs} />
           <PendingChatHeader
             pending={pending}
             view={view}

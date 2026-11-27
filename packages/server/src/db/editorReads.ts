@@ -1,3 +1,4 @@
+import { backgroundHeldBy } from "./backgroundMedia.ts"
 import { CardDoc } from "@dreamspan/shared/docs/card.ts"
 import { galleryAssets } from "@dreamspan/shared/gallery.ts"
 import { Schema } from "effect"
@@ -322,14 +323,16 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           .toSorted((a, b) => a.title.localeCompare(b.title) || (a.ref.id < b.ref.id ? -1 : 1))
       }).pipe(query("ListSharedNotes")),
 
-    GetMediaFile: ({ userId, mediaId, attachmentOnly, includeStaged }) =>
+    GetMediaFile: ({ userId, mediaId, attachmentOnly, backgroundOnly, includeStaged }) =>
       Effect.gen(function* () {
         const [file] = yield* sql<{ path: string; mime: string; byteSize: number }>`
           SELECT m.path, m.mime, m.byte_size AS byteSize FROM media_assets m
           WHERE m.id = ${mediaId} AND ${
-            attachmentOnly
-              ? attachmentHeldBy(sql, "m.id", userId)
-              : sql`(${mediaHeldBy(sql, "m.id", userId)}
+            backgroundOnly
+              ? backgroundHeldBy(sql, "m.id", userId)
+              : attachmentOnly
+                ? attachmentHeldBy(sql, "m.id", userId)
+                : sql`(${mediaHeldBy(sql, "m.id", userId)}
                 ${includeStaged ? sql`OR ${stagedAttachmentHeldBy(sql, "m.id", userId)}` : sql``})`
           }`
         if (!file || !isMediaPath(file.path)) return yield* new NotFound({ entity: "media", id: mediaId })

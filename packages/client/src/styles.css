@@ -679,15 +679,15 @@ main:has(> [data-fill]) {
 /*
  * Images in public (ui/imagePrefs.ts): the root's `data-images` blurs or hides every image
  * on every screen, a new one included, from the first frame (it's set before the app
- * renders). Images are only ever <img> elements (test/imageSurfaces.test.ts keeps it so);
- * the rest are listed so a later surface is covered too. A hidden image leaves its box: the
+ * renders). Stock images use <img> except the chat wallpaper, which needs CSS tiling.
+ * The other pixel surfaces are listed here too (test/imageSurfaces.test.ts). A hidden image leaves its box: the
  * element marked `data-image-fallback` beside it (initials, a name) shows instead.
  */
-:root[data-images="blur"] :is(img, video, canvas, picture, image) {
+:root[data-images="blur"] :is(img, video, canvas, picture, image, [data-wallpaper-pixels]) {
   filter: blur(var(--image-blur, 14px)) saturate(0.6) !important;
   clip-path: inset(0);
 }
-:root[data-images="hide"] :is(img, video, canvas, picture, image) {
+:root[data-images="hide"] :is(img, video, canvas, picture, image, [data-wallpaper-pixels]) {
   visibility: hidden !important;
 }
 [data-image-fallback] {
@@ -1198,4 +1198,56 @@ main:has(> [data-fill]) {
 [data-preserve-reading] .cm-content * {
   color: transparent !important;
   text-decoration-color: transparent !important;
+}
+
+/* The wallpaper and reading surface are paint layers. Neither participates in the timeline's dimensions. */
+:is([data-chat-main], [data-side-chat]):has(> .chat-wallpaper) {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--canvas);
+}
+
+[data-side-chat]:has(> .chat-wallpaper) > :is([data-side-chat-header], [data-side-chat-branches]) {
+  background-color: var(--surface);
+}
+
+.chat-wallpaper,
+.chat-reading-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.chat-wallpaper {
+  z-index: -2;
+  overflow: hidden;
+}
+
+.chat-wallpaper > div {
+  position: absolute;
+  inset: calc(-2 * var(--wallpaper-blur));
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  filter: blur(var(--wallpaper-blur));
+}
+
+.chat-wallpaper > [data-fit="contain"] {
+  background-size: contain;
+}
+
+.chat-wallpaper > [data-fit="tile"] {
+  background-size: auto;
+  background-repeat: repeat;
+}
+
+.chat-reading-backdrop {
+  z-index: -1;
+  background-color: color-mix(in oklch, var(--canvas) var(--reading-opacity), transparent);
+  /* At low opacity, tame high-contrast images before the message surface is composited. */
+  --reading-scrim: clamp(0%, calc((85% - var(--reading-opacity)) * 1.3), 45%);
+  --reading-scrim-color: color-mix(in oklch, var(--canvas) var(--reading-scrim), transparent);
+  background-image: linear-gradient(var(--reading-scrim-color), var(--reading-scrim-color));
+  backdrop-filter: blur(4px);
+  box-shadow: 0 0 1px var(--border);
 }
