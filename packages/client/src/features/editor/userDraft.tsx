@@ -263,7 +263,9 @@ export class UserDraftStore {
             ? { content: copy.content, changed: false, rejected: false }
             : reconcileDeletedFields(
                 this.draft,
-                save?.kind === "userDraft" && save.payload.seed !== true ? save.payload : null,
+                save?.kind === "userDraft" && (save.payload.seed !== true || this.draft.status !== "active")
+                  ? save.payload
+                  : null,
                 copy.content
               )
         const copiedFormChanged = safeCopy.changed

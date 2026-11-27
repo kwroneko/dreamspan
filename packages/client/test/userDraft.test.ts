@@ -823,3 +823,41 @@ it("a whole-field clear keeps its identity through closing saves and an earlier 
     vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
   }
 })
+
+it("a refused seed copy on a committed form keeps its blank starting snapshot when its base is current", async () => {
+  const address = { targetId: "connection:new", field: "Settings" }
+  const blank = JSON.stringify({ name: "", baseUrl: "" })
+  const committed = new Draft({
+    ...draft("", 5),
+    key: new DraftKey({ targetKind: "user_field", ...address }),
+    status: "committed",
+    session: 2,
+    deletions: { '["name"]': { draftId: "draft", rowVersion: 3, value: "Previous connection" } }
+  })
+  const seedCopy = makeCopy(
+    ownerId,
+    address.targetId,
+    address.field,
+    {
+      kind: "userDraft",
+      payload: {
+        ownerId,
+        ...address,
+        content: blank,
+        seed: true,
+        draftId: committed.id,
+        expectedRowVersion: committed.rowVersion,
+        expectedSession: committed.session
+      }
+    },
+    1
+  )
+  await keepCopy(seedCopy)
+  const { store, handlers } = harness(committed, address.field, address.targetId)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline during seed replay")
+  }
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(JSON.parse(store.snapshot().text!)).toEqual({ name: "", baseUrl: "" })
+})

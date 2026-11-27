@@ -234,6 +234,72 @@ it.live("replaying a form initialization cannot delete the keystrokes already sa
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
+for (const outcome of ["committed", "discarded"] as const)
+  it.live(
+    `starting a new form session after ${outcome} does not resurrect cleared fields from the previous session`,
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const ownerId = (yield* api.Whoami()).id
+        const address = { ownerId, targetId: "connection:new", field: "Settings" }
+        const blank = JSON.stringify({ name: "", baseUrl: "" })
+        const first = yield* api.SaveUserDraft({
+          ...address,
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          content: blank,
+          seed: true
+        })
+        const base = { ...address, draftId: first.id, expectedSession: first.session }
+        const typo = yield* api.SaveUserDraft({
+          ...base,
+          expectedRowVersion: first.rowVersion,
+          content: JSON.stringify({ name: "Typo", baseUrl: "" })
+        })
+        const cleared = yield* api.SaveUserDraft({
+          ...base,
+          expectedRowVersion: typo.rowVersion,
+          content: blank
+        })
+        const named = yield* api.SaveUserDraft({
+          ...base,
+          expectedRowVersion: cleared.rowVersion,
+          content: JSON.stringify({ name: "First connection", baseUrl: "https://one.invalid" })
+        })
+        const ended = yield* api.EndUserDraft({
+          ...address,
+          draftId: named.id,
+          expectedRowVersion: named.rowVersion,
+          outcome
+        })
+        const recoveredBefore = (yield* api.ListRecoveredTexts({ limit: 100, before: null })).length
+        const nextSeed = yield* api.SaveUserDraft({
+          ...address,
+          draftId: ended.id,
+          expectedRowVersion: ended.rowVersion,
+          expectedSession: ended.session,
+          content: blank,
+          seed: true
+        })
+        assert.strictEqual(nextSeed.content, blank)
+        assert.strictEqual(nextSeed.recovered, 0)
+        assert.isUndefined(nextSeed.refused)
+        const typed = JSON.stringify({ name: "S", baseUrl: "" })
+        const saved = yield* api.SaveUserDraft({
+          ...address,
+          draftId: nextSeed.id,
+          expectedRowVersion: nextSeed.rowVersion,
+          expectedSession: nextSeed.session,
+          content: typed
+        })
+        assert.strictEqual(saved.content, typed)
+        assert.strictEqual(saved.recovered, 0)
+        assert.isUndefined(saved.refused)
+        assert.strictEqual((yield* api.ListRecoveredTexts({ limit: 100, before: null })).length, recoveredBefore)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
 it.live("an empty reply of several dropped files what was typed into its own swipe", () =>
   Effect.gen(function* () {
     const api = yield* client()

@@ -331,7 +331,9 @@ function NewConnectionForm({
     if (!provider || !api) return
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     const created = draft(event.currentTarget)
-    await durable.commit(durable.text, async () => {
+    let createdId: ConnectionId | null = null
+    let defaultError: { connectionId: ConnectionId; error: AppError } | null = null
+    const committed = await durable.commit(durable.text, async () => {
       const result = await action.run((client) => client("CreateConnection", created), ["connections", "credentials"])
       if (result.ok) {
         const connectionId = result.value.id
@@ -360,11 +362,14 @@ function NewConnectionForm({
         freshConnections.set(connectionId, refresh?.ok ? refresh.value : null)
         // Saved, but without the default the form required: say so here and point to its page
         // to choose one. The form is replaced, so it can't create a second copy.
-        if (refresh && !refresh.ok) setUnsetDefault({ connectionId, error: refresh.error })
-        else void navigate({ to: "/settings/connections/$connectionId", params: { connectionId } })
+        if (refresh && !refresh.ok) defaultError = { connectionId, error: refresh.error }
+        else createdId = connectionId
       }
       return result.ok
     })
+    if (defaultError) setUnsetDefault(defaultError)
+    else if (committed && createdId)
+      void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: createdId } })
   }
 
   const shown = (problem: string | null) =>

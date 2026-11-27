@@ -784,7 +784,7 @@ export const makeDraftStore = (
         !deleted &&
         form &&
         draft.status === "active" &&
-        (base === null || ended || draft.text_version > base.rowVersion) &&
+        (base === null || ended || options.deliberate === false || draft.text_version > base.rowVersion) &&
         content !== draft.content
       ) {
         const at = now()
@@ -812,7 +812,7 @@ export const makeDraftStore = (
         }
       }
       const reconciled = form
-        ? reconcileDeletedFields(toDraft(draft), options.deliberate === false ? null : deletionBase, content)
+        ? reconcileDeletedFields(toDraft(draft), deletionBase, content)
         : { content, changed: false, rejected: false }
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
         // A different session's text cannot account for an old composer copy.
@@ -822,13 +822,13 @@ export const makeDraftStore = (
             : draft.target_kind === "user_field"
               ? content === shown(draft)
               : shown(draft).includes(content)
-        const recovered = toBin(draft) && content.trim() !== "" && !kept
+        const recovered = toBin(draft) && options.deliberate !== false && content.trim() !== "" && !kept
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered, accepted: false }
       }
       let recoveredInput = false
       if (reconciled.changed) {
-        if (toBin(draft) && content.trim() !== "") {
+        if (toBin(draft) && options.deliberate !== false && content.trim() !== "") {
           yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
           recoveredInput = true
         }

@@ -344,3 +344,43 @@ it.live(
       assert.isAbove(otherClear.clearedVersion!, continued.clearedVersion!)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
+
+it.live("typing into a new connection form after committing one with a cleared Name does not autofill or recover", () =>
+  Effect.gen(function* () {
+    reset()
+    const api = yield* client(),
+      ownerId = (yield* api.Whoami()).id
+    const targetId = "connection:new",
+      field = "Settings"
+    const blank = JSON.stringify({ providerId: "anthropic", apiId: "", name: "", baseUrl: "" })
+    const withName = (name: string) => JSON.stringify({ providerId: "anthropic", apiId: "", name, baseUrl: "" })
+
+    // First new-connection form: type a name, clear it, type the final name, and commit.
+    const first = new UserDraftStore(ownerId, targetId, field, runWith(api))
+    first.open()
+    yield* Effect.promise(() => vi.waitFor(() => assert.isTrue(first.snapshot().ready)))
+    first.type(withName("T"), blank)
+    first.type(blank, blank)
+    first.type(withName("First connection"), blank)
+    yield* Effect.promise(() => vi.waitFor(() => assert.strictEqual(browser.memory.size, 0)))
+    const committed = yield* Effect.promise(() => first.commit(withName("First connection"), async () => true))
+    assert.isTrue(committed)
+
+    const recoveredBefore = (yield* api.ListRecoveredTexts({ limit: 100, before: null })).length
+
+    // Second new-connection form: type into Name — must keep typed letters with no recovery or autofill.
+    const second = new UserDraftStore(ownerId, targetId, field, runWith(api))
+    second.open()
+    yield* Effect.promise(() => vi.waitFor(() => assert.isTrue(second.snapshot().ready)))
+    assert.isNull(second.snapshot().text)
+    second.type(withName("S"), blank)
+    second.type(withName("Se"), blank)
+    yield* Effect.promise(() => vi.waitFor(() => assert.strictEqual(browser.memory.size, 0)))
+    assert.strictEqual(second.snapshot().text, withName("Se"))
+    assert.strictEqual(second.snapshot().recovered, 0)
+    assert.isNull(second.snapshot().error)
+    assert.isNull(second.snapshot().refused)
+    assert.strictEqual((yield* api.ListRecoveredTexts({ limit: 100, before: null })).length, recoveredBefore)
+    assert.strictEqual((yield* api.GetUserDraft({ ownerId, targetId, field }))?.content, withName("Se"))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
