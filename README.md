@@ -1,84 +1,46 @@
 # Dreamspan
 
-A self-hosted roleplay app for desktop and phone browsers. Bring your own model connection and start a story with one character or a whole cast.
+A self-hosted roleplay web app for desktop and mobile browsers. Bring your own model connection and run stories with one character or a whole cast.
 
-Dreamspan keeps the original chat as automatic summaries make room for new turns in the model's context. You can edit a message, try a different reply, branch the story, or follow a side thread. Chats, character cards, personas, lorebooks and prompt presets can come with you from SillyTavern.
+## Features
 
-**0.1.0** is the first tester release. Start with the [user guide](docs/GUIDE.md), see what's included in the [changelog](CHANGELOG.md), or read the [Docker setup](docker/README.md) and [upgrade and rollback runbook](docs/ROLLBACK.md) to host a copy.
+- **Stories & casts:** Solo or multi-character chats with alternate replies (swipes), in-place message editing, branching, and side threads.
+- **Long-context summaries & caching:** Automatic layered summaries keep long stories within the model's context window while keeping the full original transcript readable and preserving prompt caches.
+- **Bring your own models:** Connect Anthropic, OpenAI, Google Gemini, DeepSeek, OpenRouter, AWS Bedrock, or OpenAI-compatible local servers (LM Studio, `llama.cpp`, MLX).
+- **SillyTavern import & export:** Import character cards (PNG, JSON, CHARX), personas, lorebooks, chats, groups, and chat-completion presets, and export your chats or library back out.
+- **Workshops, MCP & plugins:** Assistant workshops for drafting and editing cards, lorebooks, prompts, stories, and files, plus optional MCP tool servers and plugins.
+- **Self-hosted & multi-user:** Runs locally or on your own server with SQLite, per-account libraries, and optional Docker sandboxing.
 
-## Quick start from source
+## Quick start
 
-1. Install [Node.js 24](https://nodejs.org/) (24.11 or later, with npm).
+### Run locally (Node.js)
+
+1. Install [Node.js 24](https://nodejs.org/) (24.11 or later, with `npm`).
 2. Clone this repository or download and extract its source ZIP.
-3. Open the Dreamspan folder and start the app.
+3. Start Dreamspan from the repository folder:
 
    | Platform | How to start |
    | --- | --- |
    | Windows | Double-click `Start.bat`. |
-   | macOS | Double-click `Start.command`. If it lacks execute permission after extracting a ZIP, run `chmod +x Start.command` in Terminal first. |
+   | macOS | Double-click `Start.command` (if extracted from a ZIP, run `chmod +x Start.command` in Terminal first). |
    | Linux | Run `./start.sh` in a terminal. |
 
-   You can also run `npm start` from the Dreamspan folder on any platform. The launcher installs dependencies and builds the app automatically on the first run. Keep the terminal open while Dreamspan runs. The launcher can restart Dreamspan automatically after a one-click update.
+   You can also run `npm start` on any platform. The first run installs dependencies and builds the app automatically.
 
-4. Open `http://127.0.0.1:8080`. By default Dreamspan listens only on loopback and stores its data in `./data`. Go to **Settings → Account** to set a password for the local admin account.
+4. Open `http://127.0.0.1:8080`. By default Dreamspan listens only on loopback and stores data in `./data` (override with `DATA_DIR` and `PORT`). Go to **Settings → Account** to set a password for the local admin account, then add a model under **Settings → Connections**.
+
+### Run with Docker
+
+See [docker/README.md](docker/README.md) for a Docker Compose setup, reverse-proxy settings, and optional sandboxed workshop commands.
+
+## Documentation
+
+- [User guide](docs/GUIDE.md) — connecting models, importing from SillyTavern, summaries, workshops, and exports
+- [Local model servers](docs/LOCAL-MODELS.md) — connecting LM Studio, `llama.cpp`, or MLX
+- [Docker & self-hosting](docker/README.md) — container deployment, HTTPS proxy, and command sandboxing
+- [Upgrade & rollback](docs/ROLLBACK.md) — backups, migrations, and recovery
+- [Changelog](CHANGELOG.md)
 
 ## Development
 
-Run `npm run dev:server` and `npm run dev:client` in separate terminals. Vite runs on port 5173 and proxies to the server. Run `npm run check` for static checks and fast tests, and `npm run test:slow` for the slow suite.
-
-[ARCHITECTURE.md](ARCHITECTURE.md) describes the implemented system. Design documents:
-
-- [spec/OVERVIEW.md](spec/OVERVIEW.md): goals, non-goals, principles, stack.
-- [spec/DESIGN.md](spec/DESIGN.md): requirements and design decisions by area, each marked decided, proposed or open.
-- [spec/PLAN.md](spec/PLAN.md): phased implementation plan and open questions.
-- [spec/DATA-MODEL.md](spec/DATA-MODEL.md): the data model (phase 0).
-- [spec/CLIENT-FRAMEWORK.md](spec/CLIENT-FRAMEWORK.md): client framework evaluation, performance harness, design-system timing (phase 0).
-- [spec/EFFECT.md](spec/EFFECT.md): Effect across the stack (phase 0).
-- [spec/STORAGE.md](spec/STORAGE.md): storage engine, SQLite vs Turso (phase 0).
-- [spec/PROVIDERS.md](spec/PROVIDERS.md): the provider layer on pi-ai 1.x (phase 0).
-- [spec/PLUGINS.md](spec/PLUGINS.md): plugin threat model and structure.
-- [spec/CORDIS.md](spec/CORDIS.md): Cordis evaluated as the plugin kernel (not adopted).
-
-## Running on a laptop, offline
-
-Natively, without Docker, against a model server on the same machine: LM Studio, llama.cpp's `llama-server` or `mlx_lm.server`. Checked on Linux with no network but loopback; macOS (Apple silicon) is expected to work the same way, since nothing at runtime is native but Node's own SQLite.
-
-**Before you lose the network:**
-
-1. Install Node 24 (24.11 or later), from nodejs.org or a version manager. Check that its SQLite has full-text search, which the app needs:
-   ```bash
-   node -e "new (require('node:sqlite').DatabaseSync)(':memory:').exec('CREATE VIRTUAL TABLE t USING fts5(x)')"
-   ```
-   No output means it's fine. A Node built against another SQLite (some package managers do this) may fail here.
-2. In the repository, run `npm ci` and then `npm run build`. Local startup after this works without the network, and the client loads no fonts or scripts from elsewhere.
-3. Download the model weights and check that the model server starts.
-4. If you want your SillyTavern characters and presets, import them now (Import, or "Import a SillyTavern folder" there). You'll want a preset whose context size you can set (below).
-
-**Start it:**
-
-```bash
-npm start
-```
-
-While no account has a password, a browser on the same machine opens as admin. After setting a password, sign in with it. Set `DATA_DIR` to store the data elsewhere on a local disk. Syncing a live SQLite database through a cloud drive can corrupt it.
-
-`llama-server` and `mlx_lm.server` also default to port 8080. Start them on another port (below), or move this one with `PORT=8090`.
-
-**Start the model server** on loopback:
-
-| Server | Command | Base URL |
-|---|---|---|
-| LM Studio | Developer tab → Start server (load the model with the context length you want) | The model server's local HTTP address on port 1234, ending in `/v1` |
-| llama.cpp | `llama-server -m model.gguf -c 32768 --jinja --port 8081` | The model server's local HTTP address on port 8081, ending in `/v1` |
-| MLX | `mlx_lm.server --model <path or Hugging Face id> --port 8081` | The model server's local HTTP address on port 8081, ending in `/v1` |
-
-**Add the connection:**
-
-1. Settings → Connections → New connection.
-2. Choose OpenAI Chat Completions and enter the model server's base URL ending in `/v1`. Leave the API key blank if the server doesn't require one.
-3. Run **Test**, choose the default model for new chats, then select **Create connection**. If the server doesn't list the model, type its model ID.
-4. To change the default later, go to **Settings → Chats → Default model**. Use the chat's model picker to choose a model for that chat.
-
-**Context size.** A model whose window isn't reported shows `128k context (assumed)` and its cost stays unknown. Set its actual context window with Edit on the connection's page to match what the server loaded (`-c` for llama-server, the context length in LM Studio). Requests use that model's window; its optional "Context to send" setting can lower the limit. Prompt presets don't set the context size. Token counts are estimates, so leave some room below a local server's loaded window.
-
-**Long prompts.** A local model can take minutes to read a long prompt before it sends a token, more so the first time a chat is sent, before the server has it cached. The app waits up to 30 minutes for a response to start, or between its chunks. Stop cancels at any time.
+Run `npm run dev:server` and `npm run dev:client` in separate terminals (Vite serves the client on port `5173` and proxies API traffic to the server). Run `npm run check` for static checks and fast tests, or `npm run test:slow` for the full suite. See [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
