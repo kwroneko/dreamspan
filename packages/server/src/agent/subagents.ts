@@ -1479,6 +1479,7 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       reader: run.reader,
       writer: run.writer,
       ...(run.onDisplayChanged ? { onDisplayChanged: run.onDisplayChanged } : {}),
+      ...(run.onLibraryChanged ? { onLibraryChanged: run.onLibraryChanged } : {}),
       ...(run.onChanged ? { onChanged: run.onChanged } : {}),
       ...(run.onState ? { onState: run.onState } : {}),
       permit: (input) => permit({ ...input, onWaiting: paused(input.onWaiting) }),

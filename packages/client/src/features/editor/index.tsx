@@ -6,6 +6,7 @@ import { replyHooks } from "../chat/replyHooks.ts"
 import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
+import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { libraryActions, libraryPanels } from "../library/slots.ts"
 import { homeHeaderTitleActions } from "../characters/homeSlots.ts"
 import { LibraryReplaceButton, LibraryReplacePanel } from "./LibraryReplace.tsx"
@@ -86,6 +87,17 @@ export const register = () => {
     stateChanged: () => void refreshOpenEditors()
   })
   registerUserDraftNotices()
+  let noticesSynced = false
+  userNoticeReceivers.register({
+    id: "editor.library-changes",
+    receive: (notice) => {
+      if (notice._tag === "LibraryChanged") void refreshOpenEditors()
+      else if (notice._tag === "UserDraftSync") {
+        if (noticesSynced) void refreshOpenEditors()
+        noticesSynced = true
+      }
+    }
+  })
   cutoutChoosers.register({ id: CUTOUT_CHOOSER, component: LazyCutoutChooser })
   libraryActions.register({
     id: "editor.new-card",

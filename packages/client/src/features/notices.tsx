@@ -20,6 +20,7 @@ import { Cause, Context, Effect, Fiber, Schedule, Stream } from "effect"
 import { AtomRegistry } from "effect/reactivity"
 import { useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { routes } from "../routes.tsx"
+import { invalidateKeys } from "../actions.tsx"
 import { kindTitle } from "./chat/kindLooks.ts"
 import { AppClient } from "../rpc.ts"
 import { Switch } from "../ui/Choice.tsx"
@@ -108,6 +109,10 @@ export const useNotices = () => {
     const receive = (notice: Notice, client: AppClient["Service"]) =>
       Effect.gen(function* () {
         receiveUserNotice(notice)
+        if (notice._tag === "LibraryChanged") {
+          invalidateKeys(registry, ["library", "rollout-effects"])
+          return
+        }
         if (notice._tag !== "ReplyFinished") return
         if (!firstNotice(notice) || looking(notice.chatId)) return
         unseen.set(notice.chatId, (unseen.get(notice.chatId) ?? 0) + 1)

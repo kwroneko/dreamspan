@@ -10,6 +10,8 @@ import { StImportId, StImportStatus } from "./stImportApi.ts"
 
 export const Notice = Schema.Union([
   Schema.TaggedStruct("DisplayPrefsChanged", {}),
+  /** A library entry changed on the server (an agent tool, undo, revert or workshop swipe). */
+  Schema.TaggedStruct("LibraryChanged", {}),
   Schema.TaggedStruct("PluginsChanged", { id: Schema.String, message: Schema.String }),
   /** A generation ended on its own: complete, or failed with its cause on the version. */
   Schema.TaggedStruct("ReplyFinished", {

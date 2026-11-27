@@ -584,13 +584,14 @@ export const makeChatHandlers = Effect.gen(function* () {
                   })
               ),
               Effect.tap(() =>
-                Effect.sync(() =>
+                Effect.sync(() => {
                   hub.publish(added.chatId, {
                     _tag: "WorkshopSwipe",
                     message:
                       "Reverted the previous swipe’s changes for this retry. They’re still available on that swipe."
                   })
-                )
+                  notices.publish(id, { _tag: "LibraryChanged" })
+                })
               )
             )
           : undefined

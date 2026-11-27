@@ -86,6 +86,7 @@ export interface AgentRun {
   readonly writer: Writer["Service"]
   readonly onChanged?: (chatId: import("@dreamspan/shared/chat.ts").ChatId) => void
   readonly onDisplayChanged?: () => void
+  readonly onLibraryChanged?: () => void
   readonly onState?: () => void
   /** The tool definitions to offer as frozen into the snapshot; absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
@@ -1031,6 +1032,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             )
           }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
+          if (tool.effect === "library" && !result.isError && !raw.replayed) run.onLibraryChanged?.()
           // Keep the complete original in the transcript. Only its model projection is bounded.
           const fullText = serverData ? result.text : budgetResult(result.text)
           const stepNumber =

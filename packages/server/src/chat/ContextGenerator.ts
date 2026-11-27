@@ -252,6 +252,7 @@ export const layer = Layer.effect(
             },
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             onDisplayChanged: () => notices.publish(request.userId, { _tag: "DisplayPrefsChanged" }),
+            onLibraryChanged: () => notices.publish(request.userId, { _tag: "LibraryChanged" }),
             resume: {
               transcript: resume.transcript,
               historical: (snapshot as ContinuousSnapshot).continuity?.historical ?? 0,
@@ -748,7 +749,8 @@ export const layer = Layer.effect(
                       hub.publish(target, { _tag: "Lcm" })
                     },
                     onState: () => hub.publish(chatId, { _tag: "State" }),
-                    onDisplayChanged: () => notices.publish(userId, { _tag: "DisplayPrefsChanged" })
+                    onDisplayChanged: () => notices.publish(userId, { _tag: "DisplayPrefsChanged" }),
+                    onLibraryChanged: () => notices.publish(userId, { _tag: "LibraryChanged" })
                   }
                 }
               : {}),

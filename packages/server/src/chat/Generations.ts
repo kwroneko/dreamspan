@@ -299,6 +299,7 @@ export class Generations extends Context.Service<
               )
           if (restored) {
             hub.publish(request.chatId, { _tag: "WorkshopSwipe", message: "Restored the previous swipe’s changes." })
+            notices.publish(request.userId, { _tag: "LibraryChanged" })
             if (Option.isSome(warmth)) yield* warmth.value.refreshUser(request.userId, true)
           }
           const finished = saved.value

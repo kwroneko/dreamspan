@@ -76,8 +76,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           )
       }
       notifyChats(effects)
-      if (effects.some((effect) => effect.undoneAt !== null && effect.targetKind === "entity"))
+      if (effects.some((effect) => effect.undoneAt !== null && effect.targetKind === "entity")) {
+        notices.publish(userId, { _tag: "LibraryChanged" })
         yield* warmth.refreshUser(userId, true)
+      }
     })
   const notifyChats = (effects: ReadonlyArray<RolloutEffect>) => {
     const targets = new Map<string, { chatId: ChatId; forkId?: ForkId; state: boolean; history: boolean }>()
@@ -198,7 +200,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       )
     )
   /** A revert or redo changed a library item: what open chats send may change, as after an undo. */
-  const notifyReverted = (userId: UserId) => warmth.refreshUser(userId, true)
+  const notifyReverted = (userId: UserId) => {
+    notices.publish(userId, { _tag: "LibraryChanged" })
+    return warmth.refreshUser(userId, true)
+  }
   /**
    * Reverts one item's changes (spec/WORKSHOP-CARDS.md §8.1): a library item's in the writer, a
    * card file's on the files host, which records it after writing the file.

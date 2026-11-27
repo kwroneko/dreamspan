@@ -341,18 +341,22 @@ export class EditorStore {
 
   /** The chats' state changes (openEditors.ts) this store's state was read after. */
   seenChanges = 0
+  private refreshGeneration = 0
 
   async load() {
+    const generation = ++this.refreshGeneration
     this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
+    if (generation !== this.refreshGeneration) return result
     if (result.ok) this.apply(result.value)
     else this.loadError = result.error
     if (result.ok || result.error.tag === "NotFound") this.gone = !result.ok
     this.bumpAll()
     // An entry that can't be opened (in the bin, say) keeps its copies here until it can.
     if (result.ok) await this.restoreCopies()
+    if (result.ok && this.seenChanges < stateChanges()) void this.refresh()
     return result
   }
 
@@ -863,10 +867,12 @@ export class EditorStore {
 
   /** The server's drafts and head again, without losing what's typed here. */
   async refresh() {
+    const generation = ++this.refreshGeneration
     this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
+    if (generation !== this.refreshGeneration) return
     if (result.ok) {
       this.gone = false
       this.apply(result.value)
