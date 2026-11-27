@@ -44,3 +44,13 @@ See [docker/README.md](docker/README.md) for a Docker Compose setup, reverse-pro
 ## Development
 
 Run `npm run dev:server` and `npm run dev:client` in separate terminals (Vite serves the client on port `5173` and proxies API traffic to the server). Run `npm run check` for static checks and fast tests, or `npm run test:slow` for the full suite. See [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
+
+## License
+
+Dreamspan is free software released under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
+
+You may use, modify, and redistribute it under the terms of that license. If you run a modified version of Dreamspan as a network service, the AGPL requires you to offer the modified source code to that service's users.
+
+## Contributions
+
+Dreamspan is written and copyrighted by a single author. Contributions are welcome, but are accepted only under the terms in [CONTRIBUTING.md](CONTRIBUTING.md): by submitting a contribution you assign its copyright to the maintainer and agree to its release under the AGPL. Read that file before opening a pull request.

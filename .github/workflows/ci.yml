@@ -5,17 +5,22 @@ on:
     branches: [main, master]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run size
+      - run: npm run check:released-migrations
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
@@ -26,27 +31,32 @@ jobs:
 
   browser:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: node node_modules/@playwright/test/cli.js install --with-deps --only-shell chromium
-      - run: npm run test:browser
+      - run: npm run build
+      - run: npx playwright test -c packages/client/playwright.config.ts --project=chromium --shard=${{ matrix.shard }}/4
         env:
           CI: "true"
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.shard }}
           path: packages/client/test-results/
 
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build --tag dreamspan:ci .
       # The image listens on 0.0.0.0, so with no exposure settings it must refuse to start.
       - name: Refuse to start beyond loopback without exposure settings
