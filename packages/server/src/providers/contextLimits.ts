@@ -48,8 +48,49 @@ export const builtinContextLimitParsers: ReadonlyArray<ContextLimitParser> = [
   pattern("mistral", /too large for model with ([\d,]+) maximum context length/i)
 ]
 
+export interface OutputLimitParser {
+  readonly id: string
+  /** The max output tokens the error text states, or null when it isn't this wording. */
+  readonly parse: (text: string) => number | null
+}
+
+/** In registration order; the last is asked first, so generic wordings come first. */
+export const builtinOutputLimitParsers: ReadonlyArray<OutputLimitParser> = [
+  // Generic: "maximum output tokens is 16384", "maximum completion length: 4096"
+  pattern("generic-output", /maximum (?:output|completion) (?:tokens|length|limit)(?: is| of|:)?\s*\(?([\d,]+)\)?/i),
+  // Generic exceeds: "exceeds the model's maximum output tokens of 16384" / "(16384)"
+  pattern(
+    "generic-output-exceeds",
+    /exceeds (?:the )?(?:model'?s )?maximum (?:output|completion) (?:tokens|length|limit)(?: of ([\d,]+)| ?\(([\d,]+)\))/i
+  ),
+  // DeepSeek / OpenRouter / gateways: "valid range of max_tokens is [1, 8192]", "max_tokens must be between 1 and 8192"
+  pattern(
+    "range-output",
+    /(?:max_tokens|max_completion_tokens|max_output_tokens|maxOutputTokens|maxTokens)[^.\n]{0,80}(?:between\s+[\d,]+\s+and\s+([\d,]+)|\[\s*[\d,]+\s*,\s*([\d,]+)\s*\])/i
+  ),
+  // OpenAI Chat Completions: "max_tokens is too large: 65536. This model supports at most 16384 completion tokens"
+  pattern("openai-output", /supports at most ([\d,]+) (?:completion|output) tokens/i),
+  // OpenAI Responses & JSON schema validation: "Invalid 'max_output_tokens': integer above maximum value. Expected a value <= 16384"
+  // Also Bedrock / proxies: "maxTokens must be less than or equal to 8192", "max_tokens cannot exceed 8192"
+  pattern(
+    "param-output",
+    /['"`]?(?:max_output_tokens|max_completion_tokens|max_tokens|maxOutputTokens|maxTokens)['"`]?[^\n]{0,120}(?:<=|less than or equal to|at most|must not exceed|cannot exceed|exceeds (?:the )?maximum(?: allowed)?(?: of)?)\s*\(?([\d,]+)\)?/i
+  ),
+  // Anthropic: "max_tokens: 65536 > 16384, which is the maximum allowed number of output tokens for ..."
+  pattern("anthropic-output", /max_tokens:\s*[\d,]+\s*>\s*([\d,]+)/i)
+]
+
 /** The limit the first parser that recognizes the text reads, newest registration first. */
 export const statedContextLimit = (parsers: ReadonlyArray<ContextLimitParser>, text: string) => {
+  for (const parser of [...parsers].reverse()) {
+    const limit = parser.parse(text)
+    if (limit !== null) return limit
+  }
+  return null
+}
+
+/** The output limit the first parser that recognizes the text reads, newest registration first. */
+export const statedOutputLimit = (parsers: ReadonlyArray<OutputLimitParser>, text: string) => {
   for (const parser of [...parsers].reverse()) {
     const limit = parser.parse(text)
     if (limit !== null) return limit

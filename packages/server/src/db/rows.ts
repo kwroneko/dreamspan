@@ -233,13 +233,18 @@ const toVersionError = (json: string | null) => {
     class?: unknown
     message?: unknown
     contextLimit?: { tokens?: unknown; modelId?: unknown }
+    outputLimit?: { tokens?: unknown; modelId?: unknown }
   }
   const limit = error.contextLimit
+  const output = error.outputLimit
   return {
     class: String(error.class ?? "unknown"),
     message: String(error.message ?? ""),
     ...(limit && Number.isSafeInteger(limit.tokens) && typeof limit.modelId === "string"
       ? { contextLimit: { tokens: limit.tokens as number, modelId: limit.modelId } }
+      : {}),
+    ...(output && Number.isSafeInteger(output.tokens) && typeof output.modelId === "string"
+      ? { outputLimit: { tokens: output.tokens as number, modelId: output.modelId } }
       : {})
   }
 }

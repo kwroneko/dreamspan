@@ -224,12 +224,13 @@ export class Generations extends Context.Service<
               status = "failed"
               const failure = Cause.findErrorOption(exit.cause)
               if (Option.isSome(failure)) {
-                const { contextLimit } = failure.value
+                const { contextLimit, outputLimit } = failure.value
                 unsent = failure.value.unsent
                 error = {
                   class: failure.value.class,
                   message: failure.value.message,
-                  ...(contextLimit === undefined ? {} : { contextLimit })
+                  ...(contextLimit === undefined ? {} : { contextLimit }),
+                  ...(outputLimit === undefined ? {} : { outputLimit })
                 }
               } else {
                 yield* Effect.logError("generation crashed", exit.cause)

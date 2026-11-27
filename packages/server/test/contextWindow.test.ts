@@ -19,7 +19,12 @@ import {
   type ModelCatalog,
   piModelCatalog
 } from "../src/providers/contextCatalog.ts"
-import { builtinContextLimitParsers, statedContextLimit } from "../src/providers/contextLimits.ts"
+import {
+  builtinContextLimitParsers,
+  builtinOutputLimitParsers,
+  statedContextLimit,
+  statedOutputLimit
+} from "../src/providers/contextLimits.ts"
 import * as Providers from "../src/providers/Providers.ts"
 import { ProviderError } from "../src/providers/Providers.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
@@ -174,15 +179,33 @@ describe("a model's window, by provider kind", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
-  it.live("OpenRouter's context_length is the provider's figure", () =>
-    Effect.gen(function* () {
-      const { effective } = yield* refreshed("openrouter", "/api/v1/models", (url) => `${url}/api/v1`, {
-        data: [{ id: "anthropic/claude-sonnet-4.5", context_length: 180_000 }]
-      })
-      const model = effective("anthropic/claude-sonnet-4.5")
-      assert.strictEqual(model.context.source, "upstream")
-      assert.strictEqual(model.context.value, 180_000)
-    }).pipe(Effect.scoped, Effect.provide(layer()))
+  it.live(
+    "OpenRouter's context_length is the provider's figure, while missing maxOutput still fills from the catalog",
+    () =>
+      Effect.gen(function* () {
+        const { effective } = yield* refreshed("openrouter", "/api/v1/models", (url) => `${url}/api/v1`, {
+          data: [{ id: "anthropic/claude-sonnet-4.5", context_length: 180_000 }]
+        })
+        const model = effective("anthropic/claude-sonnet-4.5")
+        assert.strictEqual(model.context.source, "upstream")
+        assert.strictEqual(model.context.value, 180_000)
+        assert.strictEqual(model.maxOutput.source, "catalog")
+        assert.strictEqual(model.maxOutput.value, 64_000)
+        assert.include(model.catalog?.fields ?? [], "maxOutput")
+        assert.notInclude(model.catalog?.fields ?? [], "context")
+
+        // On an OpenAI-compatible proxy that reports context_length without max_output_tokens,
+        // fillFromCatalogs still fills maxOutput from pi-ai's catalog without overwriting context.
+        const proxy = yield* refreshed("openai-chat", "/v1/models", (url) => `${url}/v1`, {
+          data: [{ id: "claude-sonnet-4-20250514", context_length: 180_000 }]
+        })
+        const proxied = proxy.effective("claude-sonnet-4-20250514")
+        assert.strictEqual(proxied.context.source, "upstream")
+        assert.strictEqual(proxied.context.value, 180_000)
+        assert.strictEqual(proxied.maxOutput.source, "catalog")
+        assert.strictEqual(proxied.maxOutput.value, 64_000)
+        assert.deepStrictEqual(proxied.catalog?.fields, ["maxOutput"])
+      }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
   it.live("Anthropic's max_input_tokens is the provider's figure", () =>
@@ -244,6 +267,49 @@ describe("a model's window, by provider kind", () => {
       const forgotten = yield* writer.SetLearnedContext({ userId, modelId: model.id as ModelId, context: null, at: 2 })
       assert.isUndefined(forgotten.overrides.learned)
       assert.strictEqual(forgotten.overrides.context, 16_000)
+
+      // Learned output limit: beats upstream/unknown, yields to user's own maxOutput, and clamps a higher reply length.
+      yield* writer.EditModel({
+        userId,
+        modelId: model.id as ModelId,
+        overrides: { ...forgotten.overrides, settings: { samplers: { openai_max_tokens: 32_000 } } },
+        expectedRowVersion: forgotten.rowVersion
+      })
+      const learnedOutput = yield* writer.SetLearnedOutput({
+        userId,
+        modelId: model.id as ModelId,
+        maxOutput: 8_192,
+        at: 3
+      })
+      assert.deepStrictEqual(
+        resolveModel(learnedOutput.key, learnedOutput.upstream, learnedOutput.overrides).maxOutput,
+        {
+          value: 8_192,
+          source: "learned"
+        }
+      )
+      assert.strictEqual(learnedOutput.overrides.settings?.samplers?.openai_max_tokens, 8_192)
+      const withOwnOutput = yield* writer.EditModel({
+        userId,
+        modelId: model.id as ModelId,
+        overrides: { ...learnedOutput.overrides, maxOutput: 12_000 },
+        expectedRowVersion: learnedOutput.rowVersion
+      })
+      assert.deepStrictEqual(
+        resolveModel(withOwnOutput.key, withOwnOutput.upstream, withOwnOutput.overrides).maxOutput,
+        {
+          value: 12_000,
+          source: "user"
+        }
+      )
+      const forgottenOutput = yield* writer.SetLearnedOutput({
+        userId,
+        modelId: model.id as ModelId,
+        maxOutput: null,
+        at: 4
+      })
+      assert.isUndefined(forgottenOutput.overrides.learnedOutput)
+      assert.strictEqual(forgottenOutput.overrides.maxOutput, 12_000)
 
       const providers = yield* Providers.Providers
       const upstream = yield* providers.catalogUpstream(userId, connection.id, "claude-opus-4-5-20251101")
@@ -499,6 +565,142 @@ describe("each provider kind's context-length error, through the request", () =>
         if (!(error instanceof ProviderError)) return
         assert.strictEqual(error.reason, "context_overflow")
         assert.strictEqual(error.contextLimit, each.limit)
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+    )
+})
+
+describe("output-limit errors", () => {
+  it("parses stated output limits from provider errors without misreading context-length errors", () => {
+    const outputCases: ReadonlyArray<readonly [string, number]> = [
+      ["max_tokens: 65536 > 16384, which is the maximum allowed number of output tokens for claude-3-5-sonnet", 16_384],
+      [
+        "max_tokens is too large: 65536. This model supports at most 4096 completion tokens, whereas you provided 65536.",
+        4_096
+      ],
+      [
+        "Invalid 'max_output_tokens': integer above maximum value. Expected a value <= 16384, but got 65536 instead.",
+        16_384
+      ],
+      ["Invalid value at 'generation_config.max_output_tokens' (TYPE_INT32), 65536 exceeds the maximum (8192)", 8_192],
+      ["Invalid max_tokens value, the valid range of max_tokens is [1, 8192]", 8_192],
+      ["max_tokens must be between 1 and 16384", 16_384],
+      ["Request exceeds the model's maximum output tokens of 32,768", 32_768]
+    ]
+    for (const [text, expected] of outputCases) {
+      assert.isNull(statedContextLimit(builtinContextLimitParsers, text), `not context: ${text}`)
+      assert.strictEqual(statedOutputLimit(builtinOutputLimitParsers, text), expected, text)
+    }
+    const contextOnly = [
+      "input length and `max_tokens` exceed context limit: 197000 + 8192 > 200000",
+      "This model's maximum context length is 128000 tokens. However, you requested 130000 tokens (120000 in the messages, 10000 in the completion).",
+      "The input token count (1196265) exceeds the maximum number of tokens allowed (1048576)."
+    ]
+    for (const text of contextOnly) {
+      assert.isNotNull(statedContextLimit(builtinContextLimitParsers, text), `context: ${text}`)
+      assert.isNull(statedOutputLimit(builtinOutputLimitParsers, text), `not output: ${text}`)
+    }
+  })
+
+  const streamCases: ReadonlyArray<{
+    readonly kind: ProviderKind
+    readonly base: (url: string) => string
+    readonly list: unknown
+    readonly key: string
+    readonly body: unknown
+    readonly limit: number
+  }> = [
+    {
+      kind: "anthropic",
+      base: (url) => url,
+      list: { data: [{ id: "claude-sonnet-4-5" }], has_more: false },
+      key: "claude-sonnet-4-5",
+      body: {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message:
+            "max_tokens: 65536 > 16384, which is the maximum allowed number of output tokens for claude-sonnet-4-5"
+        }
+      },
+      limit: 16_384
+    },
+    {
+      kind: "openai-chat",
+      base: (url) => `${url}/v1`,
+      list: { data: [{ id: "custom-model" }] },
+      key: "custom-model",
+      body: {
+        error: {
+          message: "max_tokens is too large: 65536. This model supports at most 8192 completion tokens.",
+          type: "invalid_request_error"
+        }
+      },
+      limit: 8_192
+    },
+    {
+      kind: "google",
+      base: (url) => url,
+      list: { models: [{ name: "models/gemini-2.5-pro" }] },
+      key: "gemini-2.5-pro",
+      body: {
+        error: {
+          code: 400,
+          message:
+            "Invalid value at 'generation_config.max_output_tokens' (TYPE_INT32), 65536 exceeds the maximum (8192)",
+          status: "INVALID_ARGUMENT"
+        }
+      },
+      limit: 8_192
+    },
+    {
+      kind: "deepseek",
+      base: (url) => url,
+      list: { data: [{ id: "deepseek-chat" }] },
+      key: "deepseek-chat",
+      body: {
+        error: {
+          message: "Invalid max_tokens value, the valid range of max_tokens is [1, 8192]",
+          type: "invalid_request_error"
+        }
+      },
+      limit: 8_192
+    }
+  ]
+
+  for (const each of streamCases)
+    it.live(`${each.kind}: a max-tokens error carries the stated outputLimit`, () =>
+      Effect.gen(function* () {
+        const server = yield* mock((request, res) =>
+          request.method === "GET" ? json(res, 200, each.list) : json(res, 400, each.body)
+        )
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const providers = yield* Providers.Providers
+        const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+        const connection = yield* providers.createConnection({
+          userId,
+          kind: each.kind,
+          settings: settings(each.base(server.url)),
+          apiKey: "sk-test"
+        })
+        yield* providers.refreshModels(userId, connection.id)
+        const models = yield* reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
+        const model = models.find((m) => m.key === each.key)
+        assert.isDefined(model, `${each.key} listed`)
+        const error = yield* Stream.runCollect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId: model!.id as ModelId,
+            context: { messages: [{ role: "user", content: "Hello", timestamp: 1 }] },
+            attribution: { purpose: "generation" }
+          })
+        ).pipe(Effect.flip)
+        assert.instanceOf(error, ProviderError)
+        if (!(error instanceof ProviderError)) return
+        assert.strictEqual(error.reason, "bad_request")
+        assert.isUndefined(error.contextLimit)
+        assert.strictEqual(error.outputLimit, each.limit)
       }).pipe(Effect.scoped, Effect.provide(layer()))
     )
 })

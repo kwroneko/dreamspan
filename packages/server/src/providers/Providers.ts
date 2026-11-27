@@ -84,7 +84,7 @@ import { catalogEntry, withCatalog } from "./catalog.ts"
 import { withCatalogs } from "./contextCatalog.ts"
 import type { ListedModel } from "./modelLists.ts"
 import { hasRetryShim, applyShims, providerRules, withShims } from "./shims.ts"
-import { statedContextLimit } from "./contextLimits.ts"
+import { statedContextLimit, statedOutputLimit } from "./contextLimits.ts"
 import {
   classify,
   parseRetryAfter,
@@ -942,8 +942,12 @@ export const layer = (options: ProvidersOptions = {}) =>
       const withStatedLimit = (error: ProviderError): ProviderError => {
         if (!["context_overflow", "bad_request", "unknown"].includes(error.reason)) return error
         const limit = statedContextLimit(registry.contextLimits.list(), error.message)
-        if (limit === null) return error
-        return providerError("context_overflow", error.message, { ...pickExtra(error), contextLimit: limit })
+        if (limit !== null)
+          return providerError("context_overflow", error.message, { ...pickExtra(error), contextLimit: limit })
+        const output = statedOutputLimit(registry.outputLimits.list(), error.message)
+        if (output !== null)
+          return providerError(error.reason, error.message, { ...pickExtra(error), outputLimit: output })
+        return error
       }
       const bindKeysToOrigins = options.bindKeysToOrigins ?? true
 

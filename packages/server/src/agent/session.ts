@@ -306,7 +306,8 @@ const failedOf = (error: ProviderError | GenerationFailed, modelId: string): Gen
     : new GenerationFailed({
         class: error.reason,
         message: error.message,
-        ...(error.contextLimit === undefined ? {} : { contextLimit: { tokens: error.contextLimit, modelId } })
+        ...(error.contextLimit === undefined ? {} : { contextLimit: { tokens: error.contextLimit, modelId } }),
+        ...(error.outputLimit === undefined ? {} : { outputLimit: { tokens: error.outputLimit, modelId } })
       })
 
 /** Runs one agentic reply; the stream ends when the loop does. */

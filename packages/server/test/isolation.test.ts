@@ -1286,6 +1286,12 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         refused(actor.api.SaveLearnedContext({ modelId: owner.modelId, context: 1 }), "NotFound")
       )
   },
+  SaveLearnedOutput: {
+    probe: (actor, owner) =>
+      Effect.flatMap(ownModel(owner), () =>
+        refused(actor.api.SaveLearnedOutput({ modelId: owner.modelId, maxOutput: 1 }), "NotFound")
+      )
+  },
   EditModel: {
     probe: (actor, owner) =>
       Effect.flatMap(ownModel(owner), (theirs) =>

@@ -176,3 +176,17 @@ it("a context-length error that states a limit offers to save it", () => {
     )
   ).toBe("")
 })
+
+it("an output-limit error that states a limit offers to save it", () => {
+  const version = {
+    error: {
+      class: "bad_request",
+      message: "max_tokens: 65536 > 16384, which is the maximum allowed number of output tokens",
+      outputLimit: { tokens: 16_384, modelId: "model-1" }
+    }
+  } as unknown as Version
+  const html = renderToStaticMarkup(
+    createElement(SlotOutlet<{ version: Version }>, { slot: versionFailureActions, props: { version } })
+  )
+  expect(html).toContain("Save 16,384 as its output limit")
+})

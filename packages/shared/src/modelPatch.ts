@@ -7,8 +7,14 @@ import { ModelId, ModelIds, ModelOverrides } from "./providers.ts"
 import { SAMPLER_KEYS } from "./samplerRules.ts"
 
 // The schema supplies the editable leaves. Lists and free-form maps are edited as whole fields.
-// Learned context has its own operation, and the legacy samplers without controls stay as stored.
-const { settings, cacheLayout, learned: _learned, ...overrideFields } = ModelOverrides.fields
+// Learned limits have their own operations, and the legacy samplers without controls stay as stored.
+const {
+  settings,
+  cacheLayout,
+  learned: _learned,
+  learnedOutput: _learnedOutput,
+  ...overrideFields
+} = ModelOverrides.fields
 const { samplers: _samplers, ...settingFields } = settings.schema.fields
 const editablePaths = new Set(
   [

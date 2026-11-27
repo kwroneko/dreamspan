@@ -137,7 +137,10 @@ const runPlainReply = ({
                     message: error.message,
                     ...(error.contextLimit === undefined
                       ? {}
-                      : { contextLimit: { tokens: error.contextLimit, modelId: model.modelId } })
+                      : { contextLimit: { tokens: error.contextLimit, modelId: model.modelId } }),
+                    ...(error.outputLimit === undefined
+                      ? {}
+                      : { outputLimit: { tokens: error.outputLimit, modelId: model.modelId } })
                   })
                 : new GenerationFailed({ class: "server", message: error.message })
           )

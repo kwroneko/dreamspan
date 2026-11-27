@@ -221,7 +221,7 @@ const looseOverrides = (values: Draft): Json =>
       reasoning: flagOf(values.reasoning),
       tools: flagOf(values.tools),
       prefill: values.prefill === "auto" ? undefined : values.prefill
-    }).filter(([key, value]) => value !== undefined && key !== "learned" && key !== "name")
+    }).filter(([key, value]) => value !== undefined && key !== "learned" && key !== "learnedOutput" && key !== "name")
   )
 
 /** The fields whose value, or text as typed, differs between two drafts. */

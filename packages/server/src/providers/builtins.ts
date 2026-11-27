@@ -20,7 +20,7 @@ import { builtinCostFormulas, usageObservers } from "./usage.ts"
 import { builtinImageCounters } from "./imageCounters.ts"
 import { builtinTextCounters } from "./textCounters.ts"
 import { builtinModelCatalogs } from "./contextCatalog.ts"
-import { builtinContextLimitParsers } from "./contextLimits.ts"
+import { builtinContextLimitParsers, builtinOutputLimitParsers } from "./contextLimits.ts"
 import { systemOneKind } from "./systemOne.ts"
 import { bedrockKind } from "./bedrock.ts"
 import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpenAI.ts"
@@ -258,5 +258,6 @@ export const layer = Layer.effectDiscard(
     // A model's window by its id when the list doesn't say, and the limit a context-length error states.
     for (const catalog of builtinModelCatalogs) yield* registry.catalogs.register(catalog)
     for (const parser of builtinContextLimitParsers) yield* registry.contextLimits.register(parser)
+    for (const parser of builtinOutputLimitParsers) yield* registry.outputLimits.register(parser)
   })
 ).pipe(Layer.provideMerge(empty))

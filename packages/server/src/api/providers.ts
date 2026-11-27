@@ -203,6 +203,12 @@ export const makeProviderHandlers = Effect.gen(function* () {
           .SetLearnedContext({ userId: id, modelId, context, at: Date.now() })
           .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedContext"))),
+    SaveLearnedOutput: ({ modelId, maxOutput }) =>
+      Effect.flatMap(userId, (id) =>
+        writer
+          .SetLearnedOutput({ userId: id, modelId, maxOutput, at: Date.now() })
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedOutput"))),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.EditModel({ userId: id, modelId, overrides, expectedRowVersion }).pipe(

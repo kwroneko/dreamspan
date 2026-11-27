@@ -81,7 +81,7 @@ export const sourceTitle = (
   source === "user"
     ? "Set by you"
     : source === "learned"
-      ? "Learned from the provider's context-length error"
+      ? "Learned from the provider's error"
       : source === "catalog" && model.catalog
         ? `From ${model.catalog.label} (${model.catalog.match})`
         : source === "unknown"
@@ -228,6 +228,7 @@ export function ModelSettingsEditor({
 }) {
   const action = useAction()
   const forget = useAction()
+  const forgetOutput = useAction()
   const form = useRef<HTMLFormElement>(null)
   useEffect(() => {
     if (!focus) return
@@ -272,8 +273,9 @@ export function ModelSettingsEditor({
         Object.fromEntries(
           Object.entries({
             ...values.overrides,
-            // A learned size is saved and forgotten by its own buttons, never by a draft's stale copy.
+            // Learned limits are saved and forgotten by their own buttons, never by a draft's stale copy.
             learned: savedModel.overrides.learned,
+            learnedOutput: savedModel.overrides.learnedOutput,
             settings: settingsValue,
             name: values.name.trim() || undefined,
             context: contextLimit.value ?? undefined,
@@ -318,6 +320,7 @@ export function ModelSettingsEditor({
   }
 
   const learned = savedModel.overrides.learned
+  const learnedOutput = savedModel.overrides.learnedOutput
   return (
     <form
       ref={form}
@@ -352,30 +355,59 @@ export function ModelSettingsEditor({
           </div>
         }
         learned={
-          learned && (
-            <Alert
-              title={`Learned context size: ${learned.context.toLocaleString()} tokens`}
-              actions={
-                <Button
-                  variant="ghost"
-                  pending={forget.pending}
-                  hint="Stops using the learned size, so the provider’s figure applies again."
-                  onClick={async () => {
-                    const result = await forget.run(
-                      (client) => client("SaveLearnedContext", { modelId: model.id, context: null }),
-                      ["models"]
-                    )
-                    if (result.ok) setCommitted(result.value)
-                  }}
+          (learned || learnedOutput) && (
+            <div className="flex flex-col gap-3">
+              {learned && (
+                <Alert
+                  title={`Learned context size: ${learned.context.toLocaleString()} tokens`}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      pending={forget.pending}
+                      hint="Stops using the learned size, so the provider’s figure applies again."
+                      onClick={async () => {
+                        const result = await forget.run(
+                          (client) => client("SaveLearnedContext", { modelId: model.id, context: null }),
+                          ["models"]
+                        )
+                        if (result.ok) setCommitted(result.value)
+                      }}
+                    >
+                      Forget it
+                    </Button>
+                  }
                 >
-                  Forget it
-                </Button>
-              }
-            >
-              Saved from the provider&rsquo;s context-length error on {new Date(learned.at).toLocaleDateString()}. A
-              window you set wins over it.
-              <ErrorAlert error={forget.error} />
-            </Alert>
+                  Saved from the provider&rsquo;s context-length error on {new Date(learned.at).toLocaleDateString()}. A
+                  window you set wins over it.
+                  <ErrorAlert error={forget.error} />
+                </Alert>
+              )}
+              {learnedOutput && (
+                <Alert
+                  title={`Learned output limit: ${learnedOutput.maxOutput.toLocaleString()} tokens`}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      pending={forgetOutput.pending}
+                      hint="Stops using the learned output limit, so the provider’s figure applies again."
+                      onClick={async () => {
+                        const result = await forgetOutput.run(
+                          (client) => client("SaveLearnedOutput", { modelId: model.id, maxOutput: null }),
+                          ["models"]
+                        )
+                        if (result.ok) setCommitted(result.value)
+                      }}
+                    >
+                      Forget it
+                    </Button>
+                  }
+                >
+                  Saved from the provider&rsquo;s output-limit error on{" "}
+                  {new Date(learnedOutput.at).toLocaleDateString()}. An output limit you set wins over it.
+                  <ErrorAlert error={forgetOutput.error} />
+                </Alert>
+              )}
+            </div>
           )
         }
       />

@@ -352,6 +352,28 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetLearnedContext")),
 
+    SetLearnedOutput: ({ userId, modelId, maxOutput, at }) =>
+      Effect.gen(function* () {
+        const row = yield* ownedModel(userId, modelId)
+        const { learnedOutput: _, ...overrides } = JSON.parse(row.overrides_json) as Record<string, unknown>
+        void _
+        let next: Record<string, unknown> =
+          maxOutput === null ? overrides : { ...overrides, learnedOutput: { maxOutput, at } }
+        if (maxOutput !== null) {
+          const settings = next.settings as { samplers?: Record<string, unknown> } | undefined
+          const reply = settings?.samplers?.openai_max_tokens
+          if (typeof reply === "number" && reply > maxOutput) {
+            next = {
+              ...next,
+              settings: { ...settings, samplers: { ...settings!.samplers, openai_max_tokens: maxOutput } }
+            }
+          }
+        }
+        yield* sql`UPDATE models SET overrides_json = ${JSON.stringify(next)}, row_version = row_version + 1
+                   WHERE id = ${modelId}`
+        return yield* reloadModel(modelId)
+      }).pipe(transaction(sql, "SetLearnedOutput")),
+
     SetModelEndpoints: ({ userId, modelId, endpoints }) =>
       Effect.gen(function* () {
         yield* ownedModel(userId, modelId)

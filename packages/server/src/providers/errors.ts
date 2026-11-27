@@ -10,7 +10,9 @@ export { ProviderError, ProviderErrorReason } from "@dreamspan/shared/errors.ts"
 export const providerError = (
   reason: ProviderErrorReason,
   message: string,
-  extra: Partial<Pick<ProviderError, "status" | "retryAfterMs" | "category" | "afterTokens" | "contextLimit">> = {}
+  extra: Partial<
+    Pick<ProviderError, "status" | "retryAfterMs" | "category" | "afterTokens" | "contextLimit" | "outputLimit">
+  > = {}
 ) =>
   new ProviderError({
     reason,
@@ -19,7 +21,8 @@ export const providerError = (
     retryAfterMs: extra.retryAfterMs ?? null,
     category: extra.category ?? null,
     afterTokens: extra.afterTokens ?? false,
-    ...(extra.contextLimit === undefined ? {} : { contextLimit: extra.contextLimit })
+    ...(extra.contextLimit === undefined ? {} : { contextLimit: extra.contextLimit }),
+    ...(extra.outputLimit === undefined ? {} : { outputLimit: extra.outputLimit })
   })
 
 /** Retrying these before any output is safe; anything else needs the user. */

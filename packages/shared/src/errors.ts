@@ -102,7 +102,9 @@ export class ProviderError extends Schema.TaggedError<ProviderError>()("Provider
   /** Whether the model had already produced output; such failures are never retried. */
   afterTokens: Schema.Boolean,
   /** For a context-length error, the limit the provider stated in it, when it states one. */
-  contextLimit: Schema.optionalKey(Schema.Int)
+  contextLimit: Schema.optionalKey(Schema.Int),
+  /** For an output-limit error, the max output tokens the provider stated in it, when it states one. */
+  outputLimit: Schema.optionalKey(Schema.Int)
 }) {}
 
 export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {

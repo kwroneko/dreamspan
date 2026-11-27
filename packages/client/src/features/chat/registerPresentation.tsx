@@ -43,7 +43,7 @@ import { BoundPortraits } from "./BoundPortraits.tsx"
 import { boundEditorSurroundings } from "../editor/workspaceViews.ts"
 import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
-import { LearnContextLimit } from "./LearnContextLimit.tsx"
+import { LearnContextLimit, LearnOutputLimit } from "./LearnContextLimit.tsx"
 /** A part whose code loads on first use; `fallback` shows meanwhile (nothing by default). */
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>, fallback: ReactNode = null) {
   const Component = lazy(load)
@@ -139,6 +139,7 @@ export const registerPresentation = () => [
     component: ({ view }) => (view.history?.assemblyError ? <AssemblyRefusal history={view.history} /> : null)
   }),
   versionFailureActions.register({ id: "version.learn-context", order: 10, component: LearnContextLimit }),
+  versionFailureActions.register({ id: "version.learn-output", order: 11, component: LearnOutputLimit }),
   chatComposerNotes.register({
     id: "composer.image-tokens",
     order: 10,

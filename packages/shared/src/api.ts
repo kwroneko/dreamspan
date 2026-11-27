@@ -314,6 +314,16 @@ export class AppCoreApi extends RpcGroup.make(
     success: Model,
     error: Schema.Union([...StorageErrors])
   }),
+  /**
+   * Saves an output limit a provider stated in a max-tokens error as the model's learned output
+   * limit (`ModelOverrides.learnedOutput`), when the user asks; null forgets it. Also brings an
+   * explicit reply length down to the learned limit when it exceeds it.
+   */
+  Rpc.make("SaveLearnedOutput", {
+    payload: { modelId: ModelId, maxOutput: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))) },
+    success: Model,
+    error: Schema.Union([...StorageErrors])
+  }),
   Rpc.make("SetModelHidden", {
     payload: { modelId: ModelId, hidden: Schema.Boolean },
     success: Model,

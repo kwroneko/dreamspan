@@ -2228,6 +2228,12 @@ const WriteOpsChatOwn = RpcGroup.make(
     success: Model,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** Sets or clears the output limit learned from a provider's error, clamping an explicit reply length if higher. */
+  Rpc.make("SetLearnedOutput", {
+    payload: { userId: UserId, modelId: ModelId, maxOutput: Schema.NullOr(Schema.Int), at: Schema.Number },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Stores the endpoint list fetched for a model (a price per provider), replacing an older one. */
   Rpc.make("SetModelEndpoints", {
     payload: { userId: UserId, modelId: ModelId, endpoints: ModelEndpoints },

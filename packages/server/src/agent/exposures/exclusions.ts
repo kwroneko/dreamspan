@@ -293,6 +293,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SaveComposer: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SaveEditorDraft: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SaveLearnedContext: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SaveLearnedOutput: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SaveMessageDraft: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SaveSummaryDraft: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SaveFileDraft: "The editor's own unsaved text of a file; the assistant changes files with its file tools.",

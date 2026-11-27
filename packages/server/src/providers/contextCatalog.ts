@@ -150,37 +150,45 @@ export const familyCatalog: ModelCatalog = {
 export const builtinModelCatalogs: ReadonlyArray<ModelCatalog> = [familyCatalog, piModelCatalog]
 
 /** The first catalog's facts for a model, newest registration first. */
-export const lookupCatalogs = async (catalogs: ReadonlyArray<ModelCatalog>, key: string, kind: string) => {
+export const lookupCatalogs = async (
+  catalogs: ReadonlyArray<ModelCatalog>,
+  key: string,
+  kind: string,
+  need: { readonly context?: boolean; readonly maxOutput?: boolean } = { context: true, maxOutput: true }
+) => {
   for (const catalog of [...catalogs].reverse()) {
     const facts = await catalog.lookup(key, kind).catch(() => null)
-    if (facts && (facts.context !== undefined || facts.maxOutput !== undefined)) return { catalog, facts }
+    if (facts && ((need.context && facts.context !== undefined) || (need.maxOutput && facts.maxOutput !== undefined)))
+      return { catalog, facts }
   }
   return null
 }
 
 /**
- * Fills a model's window (and its output limit, when also missing) from the registered catalogs
- * when neither the list nor the kind's own catalog reported it, recording where they came from.
+ * Fills a model's missing window and/or output limit from the registered catalogs when neither
+ * the list nor the kind's own catalog reported them, recording which fields came from the catalog.
  */
 const fillFromCatalogs = async (
   catalogs: ReadonlyArray<ModelCatalog>,
   kind: string,
   model: ListedModel
 ): Promise<ListedModel> => {
-  if (model.upstream.context !== undefined) return model
-  const found = await lookupCatalogs(catalogs, model.key, kind)
+  const needContext = model.upstream.context === undefined
+  const needOutput = model.upstream.maxOutput === undefined
+  if (!needContext && !needOutput) return model
+  const found = await lookupCatalogs(catalogs, model.key, kind, { context: needContext, maxOutput: needOutput })
   if (!found) return model
   const filled: Partial<Pick<ModelUpstream, "context" | "maxOutput">> = {
-    ...(found.facts.context !== undefined ? { context: found.facts.context } : {}),
-    ...(found.facts.maxOutput !== undefined && model.upstream.maxOutput === undefined
-      ? { maxOutput: found.facts.maxOutput }
-      : {})
+    ...(needContext && found.facts.context !== undefined ? { context: found.facts.context } : {}),
+    ...(needOutput && found.facts.maxOutput !== undefined ? { maxOutput: found.facts.maxOutput } : {})
   }
+  const fields = Object.keys(filled)
+  if (fields.length === 0) return model
   const catalog: CatalogMatch = {
     catalog: found.catalog.id,
     label: found.catalog.label,
     match: found.facts.match,
-    fields: Object.keys(filled)
+    fields
   }
   return { key: model.key, upstream: { ...model.upstream, ...filled, catalog } }
 }

@@ -19,7 +19,18 @@ export interface Row {
 }
 
 /** The overrides with controls of their own at the top of the form, apart from the rest. */
-const OWN = ["name", "context", "maxOutput", "vision", "reasoning", "tools", "prefill", "settings", "learned"] as const
+const OWN = [
+  "name",
+  "context",
+  "maxOutput",
+  "vision",
+  "reasoning",
+  "tools",
+  "prefill",
+  "settings",
+  "learned",
+  "learnedOutput"
+] as const
 
 export interface Draft {
   readonly name: string

@@ -281,8 +281,21 @@ const LearnedContext = Schema.Struct({
   at: Schema.Number
 })
 
+/**
+ * An output limit the provider stated in a max-tokens error, saved by the user from that error
+ * (never applied without them). Its own source: below the user's setting, above the list.
+ */
+const LearnedOutput = Schema.Struct({
+  maxOutput: Schema.Int.check(Schema.isGreaterThan(0)),
+  at: Schema.Number
+})
+
 /** What the user changed. Always wins over the upstream (DATA-MODEL §11). */
-export const ModelOverrides = Schema.Struct({ ...capabilityFields, learned: Schema.optionalKey(LearnedContext) })
+export const ModelOverrides = Schema.Struct({
+  ...capabilityFields,
+  learned: Schema.optionalKey(LearnedContext),
+  learnedOutput: Schema.optionalKey(LearnedOutput)
+})
 export type ModelOverrides = typeof ModelOverrides.Type
 
 /**
@@ -693,13 +706,15 @@ export const resolveModel = (
   const routing = { ...listed.settings, ...overrides.settings }.routing
   const { upstream, ...route } = routedUpstream(listed, routing)
   const priced = routedPrice(upstream, routing)
-  const pick = <K extends Exclude<keyof ModelOverrides, "learned">, A>(
+  const pick = <K extends Exclude<keyof ModelOverrides, "learned" | "learnedOutput">, A>(
     field: K,
     fallback: A
   ): Resolved<NonNullable<ModelOverrides[K]> | A> => {
     const fixed = upstream.fixed?.includes(field as FixedCapability) ?? false
     if (overrides[field] !== undefined && !fixed) return { value: overrides[field]!, source: "user" }
     if (field === "context" && overrides.learned) return { value: overrides.learned.context as A, source: "learned" }
+    if (field === "maxOutput" && overrides.learnedOutput)
+      return { value: overrides.learnedOutput.maxOutput as A, source: "learned" }
     if (upstream[field] !== undefined)
       return { value: upstream[field]!, source: upstream.catalog?.fields.includes(field) ? "catalog" : "upstream" }
     return { value: fallback, source: "unknown" }
