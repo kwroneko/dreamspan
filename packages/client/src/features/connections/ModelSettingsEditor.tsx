@@ -252,7 +252,9 @@ export function ModelSettingsEditor({
   const biasProblem = (values.rows["settings.logit_bias"] ?? rowsOf(settings.logit_bias)).some(biasRowProblem)
   const effective = effectiveLimits(savedModel)
   const window = contextLimit.value ?? effective.context.value
-  const maxOutput = outputLimit.value ?? effective.maxOutput.value
+  const fallbackMaxOutput =
+    effective.maxOutput.source === "unknown" ? Math.min(effective.maxOutput.value, window) : effective.maxOutput.value
+  const maxOutput = outputLimit.value ?? fallbackMaxOutput
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -522,7 +524,9 @@ export function ModelFields({
   const outputLimit = wholeText(values.maxOutput)
   const shownProblem = (key: string) => (submitted ? (problems[key] ?? null) : null)
   const window = contextLimit.value ?? effective.context.value
-  const maxOutput = outputLimit.value ?? effective.maxOutput.value
+  const fallbackMaxOutput =
+    effective.maxOutput.source === "unknown" ? Math.min(effective.maxOutput.value, window) : effective.maxOutput.value
+  const maxOutput = outputLimit.value ?? fallbackMaxOutput
 
   /** A copied value brought down to this model's limits stops saying so once it's changed. */
   const unclamped = (path: ReadonlyArray<string>) => {
@@ -585,11 +589,9 @@ export function ModelFields({
   const contextSetting = sampler("openai_max_context")
   const size = Math.min(typeof contextSetting === "number" ? contextSetting : window, window)
   const replyDefault = Math.max(1, Math.min(maxOutput, DEFAULT_RESPONSE, Math.floor(size / 2)))
-  const limitSource = (resolved: typeof effective.context, assumed: boolean) =>
+  const limitSource = (resolved: typeof effective.context, what: string) =>
     resolved.source === "unknown"
-      ? assumed
-        ? "Assumed: nothing reports this model’s window. Set it with the pencil, or Refresh from provider to match it in a catalog."
-        : "Not reported: a safe default is used. Set it with the pencil if you know it."
+      ? `Assumed: nothing reports this model’s ${what}. Set it with the pencil, or Refresh from provider to match it in a catalog.`
       : `${sourceTitle(resolved.source, effective)}.`
 
   const contextLimitControl: Limit = {
@@ -597,8 +599,8 @@ export function ModelFields({
     value: window,
     source:
       contextLimit.value === null
-        ? limitSource(effective.context, true)
-        : `Set by you. Otherwise ${effective.context.value.toLocaleString()}: ${limitSource(effective.context, true)}`,
+        ? limitSource(effective.context, "window")
+        : `Set by you. Otherwise ${effective.context.value.toLocaleString()}: ${limitSource(effective.context, "window")}`,
     assumed: contextLimit.value === null && effective.context.source === "unknown",
     own: values.context,
     onOwn: (context) => update({ ...values, context }),
@@ -611,9 +613,9 @@ export function ModelFields({
     value: maxOutput,
     source:
       outputLimit.value === null
-        ? limitSource(effective.maxOutput, false)
-        : `Set by you. Otherwise ${effective.maxOutput.value.toLocaleString()}: ${limitSource(effective.maxOutput, false)}`,
-    assumed: false,
+        ? limitSource(effective.maxOutput, "output limit")
+        : `Set by you. Otherwise ${fallbackMaxOutput.toLocaleString()}: ${limitSource(effective.maxOutput, "output limit")}`,
+    assumed: outputLimit.value === null && effective.maxOutput.source === "unknown",
     own: values.maxOutput,
     onOwn: (maxOutput) => update({ ...values, maxOutput }),
     problem: submitted ? outputLimit.problem : null,

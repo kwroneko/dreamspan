@@ -10,6 +10,8 @@ import {
   providerBaseUrl,
   resolveProviderSettings
 } from "../src/providerDefinitions.ts"
+import { ASSUMED_CONTEXT, ASSUMED_MAX_OUTPUT, DEFAULT_RESPONSE, withModelSettings } from "../src/modelSettings.ts"
+import type { LegacyPresetDoc } from "../src/docs/preset.ts"
 import { ProviderSettings, resolveModel } from "../src/providers.ts"
 import { Schema } from "effect"
 
@@ -124,5 +126,37 @@ describe("provider capability defaults", () => {
     expect(resolve("opaque-alias")).toEqual({ value: true, source: "unknown" })
     expect(resolve("deepseek-flash", { vision: false }).value).toBe(false)
     expect(resolve("deepseek-flash", {}, { vision: false }).source).toBe("user")
+  })
+
+  it("assumes a 64K output limit within the window when no source reports one, keeping RP defaults at 4,096", () => {
+    expect(resolveModel("unknown-1m", { context: 1_048_576 }, {}).maxOutput).toEqual({
+      value: ASSUMED_MAX_OUTPUT,
+      source: "unknown"
+    })
+    expect(resolveModel("unknown-default", {}, {}).maxOutput).toEqual({
+      value: ASSUMED_MAX_OUTPUT,
+      source: "unknown"
+    })
+    expect(resolveModel("small-window", { context: 8192 }, {}).maxOutput).toEqual({
+      value: 8192,
+      source: "unknown"
+    })
+    expect(resolveModel("explicit-upstream", { context: 1_048_576, maxOutput: 4096 }, {}).maxOutput).toEqual({
+      value: 4096,
+      source: "upstream"
+    })
+    expect(resolveModel("explicit-user", { context: 1_048_576 }, { maxOutput: 16_384 }).maxOutput).toEqual({
+      value: 16_384,
+      source: "user"
+    })
+    const basePreset = {} as LegacyPresetDoc
+    expect(withModelSettings(basePreset, {}, ASSUMED_CONTEXT, null).samplers.openai_max_tokens).toBe(DEFAULT_RESPONSE)
+    expect(withModelSettings(basePreset, {}, 1_048_576, ASSUMED_MAX_OUTPUT).samplers.openai_max_tokens).toBe(
+      DEFAULT_RESPONSE
+    )
+    expect(
+      withModelSettings(basePreset, { samplers: { openai_max_tokens: 32_768 } }, 1_048_576, null).samplers
+        .openai_max_tokens
+    ).toBe(32_768)
   })
 })

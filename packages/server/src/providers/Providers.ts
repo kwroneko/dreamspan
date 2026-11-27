@@ -896,7 +896,10 @@ const buildPiModel = async (
         : {})
     },
     contextWindow: effective.context.value,
-    maxTokens: effective.maxOutput.value,
+    maxTokens:
+      effective.maxOutput.source === "unknown"
+        ? Math.max(effective.maxOutput.value, effective.settings.samplers?.openai_max_tokens ?? 0)
+        : effective.maxOutput.value,
     ...(effective.cacheTtlS.value !== null ? { promptCache: { short: effective.cacheTtlS.value } } : {}),
     compat: { ...compatDefaults, ...family?.compat, ...effective.compat, ...exclusions } as never,
     ...(Object.keys(effective.sampling).length > 0 ? { samplingParams: { ...effective.sampling } as never } : {})

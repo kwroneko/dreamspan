@@ -1,6 +1,6 @@
 // Connections and models (spec/PROVIDERS.md §2, §3). Shared so the client can show the
 // same kinds, fields and merged model descriptions the server uses.
-import { ASSUMED_CONTEXT, ModelSettings } from "./modelSettings.ts"
+import { ASSUMED_CONTEXT, ASSUMED_MAX_OUTPUT, ModelSettings } from "./modelSettings.ts"
 import { openAIStructuredTools } from "./modelFamilies.ts"
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
@@ -599,7 +599,8 @@ export const routedUpstream = (
  * Where a field's value came from: the user's setting, a limit learned from a provider's error,
  * the provider's list, a catalog matched by the model's id, the connection's provider (its
  * default or the user's change to it, for caching), or `unknown`: no source knows it and a
- * default is used (for the context window, `ASSUMED_CONTEXT`, shown as assumed).
+ * default is used (`ASSUMED_CONTEXT` for the context window and `ASSUMED_MAX_OUTPUT` within it
+ * for output, both shown as assumed).
  */
 export type FieldSource = "user" | "learned" | "upstream" | "catalog" | "provider" | "unknown"
 
@@ -672,7 +673,6 @@ const providerVision = (connection: ModelConnection | undefined, key: string): b
       openAIStructuredTools.test(key)))
 
 /** Defaults for fields no source knows, shown as unknown, never as "no". Vision is on unless a source says no (owner, 2026-11-25). */
-const DEFAULT_MAX_OUTPUT = 4096
 
 /**
  * Merges a model's sources, user edits first (PROVIDERS §3.1): the user's value, for the context
@@ -748,10 +748,12 @@ export const resolveModel = (
     upstream.routes?.some(
       (rule) => rule.capabilities?.prefill === "none" && rule.upstreams.some((u) => reachable(u.slug))
     )
+  const context = pick("context", ASSUMED_CONTEXT)
+  const maxOutput = pick("maxOutput", Math.min(ASSUMED_MAX_OUTPUT, context.value))
   return {
     name: pick("name", key),
-    context: pick("context", ASSUMED_CONTEXT),
-    maxOutput: pick("maxOutput", DEFAULT_MAX_OUTPUT),
+    context,
+    maxOutput,
     vision:
       vision.source === "unknown" && providerVision(connection, key) ? { value: true, source: "provider" } : vision,
     maxImages: pick("maxImages", 4),

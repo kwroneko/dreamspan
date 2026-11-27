@@ -193,12 +193,18 @@ for (const [width, height] of [
     await window.fill("60000")
     await expect(length.locator('[data-limit="context"]')).toContainText("Max 60,000")
 
-    // Reply length: below its default by one (log) step.
+    // Reply length: assumed output ceiling fits the edited window, and the slider moves above and below 4,096.
     const reply = length.getByRole("textbox", { name: "Reply length", exact: true })
+    await expect(length.locator('[data-limit="maxOutput"]')).toContainText("Max 60,000 (assumed)")
     await expect(reply).toHaveAttribute("placeholder", "4,096")
-    await length.getByRole("slider", { name: "Reply length slider" }).focus()
+    const replySlider = length.getByRole("slider", { name: "Reply length slider" })
+    await replySlider.focus()
+    await page.keyboard.press("End")
+    await expect(reply).toHaveValue("60000")
+    await reply.fill("")
+    await replySlider.focus()
     await page.keyboard.press("ArrowLeft")
-    await expect(reply).toHaveValue("3900")
+    await expect(reply).toHaveValue("3800")
 
     // A sampler: slid, then typed.
     const temperature = samplers.getByRole("textbox", { name: "Temperature", exact: true })
@@ -221,7 +227,7 @@ for (const [width, height] of [
     expect(stored.overrides.context).toBe(60000)
     expect(stored.overrides.settings?.samplers).toMatchObject({
       openai_max_context: 50000,
-      openai_max_tokens: 3900,
+      openai_max_tokens: 3800,
       temperature: 0.7
     })
     expect(stored.overrides.sampling).toEqual({ top_n_sigma: 1.5 })
@@ -234,7 +240,7 @@ for (const [width, height] of [
     await expect(dialog.getByRole("textbox", { name: "Your context window (tokens)", exact: true })).toHaveValue(
       "60000"
     )
-    await expect(dialog.getByRole("textbox", { name: "Reply length", exact: true })).toHaveValue("3900")
+    await expect(dialog.getByRole("textbox", { name: "Reply length", exact: true })).toHaveValue("3800")
     await expect(dialog.getByRole("textbox", { name: "Temperature", exact: true })).toHaveValue("0.7")
     // Advanced was open, and the URL keeps it open.
     await expect(dialog.getByRole("textbox", { name: "Parameter value 1", exact: true })).toHaveValue("1.5")

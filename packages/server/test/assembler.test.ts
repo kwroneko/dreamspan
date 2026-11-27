@@ -1033,6 +1033,35 @@ describe("the context assembler", () => {
       }
     })
 
+    it("sizes workshop replies from the assumed 64K output ceiling within a quarter of context when maxOutput is unknown", async () => {
+      const workshopOptions = {
+        agent: { instructions: "", speakerCardOnly: false, response: "model" as const }
+      }
+      const big = await assembled(
+        { ...withExamples, model: model({ context: 1_048_576, maxOutput: null, settings: {} }) },
+        workshopOptions
+      )
+      expect(big.contextBudget?.responseReserve).toBe(65_536)
+
+      const medium = await assembled(
+        { ...withExamples, model: model({ context: 128_000, maxOutput: null, settings: {} }) },
+        workshopOptions
+      )
+      expect(medium.contextBudget?.responseReserve).toBe(32_000)
+
+      const small = await assembled(
+        { ...withExamples, model: model({ context: 16_384, maxOutput: null, settings: {} }) },
+        workshopOptions
+      )
+      expect(small.contextBudget?.responseReserve).toBe(4096)
+
+      const explicit = await assembled(
+        { ...withExamples, model: model({ context: 1_048_576, maxOutput: 8192, settings: {} }) },
+        workshopOptions
+      )
+      expect(explicit.contextBudget?.responseReserve).toBe(8192)
+    })
+
     it("cuts to the model's Context to send, and the notes give its size", async () => {
       const snapshot = await assembled({
         ...withExamples,

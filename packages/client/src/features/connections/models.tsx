@@ -25,15 +25,16 @@ export function Value({
   resolved: ReturnType<typeof resolveModel>["context"]
   model: ReturnType<typeof resolveModel>
   show: (n: number) => string
-  /** Says "assumed" instead of "?": the context window's default is a guess shown as one. */
-  assumed?: boolean
+  /** Says "assumed" instead of "?": an unreported limit's default is a guess shown as one. */
+  assumed?: boolean | string
 }) {
+  const assumedLabel = typeof assumed === "string" ? assumed : "window"
   return resolved.source === "unknown" ? (
     <span
       className="text-muted"
       title={
         assumed
-          ? "Assumed: nothing reports this model's window. Set it in Edit, or refresh to match it in a catalog."
+          ? `Assumed: nothing reports this model's ${assumedLabel}. Set it in Edit, or refresh to match it in a catalog.`
           : sourceTitle(resolved.source, model)
       }
     >

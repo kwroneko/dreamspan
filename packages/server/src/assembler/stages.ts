@@ -10,7 +10,7 @@ import { budgetTokens } from "@dreamspan/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@dreamspan/shared/replySections.ts"
 import { modelName } from "@dreamspan/shared/cardNames.ts"
 import { nameBlock, speakerLabel } from "./contextMarkup.ts"
-import { DEFAULT_RESPONSE, withModelSettings } from "@dreamspan/shared/modelSettings.ts"
+import { ASSUMED_MAX_OUTPUT, withModelSettings } from "@dreamspan/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@dreamspan/shared/lcmSettings.ts"
 import {
   agentInstructionsPlace,
@@ -315,7 +315,7 @@ const presetStage: AssemblerStage = {
             ...assembly.preset.doc,
             samplers: {
               ...samplers,
-              openai_max_tokens: Math.max(1, Math.min(model.maxOutput ?? DEFAULT_RESPONSE, Math.floor(size / 4)))
+              openai_max_tokens: Math.max(1, Math.min(model.maxOutput ?? ASSUMED_MAX_OUTPUT, Math.floor(size / 4)))
             }
           }
         }

@@ -168,11 +168,14 @@ export function ModelMassEditDialog({
   const ownOutput = ticked.has("maxOutput") ? wholeText(values.maxOutput).value : undefined
   const targets = selected.map((model) => {
     const limits = effectiveLimits(model)
+    const context = (ownContext === undefined ? model.overrides.context : ownContext) ?? limits.context.value
+    const fallbackOutput =
+      limits.maxOutput.source === "unknown" ? Math.min(limits.maxOutput.value, context) : limits.maxOutput.value
     return {
       id: model.id,
       limits: {
-        context: (ownContext === undefined ? model.overrides.context : ownContext) ?? limits.context.value,
-        maxOutput: (ownOutput === undefined ? model.overrides.maxOutput : ownOutput) ?? limits.maxOutput.value
+        context,
+        maxOutput: (ownOutput === undefined ? model.overrides.maxOutput : ownOutput) ?? fallbackOutput
       }
     }
   })

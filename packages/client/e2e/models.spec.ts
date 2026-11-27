@@ -28,9 +28,9 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   await page.getByRole("button", { name: "Refresh from provider" }).click()
   await expect(page.getByText("0 added, 2 updated")).toBeVisible()
   await expect(models.getByText("Fake Large")).toBeVisible()
-  // The listed context, from the provider; the output limit nobody reported is marked unknown.
+  // The listed context, from the provider; the output limit nobody reported is shown as assumed.
   await expect(models.getByRole("row").filter({ hasText: "Fake Large" })).toContainText("Context 131.1k")
-  await expect(models.getByRole("row").filter({ hasText: "Fake Large" })).toContainText("Output 4.1k?")
+  await expect(models.getByRole("row").filter({ hasText: "Fake Large" })).toContainText("Output 65.5k (assumed)")
 
   await page.getByRole("button", { name: "Hide fake-small" }).click()
   // All lists it, marked hidden; Visible leaves it out.
@@ -86,7 +86,7 @@ test("model settings take typed decimals and keep the reply length apart from th
   await dialog.getByRole("button", { name: "Save model settings" }).click()
   await expect(dialog).toBeHidden()
   // The reply length is a setting; the output limit the provider reports is unchanged.
-  await expect(models.getByRole("row").filter({ hasText: "Fake Large" })).toContainText("Output 4.1k?")
+  await expect(models.getByRole("row").filter({ hasText: "Fake Large" })).toContainText("Output 65.5k (assumed)")
 
   await page.getByRole("button", { name: "Edit fake-large" }).click()
   await expect(field("Temperature")).toHaveValue("0.7")

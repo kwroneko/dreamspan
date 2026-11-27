@@ -99,7 +99,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Models"
-        about="* marks your own values, ? values nobody reports; a context size nobody reports is assumed."
+        about="* marks your own values; a context size or output limit nobody reports is assumed."
         actions={
           <>
             <Button
@@ -699,14 +699,14 @@ const ModelRow = memo(function ModelRow({
         )}
       </div>
       <div className={LIMITS}>
-        {/* In its column, an assumed window's "(assumed)" goes under the figure: both don't fit. */}
+        {/* In its column, an assumed limit's "(assumed)" goes under the figure: both don't fit. */}
         <div role="cell" className={`${CONTEXT} tabular-nums whitespace-nowrap @xl:whitespace-normal`}>
           <span className="text-muted @xl:hidden">Context </span>
-          <Value resolved={resolved.context} model={resolved} show={tokens} assumed />
+          <Value resolved={resolved.context} model={resolved} show={tokens} assumed="window" />
         </div>
-        <div role="cell" className={`${OUTPUT} tabular-nums whitespace-nowrap`}>
+        <div role="cell" className={`${OUTPUT} tabular-nums whitespace-nowrap @xl:whitespace-normal`}>
           <span className="text-muted @xl:hidden">Output </span>
-          <Value resolved={resolved.maxOutput} model={resolved} show={tokens} />
+          <Value resolved={resolved.maxOutput} model={resolved} show={tokens} assumed="output limit" />
         </div>
         <div role="cell" className={`${PRICE} tabular-nums whitespace-nowrap`}>
           {shown && (

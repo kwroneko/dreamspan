@@ -49,6 +49,11 @@ export type ModelSettings = typeof ModelSettings.Type
  * catalog, a limit learned from an error): a modern size, always shown as assumed.
  */
 export const ASSUMED_CONTEXT = 128_000
+/**
+ * The output limit assumed when no source reports the model's (its setting, the provider's list,
+ * a catalog): a modern ceiling within the context window, always shown as assumed.
+ */
+export const ASSUMED_MAX_OUTPUT = 65_536
 /** The response length a model without its own gets, within its output limit and half its context. */
 export const DEFAULT_RESPONSE = 4096
 
