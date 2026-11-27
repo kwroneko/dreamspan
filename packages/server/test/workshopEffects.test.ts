@@ -467,6 +467,7 @@ describe("workshop setup effects", () => {
             "clone_card",
             "revert_change",
             "start_chat",
+            "set_background",
             // A card attached as a file (spec/WORKSHOP-CARDS.md §4.5).
             "import_card_file",
             ...[...builtinOperationExposures, ...cardSourceExposures]
@@ -618,6 +619,7 @@ describe("workshop setup effects", () => {
                 "edit_card_note",
                 "clone_card",
                 "start_chat",
+                "set_background",
                 ...builtinOperationExposures
                   .filter((e) => e.capability === "library.write" || e.capability === "chats.setup")
                   .map((e) => e.id)

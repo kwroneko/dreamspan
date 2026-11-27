@@ -1,3 +1,4 @@
+import { SceneBackground } from "./chatBackgrounds.ts"
 import { LcmSettings } from "./lcmSettings.ts"
 // Chat state on the graph (DESIGN §3.4, DATA-MODEL §5). Every change to chat state is
 // an event at a position; the state at a slot is the fold of the events on the path
@@ -43,6 +44,7 @@ const StorySlotId = idSchema("SlotId", "storySlot")
  * are registered through the same API as these built-ins.
  */
 export const StateEventData = Schema.Union([
+  event("chat.background", SceneBackground),
   event("lcm.settings", LcmSettings),
   event("card.swap", Schema.Struct({ entity: EntityId, replaces: EntityId })),
   event("participant.join", Schema.Struct({ entity: EntityId })),
@@ -320,6 +322,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.below_history": { ids: {} },
   "context.html_depth": { ids: {} },
   "var.set": { ids: {} },
+  "chat.background": { ids: {} },
   "workshop.attached": { ids: { chat: { table: "chat" } } },
   "workshop.paired": { ids: { fork: { table: "storyFork" } } },
   "workshop.story_at": { ids: { leaf: { table: "storySlot" } } },
@@ -503,6 +506,7 @@ interface Binding {
 }
 
 export interface ChatState {
+  readonly background: SceneBackground | null
   readonly lcm: typeof LcmSettings.Type | null
   /** In join order. */
   readonly participants: ReadonlyArray<string>
@@ -580,6 +584,7 @@ export interface ChatState {
 }
 
 const emptyChatState: ChatState = {
+  background: null,
   lcm: null,
   participants: [],
   absent: [],
@@ -804,6 +809,8 @@ const applyCore = (
       return { ...state, loreBelowHistory: data.value.on }
     case "context.html_depth":
       return { ...state, htmlDepth: data.value }
+    case "chat.background":
+      return { ...state, background: data.value }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "workshop.attached":

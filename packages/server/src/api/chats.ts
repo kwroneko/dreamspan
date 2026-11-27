@@ -1,3 +1,4 @@
+import { Notices } from "../chat/Notices.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
 import { EffectUndoRefused } from "@dreamspan/shared/errors.ts"
 import { GenerationFailed } from "../chat/Generator.ts"
@@ -98,6 +99,7 @@ export const makeChatHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const files = yield* WorkshopFiles
   const sendAttachments = yield* makeAttachmentSend
+  const notices = yield* Notices
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
   const generations = yield* Generations
@@ -1083,7 +1085,11 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.GetDisplayPrefs({ userId: id })).pipe(internal("GetDisplayPrefs")),
 
     SetDisplayPrefs: ({ prefs }) =>
-      Effect.flatMap(userId, (id) => writer.SetDisplayPrefs({ userId: id, prefs })).pipe(internal("SetDisplayPrefs")),
+      Effect.flatMap(userId, (id) =>
+        writer
+          .SetDisplayPrefs({ userId: id, prefs })
+          .pipe(Effect.tap(() => Effect.sync(() => notices.publish(id, { _tag: "DisplayPrefsChanged" }))))
+      ).pipe(internal("SetDisplayPrefs")),
 
     ListBranches: ({ slotId, forkId }) =>
       Effect.flatMap(userId, (id) => reader.ListBranches({ userId: id, slotId, forkId: forkId ?? null })).pipe(

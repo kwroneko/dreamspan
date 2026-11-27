@@ -576,6 +576,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
     return new Cast({
       slotId,
+      ...(state.background === null ? {} : { background: state.background }),
       participants: state.participants as Cast["participants"],
       absent: state.absent as Cast["absent"],
       ...(awayAt(state).length ? { away: awayAt(state) as Cast["absent"] } : {}),
@@ -848,7 +849,18 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const call = yield* OperationCall
         const exact = (call?.expected as { proof?: { storyAt?: unknown } } | undefined)?.proof?.storyAt !== undefined
-        return yield* castAt(yield* userId, chatId, slotId, forkId, !exact)
+        const id = yield* userId
+        const cast = yield* castAt(id, chatId, slotId, forkId, !exact)
+        if (cast.background?.mode !== "image") return cast
+        const available = yield* reader
+          .GetMediaFile({ userId: id, mediaId: cast.background.mediaId, backgroundOnly: true })
+          .pipe(
+            Effect.as(true),
+            Effect.catchTag("NotFound", () => Effect.succeed(false))
+          )
+        if (available) return cast
+        const { background: _, ...rest } = cast
+        return new Cast(rest)
       }).pipe(internal("GetCast")),
 
     GetCasts: ({ chatId, slotIds, forkId }) =>

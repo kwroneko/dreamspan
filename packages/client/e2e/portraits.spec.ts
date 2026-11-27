@@ -51,7 +51,7 @@ const chat = async (page: Page) => {
   await expect(page.locator("article[data-slot]")).toHaveCount(3)
 }
 const select = async (page: Page, field: string, option: string) => {
-  const display = await openPanel(page, "Interface")
+  const display = await openPanel(page, "Display")
   await display.getByLabel(field, { exact: true }).click()
   await page.getByRole("option", { name: option, exact: true }).click()
   if (option === "Large (84 × 126)") {

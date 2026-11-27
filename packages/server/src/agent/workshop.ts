@@ -43,6 +43,7 @@ export const workshopMode: OrchestrationMode = {
       "diff_revisions",
       "revert_change",
       "start_chat",
+      "set_background",
       // A subagent inside the reply (spec/SUBAGENTS.md §2.1), under the `subagents` capability.
       "agent",
       // Messages to its subagents, running or finished (§4).

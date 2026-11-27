@@ -1,3 +1,4 @@
+import { sceneBackgroundName } from "@dreamspan/shared/chatBackgrounds.ts"
 // The timeline's change markers (DESIGN §3.4): a quiet line under the message after which
 // something the next replies are written from changed: who's in the chat, who's muted, which
 // notes are on, the chat's own model or preset, a lorebook, a chat setting. Derived from the
@@ -584,8 +585,28 @@ const settingsKind = folded({
   ]
 })
 
+const backgroundKind = folded({
+  id: "background",
+  order: 80,
+  label: "Scene background",
+  description: "Shows where the background changes in the story.",
+  keys: ["chat.background"],
+  open: { panel: "interface", label: "Display" },
+  changes: (before, after) => {
+    const background = after.background
+    if (background === null || JSON.stringify(before.background) === JSON.stringify(background)) return []
+    return [
+      {
+        id: "background",
+        text: `Background: ${sceneBackgroundName(background)}`,
+        explanation: "Applies from this reply on this branch when you follow the scene in Display."
+      }
+    ]
+  }
+})
+
 export const registerStateMarkerKinds = () =>
-  [castKind, muteKind, notesKind, modelKind, presetKind, lorebookKind, settingsKind].map((kind) =>
+  [castKind, muteKind, notesKind, modelKind, presetKind, lorebookKind, settingsKind, backgroundKind].map((kind) =>
     stateMarkerKinds.register(kind)
   )
 

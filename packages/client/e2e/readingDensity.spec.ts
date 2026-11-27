@@ -144,7 +144,7 @@ const stopWatching = (page: Page) =>
 
 /** Picks a spacing in the Interface panel, as a user does. */
 const choose = async (page: Page, density: Density, keepOpen = false) => {
-  const tab = await openPanel(page, "Interface")
+  const tab = await openPanel(page, "Display")
   const radio = tab.getByRole("radio", { name: density === "compact" ? /^Compact/ : /^Comfortable/ })
   await radio.scrollIntoViewIfNeeded()
   await radio.click()
@@ -249,7 +249,7 @@ for (const width of [1440, 390] as const)
       await shoot(page, `comfortable-end-${width}-${theme}`)
 
       // The control is with the other chat display choices, and explains itself.
-      const tab = await openPanel(page, "Interface")
+      const tab = await openPanel(page, "Display")
       await expect(tab.getByRole("group", { name: "Message spacing" })).toBeVisible()
       await expect(tab.getByRole("radio", { name: /^Comfortable/ })).toBeChecked()
       await expectLayout(page, info, `interface panel ${width} ${theme}`)
@@ -281,7 +281,7 @@ for (const width of [1440, 390] as const)
           }).length
       )
       for (const density of ["compact", "comfortable", "compact"] as const) {
-        if (!phone) await openPanel(page, "Interface")
+        if (!phone) await openPanel(page, "Display")
         await page.waitForTimeout(300)
         const before = (await reading(page))!
         expect(before).not.toBeNull()

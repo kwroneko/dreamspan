@@ -442,7 +442,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     return resolved
   }
 
-  const authorize = (ctx: ToolContext, capability: string, use?: "import" | "portrait") =>
+  const authorize = (ctx: ToolContext, capability: string, use?: "import" | "portrait" | "background") =>
     deps.reader.AuthorizePluginTool({
       userId: ctx.userId,
       rolloutId: ctx.rolloutId,
@@ -454,7 +454,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     })
 
   /** The capability's standing, checked again at the call; the account; its folders made. */
-  const proof = (ctx: ToolContext, capability: string, use?: "import" | "portrait") =>
+  const proof = (ctx: ToolContext, capability: string, use?: "import" | "portrait" | "background") =>
     Effect.gen(function* () {
       const actor = yield* authorize(ctx, capability, use)
       ctx.cache.set(ACTOR_KEY, actor)
@@ -1181,50 +1181,66 @@ export const makeFileTools = (deps: FileToolDeps) => {
       })
   })
 
-  // --- a card's portrait from an image (create_card / edit_card `portrait`, agent/portraits.ts)
+  // Pictures use the same no-follow file reader and the format worker as other image uploads.
+  const readToolImage = Effect.fnUntraced(function* (ctx: ToolContext, path: string, use: "portrait" | "background") {
+    const capability = use === "portrait" ? "library.write" : "chats.setup"
+    const { env } = yield* proof(ctx, capability, use)
+    const place = yield* readPlace(ctx, env, path)
+    const read = yield* attempt(() => readRegularFile(place.hostRoot, place.segments, PORTRAIT_MAX_BYTES))
+    if (read.truncated)
+      return yield* Effect.fail(
+        new FilePathRefused(`${place.full} is larger than ${PORTRAIT_MAX_BYTES / 2 ** 20} MiB, too big for a ${use}.`)
+      )
+    const bytes = read.bytes
+    const image = describeImage(bytes)
+    if (!PORTRAIT_TYPES.has(image.mime))
+      return yield* Effect.fail(
+        new FilePathRefused(`${place.full} isn't a PNG, JPEG, GIF or WebP image, so it can't be a ${use}.`)
+      )
+    if (!deps.formats || !(yield* deps.formats.validateImage(bytes)))
+      return yield* Effect.fail(
+        new FilePathRefused(`${place.full} couldn't be decoded as an image (it may be damaged or too large).`)
+      )
+    return { bytes, media: { sha256: sha256(bytes), byteSize: bytes.byteLength, ...image } }
+  })
+
+  const imageFailure = <A, E>(effect: Effect.Effect<A, E>) =>
+    effect.pipe(
+      Effect.catchCause((cause) => {
+        const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
+        const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
+        return Effect.fail(
+          (value as { _tag?: string } | undefined)?._tag !== undefined || value instanceof FilePathRefused
+            ? (value as E | Error)
+            : new FilePathRefused(refusedText(value))
+        )
+      })
+    )
+
   const portraits: PortraitSource = {
     id: "files",
     apply: (ctx, path, commit) =>
-      Effect.gen(function* () {
-        const { env } = yield* proof(ctx, "library.write", "portrait")
-        const place = yield* readPlace(ctx, env, path)
-        const read = yield* attempt(() => readRegularFile(place.hostRoot, place.segments, PORTRAIT_MAX_BYTES))
-        if (read.truncated)
-          return yield* Effect.fail(
-            new FilePathRefused(
-              `${place.full} is larger than ${PORTRAIT_MAX_BYTES / 2 ** 20} MiB, too big for a portrait.`
+      imageFailure(
+        Effect.gen(function* () {
+          const { bytes, media } = yield* readToolImage(ctx, path, "portrait")
+          const done = yield* withWorkshopMediaQuota(ctx, deps.quota, [media], "save a portrait", (maxAddedBytes) =>
+            deps.holding(
+              [media.sha256],
+              Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit({ ...media, maxAddedBytes }))
             )
           )
-        const bytes = read.bytes
-        const image = describeImage(bytes)
-        if (!PORTRAIT_TYPES.has(image.mime))
-          return yield* Effect.fail(
-            new FilePathRefused(
-              `${place.full} isn't a PNG, JPEG, GIF or WebP image, so it can't be a portrait. Read the path with read_file to check what it is.`
-            )
-          )
-        if (!deps.formats || !(yield* deps.formats.validateImage(bytes)))
-          return yield* Effect.fail(
-            new FilePathRefused(`${place.full} couldn't be decoded as an image (it may be damaged or too large).`)
-          )
-        const media = { sha256: sha256(bytes), byteSize: bytes.byteLength, ...image }
-        const done = yield* withWorkshopMediaQuota(ctx, deps.quota, [media], "save a portrait", (maxAddedBytes) =>
-          deps.holding(
+          if (deps.formats)
+            yield* prepareAvatarThumbnails(deps.formats, deps.dataDir, [{ role: "avatar", sha256: media.sha256 }])
+          return done
+        })
+      ) as never,
+    background: (ctx, path, commit) =>
+      imageFailure(
+        Effect.gen(function* () {
+          const { bytes, media } = yield* readToolImage(ctx, path, "background")
+          return yield* deps.holding(
             [media.sha256],
-            Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit({ ...media, maxAddedBytes }))
-          )
-        )
-        yield* prepareAvatarThumbnails(deps.formats, deps.dataDir, [{ role: "avatar", sha256: media.sha256 }])
-        return done
-      }).pipe(
-        Effect.catchCause((cause) => {
-          const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
-          const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
-          // The card write's own refusals keep their shape; file problems become plain text.
-          return Effect.fail(
-            (value as { _tag?: string } | undefined)?._tag !== undefined || value instanceof FilePathRefused
-              ? (value as Error)
-              : new FilePathRefused(refusedText(value))
+            Effect.andThen(storeMedia(deps.dataDir, media.sha256, bytes), commit(media))
           )
         })
       ) as never

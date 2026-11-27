@@ -356,7 +356,7 @@ const GROUPED = "button:not([aria-expanded]), select, [role=combobox]:not(input)
 
 /** A row of controls that belong together (`max-w-controls`, styles.css): 40rem. */
 const GROUP = 640
-const TABS = ["This chat", "Cast", "Model", "Lorebooks", "Notes", "Summaries", "Interface", "Snippets", "Mira"]
+const TABS = ["This chat", "Cast", "Model", "Lorebooks", "Notes", "Summaries", "Display", "Snippets", "Mira"]
 
 /** The paragraphs in `scope` with a line longer than 80 characters of their own type. */
 const longLines = (scope: Locator) =>
@@ -424,8 +424,8 @@ for (const theme of ["light", "dark"] as const)
     const miraNotes = (await notes.getByRole("region", { name: "Mira's notes" }).boundingBox())!
     expect(miraNotes.x).toBeGreaterThan(chatNotes.x + chatNotes.width)
     // Interface: colour swatches, not bars.
-    await panelTab(page, "Interface")
-    const swatch = page.getByRole("tabpanel", { name: "Interface" }).getByLabel("Main text colour", { exact: true })
+    await panelTab(page, "Display")
+    const swatch = page.getByRole("tabpanel", { name: "Display" }).getByLabel("Main text colour", { exact: true })
     expect((await swatch.boundingBox())!.width).toBeLessThanOrEqual(96)
 
     // The sidebar's chats: one column, the rows using the width for their text.

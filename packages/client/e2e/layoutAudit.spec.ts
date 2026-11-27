@@ -1145,8 +1145,8 @@ test.describe("synthetic library and every app surface", () => {
           await page.goto(`${server.url}/chats/${chatId}`)
           await openPanel(page, "This chat")
           await audit("html-chat-settings", '[role="tabpanel"][aria-label="This chat"]')
-          await openPanel(page, "Interface")
-          await audit("html-interface", '[role="tabpanel"][aria-label="Interface"]')
+          await openPanel(page, "Display")
+          await audit("html-interface", '[role="tabpanel"][aria-label="Display"]')
           await openPanel(page, cardName)
           await page.getByRole("tab", { name: "Extra", exact: true }).click()
           await audit("html-card-panel", '[data-card-tabs] [role="tabpanel"]')
@@ -1157,9 +1157,9 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
           await page.goto(`${server.url}/chats/${chatId}`)
-          await openPanel(page, "Interface")
+          await openPanel(page, "Display")
           const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
-          await expect(tabs.getByRole("tab", { name: "Interface", exact: true })).toBeVisible()
+          await expect(tabs.getByRole("tab", { name: "Display", exact: true })).toBeVisible()
           const bar = tabs.locator("../..")
           await bar.evaluate((element) => element.setAttribute("data-interface-tabs-audit", ""))
           await bar.screenshot({ path: join(work, `${width}-${theme}-interface-tabs.png`) })
@@ -1955,8 +1955,8 @@ test.describe("synthetic library and every app surface", () => {
           await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("chat-before-display", `/chats/${chatId}`)
-          await openPanel(page, "Interface")
-          await audit("panel-Interface")
+          await openPanel(page, "Display")
+          await audit("panel-Display")
           return
         }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
@@ -2020,7 +2020,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Interface",
+            "Display",
             "Snippets",
             "History edits"
           ]
@@ -2088,7 +2088,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Interface",
+            "Display",
             "Snippets",
             "History edits"
           ]) {
@@ -2377,7 +2377,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Interface",
+            "Display",
             "Snippets",
             "History edits"
           ]) {

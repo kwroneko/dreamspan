@@ -1,4 +1,10 @@
-import { BACKGROUNDS_KEY, BackgroundHolds, readBackgroundHolds } from "./backgroundMedia.ts"
+import {
+  BACKGROUNDS_KEY,
+  BackgroundHolds,
+  isLocalBackgroundKey,
+  LocalBackgroundHolds,
+  readBackgroundHolds
+} from "./backgroundMedia.ts"
 import { PluginPins } from "@dreamspan/shared/plugins.ts"
 import { ExternalMediaPrefs } from "@dreamspan/shared/externalMedia.ts"
 import { MediaHosts } from "@dreamspan/shared/savedMedia.ts"
@@ -199,7 +205,9 @@ export const writeSetting = Effect.fnUntraced(function* (
   value: unknown,
   expectedRevision?: number
 ) {
-  const definition = settingsRegistry.get(key)
+  const definition = isLocalBackgroundKey(key)
+    ? { scope: "user", accepts: Schema.is(LocalBackgroundHolds) }
+    : settingsRegistry.get(key)
   if (!definition || definition.scope !== scope || !definition.accepts(value))
     return yield* new StorageError({
       operation: "writeSetting",
@@ -216,14 +224,25 @@ export const writeSetting = Effect.fnUntraced(function* (
     })
   // Other account setting writers (including settings undo) use the same ownership boundary.
   if (key === "display" && Schema.is(DisplayPrefs)(value)) {
-    const choices = [value.chatBackground.mediaId, ...Object.values(value.chatBackgrounds)]
-    if (choices.some((id) => id !== null)) {
+    const { chatBackground, chatBackgrounds, workshopBackground } = value
+    const globals = [chatBackground.mediaId, workshopBackground === "inherit" ? null : workshopBackground]
+    const overrides = Object.entries(chatBackgrounds).filter(([, id]) => typeof id === "string")
+    if (globals.some((id) => id !== null) || overrides.length > 0) {
       const gallery = new Set((yield* readBackgroundHolds(sql, scopeId)).map(({ mediaId }) => mediaId))
-      if (choices.some((id) => id !== null && !gallery.has(id)))
+      const missingGlobal = globals.some((id) => id !== null && !gallery.has(id))
+      let missingLocal = false
+      for (const [chatId, id] of overrides) {
+        if (id === null || gallery.has(id)) continue
+        if (!(yield* readBackgroundHolds(sql, scopeId, chatId)).some((entry) => entry.mediaId === id)) {
+          missingLocal = true
+          break
+        }
+      }
+      if (missingGlobal || missingLocal)
         return yield* new StorageError({
           operation: "writeSetting",
           reason: "constraint",
-          message: "Chat backgrounds must belong to your gallery."
+          message: "Chat backgrounds must belong to an available gallery."
         })
     }
   }

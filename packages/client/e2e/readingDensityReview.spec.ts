@@ -129,7 +129,7 @@ test("a second tab receives the account's spacing choice", async ({ context, pag
   const second = await context.newPage()
   await second.goto(`${server().url}/chats/${chatId}`)
   await expect(second.getByTestId("messages")).toHaveAttribute("data-chat-density", "comfortable")
-  const panel = await openPanel(page, "Interface")
+  const panel = await openPanel(page, "Display")
   await panel.getByRole("radio", { name: /^Compact/ }).click()
   await expect(second.getByTestId("messages")).toHaveAttribute("data-chat-density", "compact")
   await panel.getByRole("radio", { name: /^Comfortable/ }).click()

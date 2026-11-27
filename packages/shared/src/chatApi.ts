@@ -6,6 +6,7 @@ import {
   ChatBackground,
   ChatBackgroundChange,
   ChatBackgroundOverrides,
+  WorkshopBackground,
   DEFAULT_CHAT_BACKGROUND
 } from "./chatBackgrounds.ts"
 import { RolloutStep } from "./agent.ts"
@@ -153,6 +154,7 @@ const displayFields = {
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
   chatBackground: ChatBackground,
+  workshopBackground: WorkshopBackground,
   chatBackgrounds: ChatBackgroundOverrides,
   /**
    * "Message spacing": how much room messages take in a chat. `compact` tightens the gaps,
@@ -222,6 +224,7 @@ export const DisplayPrefsChange = Schema.Struct({
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   chatBackground: Schema.optionalKey(ChatBackgroundChange),
+  workshopBackground: Schema.optionalKey(WorkshopBackground),
   chatBackgrounds: Schema.optionalKey(ChatBackgroundOverrides),
   inheritChatBackground: Schema.optionalKey(ChatId),
   chatDensity: Schema.optionalKey(displayFields.chatDensity),
@@ -260,6 +263,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
   chatBackground: DEFAULT_CHAT_BACKGROUND,
+  workshopBackground: "inherit",
   chatBackgrounds: {},
   chatDensity: "comfortable",
   presetSort: "name",

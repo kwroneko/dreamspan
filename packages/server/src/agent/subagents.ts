@@ -1478,6 +1478,7 @@ const runChild = (ctx: ToolContext, host: Host, start: ChildStart): Effect.Effec
       ...(run.allowsOutside !== undefined ? { allowsOutside: run.allowsOutside } : {}),
       reader: run.reader,
       writer: run.writer,
+      ...(run.onDisplayChanged ? { onDisplayChanged: run.onDisplayChanged } : {}),
       ...(run.onChanged ? { onChanged: run.onChanged } : {}),
       ...(run.onState ? { onState: run.onState } : {}),
       permit: (input) => permit({ ...input, onWaiting: paused(input.onWaiting) }),

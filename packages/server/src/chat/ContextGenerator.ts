@@ -1,3 +1,4 @@
+import { Notices } from "./Notices.ts"
 import { admitsEffect, outsideEffect } from "../agent/effects.ts"
 import { toolForKind } from "../execution.ts"
 import { storyReadStamp, type ContinuousSnapshot } from "../agent/continuity.ts"
@@ -67,6 +68,7 @@ export const layer = Layer.effect(
     const providers = yield* Providers
     const config = yield* AppConfig
     const hub = yield* ChatHub
+    const notices = yield* Notices
     // Optional, as decision models are (DESIGN §7.6): without the engine the keywords decide.
     const decisions = yield* Effect.serviceOption(DecisionEngine)
     // MCP servers' tools (spec/MCP.md M2), where the server runs the MCP client.
@@ -249,6 +251,7 @@ export const layer = Layer.effect(
               hub.publish(target, { _tag: "Lcm" })
             },
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
+            onDisplayChanged: () => notices.publish(request.userId, { _tag: "DisplayPrefsChanged" }),
             resume: {
               transcript: resume.transcript,
               historical: (snapshot as ContinuousSnapshot).continuity?.historical ?? 0,
@@ -744,7 +747,8 @@ export const layer = Layer.effect(
                       hub.publish(target, { _tag: "Reload" })
                       hub.publish(target, { _tag: "Lcm" })
                     },
-                    onState: () => hub.publish(chatId, { _tag: "State" })
+                    onState: () => hub.publish(chatId, { _tag: "State" }),
+                    onDisplayChanged: () => notices.publish(userId, { _tag: "DisplayPrefsChanged" })
                   }
                 }
               : {}),

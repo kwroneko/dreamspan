@@ -38,6 +38,7 @@ interface Script {
 export const startWorkshopProvider = async (
   options: {
     readonly calls?: ReadonlyArray<Script>
+    readonly offeredTool?: string
     readonly perTask?: boolean
     readonly fail?: (body: Body, round: number) => boolean
     readonly answer?: string | ((body: Body) => string)
@@ -83,7 +84,8 @@ export const startWorkshopProvider = async (
       const body = JSON.parse(raw) as Body
       bodies.push(body)
       const usage = { prompt_tokens: 300, completion_tokens: 10 }
-      const library = body.tools?.some((tool) => tool.function.name === "list_library") === true
+      const library =
+        body.tools?.some((tool) => tool.function.name === (options.offeredTool ?? "list_library")) === true
       if (!library) return stream(res, [...words(STORY_REPLY), chunk({}, "stop"), chunk({}, null, usage)])
       const from = options.perTask ? body.messages.findLastIndex((m) => m.role === "user") : 0
       const done = body.messages.slice(Math.max(0, from)).filter((m) => m.role === "tool").length

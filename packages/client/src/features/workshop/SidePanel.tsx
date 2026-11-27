@@ -564,7 +564,14 @@ function SideChatSurface({
             className="@container/chat flex min-h-0 flex-1 flex-col"
             style={{ ...kindRoot.style, "--chat-portrait-width": "48px" } as CSSProperties}
           >
-            {!changes && <ChatBackdrop prefs={prefs} chatId={started ? view.chat?.id : undefined} />}
+            {!changes && (
+              <ChatBackdrop
+                prefs={prefs}
+                chatId={started ? view.chat?.id : undefined}
+                kind={"workshop"}
+                scene={view.cast?.background}
+              />
+            )}
             {header}
             {beside.length > 1 && (
               <SideBranchMenu session={session} view={view} beside={beside} shown={fork} onPick={onFork} />

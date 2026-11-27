@@ -1,3 +1,4 @@
+import { onDisplayPrefsChanged } from "../../ui/viewPrefs.ts"
 import { blockField, type VersionBlock } from "@dreamspan/shared/chat.ts"
 import type { BlockEdits } from "@dreamspan/shared/chatApi.ts"
 import { forksChanged } from "./forks.ts"
@@ -686,6 +687,9 @@ export class ChatSession {
     seeds.delete(this.chatId)
     for (const entry of this.view.entries) this.track(entry.version)
     this.hellos = 0
+    const offDisplay = onDisplayPrefsChanged(() => {
+      if (this.view.cast?.background?.mode === "image") void this.refreshCast()
+    })
     const subscribe = Effect.flatMap(Registry.getResult(this.registry, AppClient.runtime), (services) =>
       Context.get(services, AppClient)("SubscribeChat", { chatId: this.chatId }).pipe(
         Stream.runForEach((incoming) =>
@@ -732,23 +736,25 @@ export class ChatSession {
       )
     )
     this.subscription = Effect.runFork(
-      subscribe.pipe(
-        // A dropped socket ends the stream: subscribe again, and its Hello reloads.
-        Effect.tapError(() => Effect.sync(() => this.activity(null))),
-        Effect.retry({ schedule: Schedule.spaced("1 second"), while: (error) => !this.notFound(error) }),
-        // A new chat swept while this tab was away (its Deleted went out meanwhile): as if it
-        // came now, so the page opens another for the same entry.
-        Effect.catch((error) =>
-          this.notFound(error) && this.view.chat?.status === "pending"
-            ? Effect.sync(() => this.update({ deleted: true, loading: false }))
-            : Effect.fail(error)
-        ),
-        Effect.catchCause((cause) =>
-          Effect.sync(() => {
-            if (!Cause.hasInterruptsOnly(cause)) this.update({ error: describeCause(cause).message, loading: false })
-          })
+      subscribe
+        .pipe(
+          // A dropped socket ends the stream: subscribe again, and its Hello reloads.
+          Effect.tapError(() => Effect.sync(() => this.activity(null))),
+          Effect.retry({ schedule: Schedule.spaced("1 second"), while: (error) => !this.notFound(error) }),
+          // A new chat swept while this tab was away (its Deleted went out meanwhile): as if it
+          // came now, so the page opens another for the same entry.
+          Effect.catch((error) =>
+            this.notFound(error) && this.view.chat?.status === "pending"
+              ? Effect.sync(() => this.update({ deleted: true, loading: false }))
+              : Effect.fail(error)
+          ),
+          Effect.catchCause((cause) =>
+            Effect.sync(() => {
+              if (!Cause.hasInterruptsOnly(cause)) this.update({ error: describeCause(cause).message, loading: false })
+            })
+          )
         )
-      )
+        .pipe(Effect.ensuring(Effect.sync(offDisplay)))
     )
   }
 
@@ -1423,9 +1429,14 @@ export class ChatSession {
       const stored = withPosition(updated, current.position)
       next[index] = stored
       this.update({ entries: next })
+      if (stored.version.id !== current.version.id) void this.refreshCast()
       this.track(stored.version)
       return true
     }
+    // A tab reading an older window can miss the selected slot even when its state
+    // applies at this fork's tip.
+    if (entry.versionCount > 1 && (entry.shownForkId ?? entry.forkId ?? this.view.forkId) === this.view.forkId)
+      void this.refreshCast()
     // A message another fork appended at the same tip isn't this fork's.
     const otherFork = entry.forkId !== undefined && this.view.forkId !== null && entry.forkId !== this.view.forkId
     // A message inserted in this fork goes in place, by its position (spec/MESSAGE-INSERT.md §2.3).
@@ -1507,6 +1518,7 @@ export class ChatSession {
     }
     const placed = withPosition(entry, at === 0 ? 0 : positionOf(entries[at - 1]!) + 1)
     this.update({ entries: [...entries.slice(0, at), placed, ...shift(entries.slice(at))] })
+    void this.refreshCast()
     this.track(entry.version)
     return true
   }
@@ -2010,7 +2022,9 @@ export class ChatSession {
         expectedVersionId: entry.version.id
       })
     )
-    if (!result.ok && result.error.tag !== "StaleWrite") this.applySlot(entry)
+    // The optimistic slot can arrive before the writer commits the swipe.
+    if (result.ok) void this.refreshCast()
+    else if (result.error.tag !== "StaleWrite") this.applySlot(entry)
     return result
   }
 

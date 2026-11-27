@@ -63,6 +63,7 @@ export interface ToolContext {
   readonly approvalDigest?: string
   /** New workshop results only; receipt producers use this before saving their final text. */
   readonly formatResult?: (text: string, frame?: string) => string
+  readonly onDisplayChanged?: () => void
   readonly onChanged?: (chatId: ChatId) => void
   /**
    * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the

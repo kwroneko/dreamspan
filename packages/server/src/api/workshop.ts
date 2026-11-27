@@ -1,3 +1,7 @@
+import { Notices } from "../chat/Notices.ts"
+import { AppConfig } from "../config.ts"
+import { MediaHolds } from "../importer/MediaHolds.ts"
+import { discardMedia } from "../importer/mediaFiles.ts"
 import type { WrittenCardFileReversal } from "../agent/tools/files.ts"
 import { PluginHost } from "../plugins/Host.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
@@ -48,6 +52,9 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   const plugins = yield* PluginHost
   const files = yield* WorkshopFiles
   const hub = yield* ChatHub
+  const notices = yield* Notices
+  const config = yield* AppConfig
+  const { pending } = yield* MediaHolds
   const warmth = yield* CacheWarmth
   const generator = yield* Generator
   const generations = yield* Generations
@@ -57,6 +64,17 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   // and list: they read their state again, as after the same change from the library.
   const notifyUndo = (userId: UserId, effects: ReadonlyArray<RolloutEffect>) =>
     Effect.gen(function* () {
+      for (const effect of effects) {
+        if (effect.kind !== "setup.background" || effect.undoneAt === null) continue
+        notices.publish(userId, { _tag: "DisplayPrefsChanged" })
+        const hash = effect.undoResult?.discardedHash
+        if (typeof hash === "string")
+          yield* discardMedia(
+            config.dataDir,
+            hash,
+            Effect.suspend(() => (pending.has(hash) ? Effect.succeed(true) : reader.IsMediaRecorded({ sha256: hash })))
+          )
+      }
       notifyChats(effects)
       if (effects.some((effect) => effect.undoneAt !== null && effect.targetKind === "entity"))
         yield* warmth.refreshUser(userId, true)

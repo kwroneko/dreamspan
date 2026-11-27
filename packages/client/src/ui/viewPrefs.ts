@@ -1,3 +1,4 @@
+import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 // Account-owned viewer choices. Each account has its own query, including when users
 // sign out and back in in the same tab. Writes patch one choice in the writer transaction.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -15,7 +16,21 @@ const channel =
     ? null
     : new BroadcastChannel("dreamspan.displayPrefs")
 
-export const notifyDisplayPrefsChanged = () => channel?.postMessage("changed")
+const notifyDisplayPrefsChanged = () => channel?.postMessage("changed")
+const listeners = new Set<() => void>()
+export const onDisplayPrefsChanged = (refresh: () => void) => {
+  listeners.add(refresh)
+  return () => {
+    listeners.delete(refresh)
+  }
+}
+export const displayNoticeReceiver = {
+  id: "display.live",
+  receive: (notice: Notice) => {
+    if (notice._tag === "DisplayPrefsChanged" || notice._tag === "UserDraftSync")
+      for (const refresh of listeners) refresh()
+  }
+}
 
 const writesFor = Atom.family((_userId: string) => Atom.make(new PreferenceWrites()))
 const prefsFor = Atom.family((userId: string) =>
@@ -37,9 +52,11 @@ export function useViewPrefs() {
   const result = useAtomValue(prefsFor(userId))
   const refresh = useAtomRefresh(prefsFor(userId))
   useEffect(() => {
+    const stop = onDisplayPrefsChanged(refresh)
     channel?.addEventListener("message", refresh)
     window.addEventListener("focus", refresh)
     return () => {
+      stop()
       channel?.removeEventListener("message", refresh)
       window.removeEventListener("focus", refresh)
     }

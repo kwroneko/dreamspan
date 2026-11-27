@@ -1,4 +1,4 @@
-import { ChatBackgroundGallery } from "@dreamspan/shared/chatBackgrounds.ts"
+import { ChatBackgroundChange, ChatBackgroundGallery } from "@dreamspan/shared/chatBackgrounds.ts"
 import { DatabaseStartup } from "@dreamspan/shared/databaseStartup.ts"
 import {
   McpCall,
@@ -3002,6 +3002,33 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.String,
     error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
   }),
+  Rpc.make("AgentSetBackground", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: Schema.optionalKey(ChatId),
+      scope: Schema.Literals(["default", "workshop", "chat"]),
+      choice: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(100)))),
+      appearance: ChatBackgroundChange,
+      imported: Schema.optionalKey(
+        Schema.Struct({
+          name: Schema.String.check(Schema.isMaxLength(255)),
+          media: Schema.Struct({
+            sha256: Sha256,
+            mime: Schema.String,
+            byteSize: Schema.Int,
+            width: Schema.NullOr(Schema.Int),
+            height: Schema.NullOr(Schema.Int)
+          })
+        })
+      ),
+      result: Schema.String
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("AgentCreateEntity", {
     payload: {
       userId: UserId,
@@ -4383,6 +4410,7 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   Rpc.make("RecordChatBackground", {
     payload: {
       userId: UserId,
+      chatId: Schema.optionalKey(ChatId),
       name: Schema.String.check(Schema.isMaxLength(255)),
       media: Schema.Struct({
         sha256: Sha256,
@@ -4393,10 +4421,10 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       })
     },
     success: Schema.NullOr(Schema.String),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("DeleteChatBackground", {
-    payload: { userId: UserId, mediaId: Schema.String },
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId), mediaId: Schema.String },
     success: Schema.NullOr(Sha256),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -7299,7 +7327,11 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
-  Rpc.make("ListChatBackgrounds", { payload: { userId: UserId }, success: ChatBackgroundGallery, error: StorageError }),
+  Rpc.make("ListChatBackgrounds", {
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    success: ChatBackgroundGallery,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   /** The account's card-source choices and recently viewed cards; the defaults where none are stored. */
   Rpc.make("GetSourcePrefs", { payload: { userId: UserId }, success: SourcePrefs, error: StorageError }),

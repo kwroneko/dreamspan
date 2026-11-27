@@ -305,18 +305,18 @@ export function stateMarkerTests() {
         await expect(newest).toHaveCount(0)
         // The Interface switch hides a kind, here and after a reload.
         await expect(marker(page, slots[0]!)).toHaveText(/Tobin muted/)
-        const settings = await openPanel(page, "Interface")
+        const settings = await openPanel(page, "Display")
         const shown = settings.getByRole("group", { name: "Changes shown in the chat" })
         await expect(shown.getByRole("switch")).toHaveCount(7)
         await shown.getByRole("switch", { name: "Who was muted", exact: true }).click()
         await expect(marker(page, slots[0]!)).toHaveCount(0)
         await expectLayout(page, info, `markers-settings-${width}-${theme}`, {
-          scope: '[role="tabpanel"][aria-label="Interface"]'
+          scope: '[role="tabpanel"][aria-label="Display"]'
         })
         await page.reload()
         await expect(marker(page, slots[1]!)).toBeVisible()
         await expect(marker(page, slots[0]!)).toHaveCount(0)
-        const back = await openPanel(page, "Interface")
+        const back = await openPanel(page, "Display")
         await back.getByRole("switch", { name: "Who was muted", exact: true }).click()
         if (width === 390) await closePanel(page)
         await expect(marker(page, slots[0]!)).toHaveText(/Tobin muted/)
@@ -437,7 +437,7 @@ export function stateMarkerTests() {
         }
         // Opening panels and loading new cast batches while scrolling must not rescan events.
         const settledReads = reads
-        const panel = await openPanel(page, "Interface")
+        const panel = await openPanel(page, "Display")
         await expect(panel.getByRole("group", { name: "Changes shown in the chat" })).toBeVisible()
         await closePanel(page)
         await page.waitForTimeout(250)

@@ -308,7 +308,7 @@ test("chat: branch, message link and reading offset restore; missing branch fall
 })
 
 for (const width of [1440, 390]) {
-  test(`Interface links preserve legacy addresses at ${width}`, async ({ page }) => {
+  test(`Display links preserve legacy addresses at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`${server().url}/settings/display?from=legacy`)
     await expect(page).toHaveURL(
@@ -318,12 +318,12 @@ for (const width of [1440, 390]) {
     else
       await expect(page.getByRole("link", { name: "Interface", exact: true })).toHaveAttribute("aria-current", "page")
     await page.goto(`${server().url}/chats/${chat}?panel=display`)
-    await expect(page.getByRole("tabpanel", { name: "Interface", exact: true })).toBeVisible()
+    await expect(page.getByRole("tabpanel", { name: "Display", exact: true })).toBeVisible()
     await expect(page).toHaveURL(/panel=interface/)
-    const tab = page.getByRole("tab", { name: "Interface", exact: true })
+    const tab = page.getByRole("tab", { name: "Display", exact: true })
     await expect(tab).toHaveAttribute("aria-selected", "true")
-    await expect(page.getByRole("tab", { name: "Display", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("tab", { name: "Interface", exact: true })).toHaveCount(0)
     await reload(page)
-    await expect(page.getByRole("tabpanel", { name: "Interface", exact: true })).toBeVisible()
+    await expect(page.getByRole("tabpanel", { name: "Display", exact: true })).toBeVisible()
   })
 }

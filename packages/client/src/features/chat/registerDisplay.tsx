@@ -1,3 +1,5 @@
+import { userNoticeReceivers } from "../noticeContributions.tsx"
+import { displayNoticeReceiver } from "../../ui/viewPrefs.ts"
 import { ExternalMediaProvider } from "./externalMedia.tsx"
 import { Navigate } from "@tanstack/react-router"
 import { routes } from "../../routes.tsx"
@@ -34,6 +36,7 @@ function InterfacePage() {
 
 export const registerDisplay = () => [
   registerMessageCopy(),
+  userNoticeReceivers.register(displayNoticeReceiver),
   // Where a double-click opens the message's edit (ui/editCaret.ts).
   ...registerEditCaret(),
   routes.register({
@@ -69,11 +72,16 @@ export const registerDisplay = () => [
   chatPanels.register({
     id: "interface",
     matches: (value) => value === "interface" || value === "display",
-    label: "Interface",
+    label: "Display",
     description: "Change how chats look and send, including colours and what Enter does.",
     order: 85,
     icon: "type",
-    component: ({ view }) => <DisplaySettings chatId={view.chat?.status === "pending" ? undefined : view.chat?.id} />,
+    component: ({ view }) => (
+      <DisplaySettings
+        chatId={view.chat?.status === "pending" ? undefined : view.chat?.id}
+        scene={view.cast?.background}
+      />
+    ),
     pending: () => <DisplaySettings />
   })
 ]

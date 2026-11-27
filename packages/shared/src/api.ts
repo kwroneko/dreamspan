@@ -431,10 +431,9 @@ export class AppCoreApi extends RpcGroup.make(
   // --- The card and preset editors (editorApi.ts).
   .merge(EditorApi)
   .merge(SnippetsApi)
-  // --- The recycle bin, the composer's drafts, notices (binApi.ts, composerApi.ts, noticeApi.ts).
+  // --- The recycle bin and the composer’s drafts (binApi.ts, composerApi.ts).
   .merge(BinApi)
   .merge(ComposerApi)
-  .merge(NoticeApi)
   // --- The request inspector (inspectorApi.ts).
   .merge(InspectorApi)
   .merge(LcmApi)
@@ -547,7 +546,10 @@ export const AuthenticatedUpdateApi = UpdateApi.middleware(Authentication)
 /** A workshop composer's library items (composerApi.ts). */
 export class AuthenticatedComposerLibraryApi extends ComposerLibraryApi.middleware(Authentication) {}
 
+export class AuthenticatedNoticeApi extends NoticeApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedNoticeApi)
   .merge(AuthenticatedComposerLibraryApi)
   .merge(DatabaseStatusApi)
   .merge(AuthenticatedUpdateApi)

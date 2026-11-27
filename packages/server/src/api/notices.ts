@@ -1,6 +1,6 @@
 import { ServerError } from "@dreamspan/shared/errors.ts"
 // The caller's notices: initial private-draft sync and durable plugin suspension reports.
-import { type AppApi, CurrentUser } from "@dreamspan/shared/api.ts"
+import { type AuthenticatedNoticeApi, CurrentUser } from "@dreamspan/shared/api.ts"
 import type { Notice } from "@dreamspan/shared/noticeApi.ts"
 import { Effect, Stream } from "effect"
 import { Notices } from "../chat/Notices.ts"
@@ -24,5 +24,5 @@ export const makeNoticeHandlers = Effect.gen(function* () {
           return Stream.concat(Stream.succeed(initial), Stream.fromQueue(queue))
         }).pipe(Effect.catchCause(() => Effect.fail(new ServerError({ message: "Could not load notices" }))))
       )
-  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+  } satisfies Parameters<typeof AuthenticatedNoticeApi.of>[0]
 })

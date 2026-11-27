@@ -242,13 +242,13 @@ for (const width of [1440, 390])
       await expect(
         (await openPanel(page, "This chat")).getByRole("combobox", { name: "Images from other sites in this chat" })
       ).toHaveText("Block")
-      const iface = await openPanel(page, "Interface")
+      const iface = await openPanel(page, "Display")
       const account = iface.getByRole("switch", { name: "Images from other sites", exact: true })
       await expect(account).not.toBeChecked()
       await account.click()
       await expect(account).toBeChecked()
       await expectLayout(page, info, `external-media-default-${width}-${theme}`, {
-        scope: '[role="tabpanel"][aria-label="Interface"]'
+        scope: '[role="tabpanel"][aria-label="Display"]'
       })
       await page.goto(`${server().url}/library/${ref.id}`)
       await page.getByRole("tab", { name: "Extra", exact: true }).click()

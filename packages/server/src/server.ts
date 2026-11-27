@@ -1,3 +1,4 @@
+import { AuthenticatedNoticeApi } from "@dreamspan/shared/api.ts"
 import { TransportApi, type TransportRpcs } from "@dreamspan/shared/transportApi.ts"
 import { installCardSourceCommands } from "./agent/cardSourceCommands.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
@@ -185,7 +186,6 @@ const CoreHandlers = AppCoreApi.toLayer(
     // --- The recycle bin, the composer's drafts, notices
     const bin = yield* makeBinHandlers
     const composer = yield* makeComposerHandlers
-    const notices = yield* makeNoticeHandlers
     const inspector = yield* makeInspectorHandlers
     return AppCoreApi.of({
       ...providers,
@@ -198,7 +198,6 @@ const CoreHandlers = AppCoreApi.toLayer(
       ...generation,
       ...bin,
       ...composer,
-      ...notices,
       ...inspector,
       ...(yield* makeLcmHandlers),
       ...(yield* makeHistoryHandlers),
@@ -267,6 +266,7 @@ const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
   DatabaseStatusHandlers,
   UpdateHandlers,
+  AuthenticatedNoticeApi.toLayer(makeNoticeHandlers),
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedComposerLibraryApi.toLayer(makeComposerLibraryHandlers),
   AuthenticatedSharedNoteRefsApi.toLayer(makeSharedNoteRefsHandlers),
@@ -847,7 +847,7 @@ export const serverWith = <E>(
   generator: Layer.Layer<
     Generator,
     E,
-    AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer | ChatHub
+    AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer | ChatHub | Notices
   >,
   summaries = Summarizer.layer,
   formats = FormatsLive,

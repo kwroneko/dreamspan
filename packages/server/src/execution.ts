@@ -1,3 +1,4 @@
+import { setChatBackground, setBackground } from "./agent/tools/backgrounds.ts"
 import { historyRenameTool, historySearchTool, rewriteTools } from "./agent/tools/rewrite.ts"
 import { makeOperationTools, type OperationRuntime } from "./agent/operations.ts"
 import { builtinOperationExposures } from "./agent/exposures/builtins.ts"
@@ -175,6 +176,8 @@ export class ExecutionRegistry extends Context.Service<
         editNote,
         switchNote,
         setPresence,
+        setChatBackground,
+        setBackground,
         // spec/SUBAGENTS.md SA1: a workshop's child runs; never a story reply's tool.
         agentTool,
         // SA5: messages to the reply's subagents, running or finished.

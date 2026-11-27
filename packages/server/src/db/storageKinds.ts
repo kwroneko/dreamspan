@@ -20,6 +20,7 @@ export const storageKinds = makeRegistry<StorageKind>([
       "chat.create",
       "chat.change",
       "setting.set",
+      "setup.background",
       "changeset.apply",
       "plugin.create",
       "plugin.write",

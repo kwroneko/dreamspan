@@ -85,6 +85,7 @@ export interface AgentRun {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
   readonly onChanged?: (chatId: import("@dreamspan/shared/chat.ts").ChatId) => void
+  readonly onDisplayChanged?: () => void
   readonly onState?: () => void
   /** The tool definitions to offer as frozen into the snapshot; absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
@@ -775,6 +776,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             }
           : {}),
         cache,
+        ...(run.onDisplayChanged ? { onDisplayChanged: run.onDisplayChanged } : {}),
         ...(run.onChanged ? { onChanged: run.onChanged } : {}),
         userId: request.userId,
         chatId: request.chatId,

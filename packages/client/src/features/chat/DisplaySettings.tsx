@@ -1,5 +1,6 @@
+import type { SceneBackground } from "@dreamspan/shared/chatBackgrounds.ts"
 import type { ChatId } from "@dreamspan/shared/chat.ts"
-import { ChatBackgroundSettings } from "./ChatBackgroundSettings.tsx"
+import { ChatBackgroundSettings, ThisChatBackgroundSettings } from "./ChatBackgroundSettings.tsx"
 import { ExternalMediaDefault } from "./externalMedia.tsx"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { positionOf } from "./position.ts"
@@ -246,11 +247,19 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
     </ScriptDisplay>
   )
 }
-export function DisplaySettings({ chatId }: { chatId?: ChatId | undefined }) {
+export function DisplaySettings({
+  chatId,
+  scene
+}: {
+  chatId?: ChatId | undefined
+  scene?: SceneBackground | undefined
+}) {
   const viewer = useViewPrefs()
   return (
     <div className="flex flex-col gap-6">
-      <ChatBackgroundSettings chatId={chatId} />
+      {chatId && <ThisChatBackgroundSettings chatId={chatId} scene={scene} />}
+      {chatId && <h2 className="text-base font-semibold text-text">Account-wide display settings</h2>}
+      <ChatBackgroundSettings />
       <ChatWidthSetting />
       <ChatDensitySetting />
       <Fieldset legend="Enter sends" about="Ctrl/Cmd+Enter always sends; Shift+Enter adds a line.">

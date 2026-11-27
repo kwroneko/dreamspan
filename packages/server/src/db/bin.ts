@@ -1,3 +1,4 @@
+import { purgeChatBackgrounds } from "./displayPrefs.ts"
 import { splitChatMarkers, splitGroups } from "./splitChats.ts"
 // The recycle bin (DESIGN §6.2), used by the writer. Deleting marks rows (deleted_at,
 // bin_item_id) instead of removing them, so restoring puts things back exactly where
@@ -1524,9 +1525,19 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         yield* dropSelections(item.chat_id, item.slot_id, item.target_id)
       }
 
+      const galleries = yield* sql.unsafe<{ id: ChatId; owner_user_id: UserId }>(
+        `SELECT id, owner_user_id FROM chats /* chat:includes-pending: permanent removal */
+           WHERE id IN (${targets("chat")})
+         UNION ALL SELECT f.id, c.owner_user_id FROM forks f JOIN chats c ON c.id = f.chat_id
+           /* chat:includes-pending: permanent removal */
+           WHERE f.split_chat = 1 AND (f.chat_id IN (${targets("chat")})
+             OR f.bin_item_id IN (${items("'branch', 'threads'")}))`,
+        [...params, ...params, ...params]
+      )
       // A chat goes with everything in it, its other bin items included.
       yield* run(`DELETE FROM bin_items WHERE kind <> 'chat' AND chat_id IN (${targets("chat")})`)
       yield* run(`DELETE FROM chats WHERE id IN (${targets("chat")})`)
+      for (const { id, owner_user_id } of galleries) yield* purgeChatBackgrounds(sql, owner_user_id, id)
 
       // Messages and branches keep their slots as empty placeholders, so the
       // conversation's structure and any summaries over it remain valid. A branch's forks
@@ -1747,7 +1758,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
                 .withTransaction(purgeWithCompanions(oldest.id))
                 .pipe(
                   Effect.catch((error) =>
-                    Effect.logWarning(`bin eviction skipped ${oldest.kind} item ${oldest.id}`, error.reason.cause)
+                    Effect.logWarning(`bin eviction skipped ${oldest.kind} item ${oldest.id}`, error)
                   )
                 )
             }

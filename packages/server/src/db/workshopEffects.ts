@@ -1,3 +1,4 @@
+import { backgroundSetup, backgroundUndo } from "./backgroundSetup.ts"
 import { checkStoryWrite } from "./storyWriteScope.ts"
 import { displayEndOf } from "./displayPath.ts"
 import type { ChatId, StoryAt } from "@dreamspan/shared/chat.ts"
@@ -91,6 +92,7 @@ type Key = {
   readonly approvalDigest?: string
   readonly refId?: RefId
   readonly librarySight?: LibraryWriteSight
+  readonly backgroundFile?: true
   readonly cardFileImport?: { readonly maxAddedBytes: number }
   readonly portrait?: { readonly maxAddedBytes: number }
   readonly expectedRefs?: ReadonlyArray<{
@@ -597,6 +599,7 @@ const operationUndo: Undoer = {
 }
 export const rolloutUndoers = makeRegistry<Undoer>([
   createUndoer,
+  backgroundUndo,
   {
     ...reviseUndoer,
     unchanged: (sql, userId, effect, effects) =>
@@ -721,7 +724,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           return yield* new EffectUndoRefused({ message: "This workshop run is no longer running." })
         // Check the current permission in the same transaction as the change. An Off choice
         // or a new Ask-first choice in another tab cannot race the main-thread permit.
-        if (key.portrait || key.cardFileImport) {
+        if (key.portrait || key.cardFileImport || key.backgroundFile) {
           yield* authorizePluginTool(sql, {
             userId: key.userId,
             rolloutId: key.rolloutId,
@@ -878,6 +881,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       return id
     })
     const handlers = {
+      AgentSetBackground: (input) =>
+        receipted(
+          { ...input, ...(input.imported ? { backgroundFile: true as const } : {}) },
+          "chats.setup",
+          backgroundSetup(sql, input)
+        ),
+
       RunWorkshopOperation: (input) =>
         Effect.gen(function* () {
           const policy = operationPolicies.get(input.operation)
@@ -1719,6 +1729,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       Handlers,
       | "RunWorkshopOperation"
       | "AgentCreateEntity"
+      | "AgentSetBackground"
       | "AgentReviseEntity"
       | "AgentCloneCard"
       | "AgentRevertRevision"

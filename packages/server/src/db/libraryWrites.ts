@@ -36,8 +36,7 @@ import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeLibraryReplaceWrites } from "./libraryReplaceWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaReferenceHeldBy, recordMediaReference, type MediaUpload } from "./media.ts"
-import { BACKGROUNDS_KEY, readBackgroundHolds } from "./backgroundMedia.ts"
-import { putUserSetting } from "./settings.ts"
+import { promoteBackgroundMedia } from "./backgroundMedia.ts"
 import { replacementConflict } from "./noteReplacementWrites.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { type FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
@@ -484,16 +483,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     /** Records a file in media storage for the user; the same bytes are one row for everyone. */
     const recordMedia = Effect.fnUntraced(function* (userId: string, file: MediaUpload, verifiedImage?: true) {
       const { mediaId, created } = yield* recordMediaReference(sql, userId, file, verifiedImage)
-      if (!created) {
-        const gallery = yield* readBackgroundHolds(sql, userId)
-        if (gallery.some((entry) => entry.mediaId === mediaId && entry.galleryOnly))
-          yield* putUserSetting(
-            sql,
-            userId,
-            BACKGROUNDS_KEY,
-            gallery.map((entry) => (entry.mediaId === mediaId ? { ...entry, galleryOnly: false } : entry))
-          ).pipe(Effect.catchTag("StorageError", Effect.die))
-      }
+      if (!created) yield* promoteBackgroundMedia(sql, userId, mediaId)
       return mediaId
     })
 

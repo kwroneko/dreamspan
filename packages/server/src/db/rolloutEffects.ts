@@ -1,3 +1,4 @@
+import { readBackgroundHolds } from "./backgroundMedia.ts"
 import { nextReceiptTime, pendingOperationReceipt, recoveredOperationText } from "./operationReceipts.ts"
 // A rollout's chat-state effects (spec/AGENTIC.md §4.3): a tool call's notes and state events,
 // attached to the version being generated so they hold only while it's shown (a swipe reverses
@@ -131,6 +132,18 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
           }
         }
         for (const data of [...written, ...events]) {
+          if (data.key === "chat.background" && data.value.mode === "image") {
+            const { mediaId } = data.value
+            const global = yield* readBackgroundHolds(sql, userId)
+            if (!global.some((entry) => entry.mediaId === mediaId)) {
+              const [split] = yield* sql<{
+                id: string
+              }>`SELECT id FROM forks WHERE id = ${rollout.fork_id} AND split_chat = 1`
+              const local = yield* readBackgroundHolds(sql, userId, split?.id ?? rollout.chat_id)
+              if (!local.some((entry) => entry.mediaId === mediaId))
+                return yield* new NotFound({ entity: "background", id: mediaId })
+            }
+          }
           yield* graph.insertStateEvent(
             userId,
             rollout.chat_id,

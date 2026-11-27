@@ -150,7 +150,7 @@ test("viewer preferences belong to the account and patches preserve independent 
     await page.goto(`${server().url}/chats/${otherChat.id}`)
     const panel = await openPanel(page, "Summaries")
     await expect(panel.getByRole("switch", { name: "Coverage rail" })).not.toBeChecked()
-    await openPanel(page, "Interface")
+    await openPanel(page, "Display")
     await expect(page.getByLabel("Message portrait size", { exact: true })).toHaveText("Small (60 × 90)")
   } finally {
     await context.close()

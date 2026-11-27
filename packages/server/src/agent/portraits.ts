@@ -17,6 +17,11 @@ export interface PortraitMedia {
 
 export interface PortraitSource {
   readonly id: string
+  readonly background: <A, E>(
+    ctx: ToolContext,
+    path: string,
+    commit: (media: Omit<PortraitMedia, "maxAddedBytes">) => Effect.Effect<A, E>
+  ) => Effect.Effect<A, E | Error>
   /**
    * Reads the image at `path` (an /attachments/<id> copy or a path in the files), refuses
    * what isn't a PNG, JPEG, GIF or WebP picture the app can decode, stores it, and runs

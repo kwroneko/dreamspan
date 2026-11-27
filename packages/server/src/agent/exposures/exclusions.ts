@@ -321,7 +321,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetConnectionProxy: "User-only security, consent, account, credential or network configuration.",
   SetCostSettings: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetDecisionSettings: "User-only security, consent, account, credential or network configuration.",
-  SetDisplayPrefs: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetDisplayPrefs: "Account display writes run through the undoable set_background tool.",
   SetExternalMedia: "User-only security, consent, account, credential or network configuration.",
   SetGenerationDefaults: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetGlobalRegex: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

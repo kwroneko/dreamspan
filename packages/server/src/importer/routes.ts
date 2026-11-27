@@ -1,5 +1,4 @@
 import { CHAT_BACKGROUNDS_ROUTE, CHAT_BACKGROUND_MEDIA_ROUTE } from "@dreamspan/shared/chatBackgrounds.ts"
-import { MAX_BACKGROUNDS } from "../db/backgroundMedia.ts"
 import { makeMediaLimits } from "../net/mediaLimits.ts"
 // Files into and out of the library over plain HTTP (ARCHITECTURE.md §11.4). RPC messages
 // are JSON, so a file would cross as base64: a third larger, and decoded whole on the main
@@ -966,6 +965,10 @@ export const layer = Layer.unwrap(
         )
       )
 
+    const backgroundScope = (params: URLSearchParams) => {
+      const chatId = params.get("chatId") as ChatId | null
+      return chatId === null ? {} : { chatId }
+    }
     const backgroundLimits = makeMediaLimits()
     const discardBackgroundBytes = (sha256: string) =>
       discardMedia(
@@ -984,7 +987,8 @@ export const layer = Layer.unwrap(
         if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
           return jsonError(413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
         }
-        const name = fileNameFrom(new URL(request.url, "http://upload").searchParams.get("name")) || "Background"
+        const params = new URL(request.url, "http://upload").searchParams
+        const name = fileNameFrom(params.get("name")) || "Background"
         const message = NodeHttpServerRequest.toIncomingMessage(request)
         const limits = {
           maxBytes: MAX_AVATAR_BYTES,
@@ -1019,14 +1023,15 @@ export const layer = Layer.unwrap(
                   Effect.andThen(
                     storeMedia(config.dataDir, sha256, body),
                     background
-                      ? writer.RecordChatBackground({ userId: user.id, name, media })
+                      ? writer.RecordChatBackground({ userId: user.id, name, media, ...backgroundScope(params) })
                       : writer.RecordMessageImage({ userId: user.id, media })
                   )
-                )
+                ).pipe(Effect.tapError(() => discardBackgroundBytes(sha256)))
                 if (mediaId === null) {
                   yield* discardBackgroundBytes(sha256)
-                  return jsonError(409, `Your gallery already has ${MAX_BACKGROUNDS} backgrounds.`)
+                  return jsonError(409, "Your background gallery is full.")
                 }
+                if (background) notices.publish(user.id, { _tag: "DisplayPrefsChanged" })
                 return HttpServerResponse.jsonUnsafe({ mediaId })
               })
             )
@@ -1046,6 +1051,7 @@ export const layer = Layer.unwrap(
         if (!release) return jsonError(429, "Too many image uploads. Try again shortly.")
         return yield* transfer.pipe(Effect.ensuring(Effect.sync(release)))
       }).pipe(
+        Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such chat"))),
         Effect.catch((error) =>
           Effect.logError("an image upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
         )
@@ -1053,15 +1059,28 @@ export const layer = Layer.unwrap(
 
     const listBackgrounds = Effect.gen(function* () {
       const user = yield* CurrentUser
-      const gallery = yield* reader.ListChatBackgrounds({ userId: user.id })
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const gallery = yield* reader.ListChatBackgrounds({
+        userId: user.id,
+        ...backgroundScope(new URL(request.url, "http://upload").searchParams)
+      })
       return HttpServerResponse.jsonUnsafe(gallery, { headers: { "cache-control": "no-store" } })
-    }).pipe(Effect.catch(() => Effect.succeed(jsonError(500, "the backgrounds couldn't be loaded"))))
+    }).pipe(
+      Effect.catchTag("NotFound", () => Effect.succeed(jsonError(404, "there's no such chat"))),
+      Effect.catch(() => Effect.succeed(jsonError(500, "the backgrounds couldn't be loaded")))
+    )
 
     const deleteBackground = Effect.gen(function* () {
       const user = yield* CurrentUser
+      const request = yield* HttpServerRequest.HttpServerRequest
       const mediaId = (yield* HttpRouter.params).id ?? ""
-      const discardedHash = yield* writer.DeleteChatBackground({ userId: user.id, mediaId })
+      const discardedHash = yield* writer.DeleteChatBackground({
+        userId: user.id,
+        mediaId,
+        ...backgroundScope(new URL(request.url, "http://upload").searchParams)
+      })
       if (discardedHash) yield* discardBackgroundBytes(discardedHash)
+      notices.publish(user.id, { _tag: "DisplayPrefsChanged" })
       return HttpServerResponse.empty({ status: 204 })
     }).pipe(
       Effect.uninterruptible,
@@ -1269,6 +1288,7 @@ export const layer = Layer.unwrap(
       HttpRouter.add("GET", CHAT_BACKGROUNDS_ROUTE, authenticated(accounts, listBackgrounds)),
       HttpRouter.add("POST", CHAT_BACKGROUNDS_ROUTE, authenticated(accounts, uploadImage(true))),
       HttpRouter.add("DELETE", `${CHAT_BACKGROUNDS_ROUTE}/:id`, authenticated(accounts, deleteBackground)),
+      HttpRouter.add("GET", "/api/media/:id", authenticated(accounts, mediaFile(true))),
       HttpRouter.add("GET", `${CHAT_BACKGROUND_MEDIA_ROUTE}/:id`, authenticated(accounts, mediaFile(true))),
       HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar())),
       HttpRouter.add("POST", "/library/gallery", authenticated(accounts, uploadAvatar(true))),

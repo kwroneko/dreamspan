@@ -90,10 +90,19 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     label: "Chat setup",
     kinds: workshop,
     description:
-      "Start story chats, change a chat's cast, model or preset, rename or pin chats, and write a reply in another chat.",
+      "Start story chats, change a chat's cast, model or preset, rename or pin chats, change backgrounds, and write a reply in another chat.",
     instructions:
-      "Look up chats with list_chats and read one's cast with get_cast before changing it. Starting a chat never writes a reply; generate_reply does, and asks first.",
-    tools: ["start_chat", "list_chats", "get_cast", "change_chat", "rename_chat", "set_chat_pin", "generate_reply"]
+      "Look up chats with list_chats and read one's cast with get_cast before changing it. Use set_background to change a chat, workshop or main background, including from a supplied image file. Starting a chat never writes a reply; generate_reply does, and asks first.",
+    tools: [
+      "start_chat",
+      "list_chats",
+      "get_cast",
+      "change_chat",
+      "rename_chat",
+      "set_chat_pin",
+      "set_background",
+      "generate_reply"
+    ]
   },
   {
     id: "stories",

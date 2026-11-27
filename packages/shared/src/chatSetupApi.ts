@@ -1,3 +1,4 @@
+import { SceneBackground } from "./chatBackgrounds.ts"
 import { Draft } from "./drafts.ts"
 import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // Starting chats from cards, who's in them, their settings, and the send queue (DESIGN
@@ -347,6 +348,7 @@ export const RoleProjectionOption = Schema.Struct({
  * (DATA-MODEL §5.2), with every card named there.
  */
 export class Cast extends Schema.Class<Cast>("Cast")({
+  background: Schema.optionalKey(SceneBackground),
   /** The position: state after this slot (null: before the first message). */
   slotId: Schema.NullOr(SlotId),
   /** In join order. */
