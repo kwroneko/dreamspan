@@ -5,6 +5,13 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "1200" })
+const pendingPlace = (page: Page) => {
+  const url = new URL(page.url())
+  // The workbench records its tab layout independently of the pending chat.
+  url.searchParams.delete("wb")
+  return url.href
+}
+
 const setup = async (page: Page, title: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const existing = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListCards())
@@ -105,7 +112,7 @@ for (const target of ["card", "group"] as const) {
         expect(box.y + box.height).toBeLessThanOrEqual(outline.y + outline.height)
         expect(box.x + box.width).toBeLessThanOrEqual(Math.min(width, outline.x + outline.width))
       }
-      const pendingUrl = page.url()
+      const pendingUrl = pendingPlace(page)
       await composer.fill("First line")
       await composer.press("Shift+Enter")
       await composer.press("Shift+Enter")
@@ -116,7 +123,7 @@ for (const target of ["card", "group"] as const) {
       const sendBox = (await send.boundingBox())!
       expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(Math.min(width, outline.x + outline.width))
       expect((await composer.boundingBox())!.height).toBeGreaterThan(empty.height)
-      expect(page.url()).toBe(pendingUrl)
+      expect(pendingPlace(page)).toBe(pendingUrl)
       await page.reload()
       await expectTextBox(composer, "First line\n\n\n\nSecond line")
       await send.hover()
@@ -138,11 +145,11 @@ test("a touch keyboard keeps Enter for a newline; Ctrl+Enter creates the chat", 
   try {
     await setup(page, "Touch composer")
     const composer = page.getByLabel("Message", { exact: true })
-    const pendingUrl = page.url()
+    const pendingUrl = pendingPlace(page)
     await composer.fill("Touch keyboard")
     await composer.press("Enter")
     await expectTextBox(composer, "Touch keyboard\n")
-    expect(page.url()).toBe(pendingUrl)
+    expect(pendingPlace(page)).toBe(pendingUrl)
     await composer.press("Control+Enter")
     await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
     await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("Touch keyboard")

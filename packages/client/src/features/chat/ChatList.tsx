@@ -90,6 +90,7 @@ function Row({
           search={{ ...(search.panel ? { panel: search.panel } : {}), ...(group ? { fork: group.forkId } : {}) }}
           // Dropped on a frame, the chat opens there, as a click does (owner, 2026-11-07).
           onDragStart={carryLink(CHAT_DRAG.id)}
+          data-chat-id={group?.chat.id ?? chat.id}
           aria-current={active ? "page" : undefined}
           className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
             active ? "bg-surface-raised" : "hover:bg-surface-raised/60"

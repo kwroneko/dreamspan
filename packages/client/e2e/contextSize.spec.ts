@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { wheelTimeline } from "./support/message.ts"
 import { openModelSettings } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
@@ -206,7 +207,7 @@ test("the history note sits in the message column of a real-looking chat, naming
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "small-window",
-        overrides: { context: 4000 }
+        overrides: { context: 4000, maxOutput: 512 }
       })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
@@ -227,18 +228,32 @@ test("the history note sits in the message column of a real-looking chat, naming
     "characters/Ines.png",
     card("Ines", '*Ines looks up from the map.* "You\'re late."', {}, { description: MIRA.repeat(8) })
   )
-  await upload("chats/Ines/Ridge.jsonl", jsonl([header({}), ...turns(60, "Ines")]))
+  await upload("chats/Ines/Ridge.jsonl", jsonl([header({}), ...turns(120, "Ines")]))
   const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.ListChats({ limit: 10, before: null }).pipe(Effect.map((chats) => chats.find((c) => c.title === "Ridge")!))
   )
+  const next = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.GetNextContext({ chatId: chat.id, leafSlotId: chat.activeLeafSlotId })
+  )
+  expect(next.assemblyError).toBeFalsy()
+  expect(next.historyStart?.cutThrough).toEqual(expect.any(Number))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
   const note = page.getByRole("status").filter({ hasText: "aren’t sent to the model" })
   const article = page.locator("article").first()
   await themes(page, async (width, theme) => {
     // The list is virtualized: scroll up from the newest messages until the boundary renders.
-    await page.mouse.move(width / 2, 400)
-    for (let i = 0; i < 60 && (await note.count()) === 0; i++) await page.mouse.wheel(0, -300)
+    await expect(article).toBeVisible()
+    await expect
+      .poll(
+        async () => {
+          if (await note.count()) return true
+          await wheelTimeline(page, -0.8)
+          return false
+        },
+        { intervals: [150] }
+      )
+      .toBe(true)
     await note.scrollIntoViewIfNeeded()
     await expect(note).toContainText("allows 4,000 tokens (your setting for the model's window)")
     await expect(note.getByRole("button", { name: "Change the context size" })).toBeVisible()

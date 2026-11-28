@@ -1,5 +1,5 @@
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
@@ -12,12 +12,16 @@ test.beforeAll(async () => {
   seed = await asUser(server(), ADMIN.handle, ADMIN.password, seedSplitChats)
 })
 
+const expandRelated = async (section: Locator, count: number) => {
+  const header = section.getByRole("button", { name: `Related chats (${count})`, exact: true })
+  await expect(header).toBeVisible()
+  if ((await header.getAttribute("aria-expanded")) === "false") await header.click()
+}
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`split chats navigate between groups at ${width} ${theme}`, async ({ page }) => {
-      // This navigation scenario needs expanded foot lists beside its global pin;
-      // short-column automatic collapse is covered by the layout audit.
-      // At 390 the sheet's navigation tiles take two rows, so it needs a taller column.
+      // Keep enough room to expand both footer lists beside the global pin.
       await page.setViewportSize({ width, height: width === 390 ? 1400 : 1200 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
@@ -32,13 +36,16 @@ for (const width of [1440, 390])
       const splitOff = splits.getByRole("group", { name: "Split off from this chat", exact: true })
       const branches = page.getByRole("region", { name: "Branches of the open chat", exact: true })
       const chats = page.getByRole("region", { name: "Chats", exact: true })
-      await expect(splits.getByRole("button", { name: "Related chats (3)", exact: true })).toBeVisible()
+      await expandRelated(splits, 3)
       await expect(source).toHaveCount(0)
       await expect(splitOff.locator("[data-fork-row]")).toHaveCount(3)
+      const branchHeader = branches.getByRole("button", { name: /^Branches of / })
+      await expect(branchHeader).toBeVisible()
+      if ((await branchHeader.getAttribute("aria-expanded")) === "false") await branchHeader.click()
       await expect(branches.getByRole("button", { name: /^Open branch / })).toHaveCount(2)
       await splits.getByRole("link", { name: "Open chat Split demo · Harbor", exact: true }).click()
       await showAppNavigation(page)
-      await expect(splits.getByRole("button", { name: "Related chats (2)", exact: true })).toBeVisible()
+      await expandRelated(splits, 2)
       const parent = source.getByRole("link", { name: "Open chat Split demo · Journeys", exact: true })
       await expect(parent).toBeVisible()
       await expect(source.locator("[data-row-relation]")).toHaveText(/^Shares messages #1–2 · split /)
@@ -66,10 +73,11 @@ for (const width of [1440, 390])
           .filter({ hasText: "This chat was split from “Split demo · Journeys” here" })
       ).toBeVisible()
       await showAppNavigation(page)
+      await expandRelated(splits, 2)
       await splits.getByRole("link", { name: "Open chat Split demo · Lighthouse", exact: true }).click()
       await showAppNavigation(page)
+      await expandRelated(splits, 1)
       await expect(source.getByRole("link", { name: "Open chat Split demo · Harbor", exact: true })).toBeVisible()
-      await expect(splits.getByRole("button", { name: "Related chats (1)", exact: true })).toBeVisible()
       await expect(splitOff).toHaveCount(0)
     })
   }

@@ -5,7 +5,7 @@
 // wide and a phone width.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { scrollPane } from "./support/scrollPane.ts"
+import { wordPoint, wheelTimeline } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { replaceEditorText, textBoxValue } from "./support/textbox.ts"
 
@@ -96,26 +96,6 @@ function expectSame(before: Layout, after: Layout, what: string) {
   near(before.page, after.page, "the page's scroll")
 }
 
-/** A point in letter `into` of `word` in the message's text, with the word's line in the middle of the screen. */
-const wordPoint = (body: Locator, word: string, into: number) =>
-  body.evaluate(
-    (node, { word, into }) => {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
-      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
-        const at = text.textContent!.indexOf(word)
-        if (at < 0) continue
-        ;(text.parentElement as HTMLElement).scrollIntoView({ block: "center" })
-        const letter = document.createRange()
-        letter.setStart(text, at + into)
-        letter.setEnd(text, at + into + 1)
-        const rect = letter.getBoundingClientRect()
-        return { x: rect.left + 1, y: rect.top + rect.height / 2 }
-      }
-      throw new Error(`no ${word}`)
-    },
-    { word, into }
-  )
-
 for (const width of [1440, 390])
   test(`opening, saving and cancelling an edit moves nothing at ${width}`, async ({ page }) => {
     test.setTimeout(150_000)
@@ -142,8 +122,7 @@ for (const width of [1440, 390])
     // From the newest up: the list keeps only the rows near the screen.
     for (const message of [...MESSAGES].reverse()) {
       const found = mine(message.text)
-      for (let tries = 0; (await found.count()) === 0 && tries < 40; tries++)
-        await scrollPane(page.locator("article[data-slot]").first(), { by: -0.6 })
+      for (let tries = 0; (await found.count()) === 0 && tries < 40; tries++) await wheelTimeline(page, -0.6)
       await expect(found).toHaveCount(1)
       // By its slot: its text is in the editor's shadow root while it's edited.
       const slot = await found.getAttribute("data-slot")
@@ -151,7 +130,7 @@ for (const width of [1440, 390])
       const body = article.locator(".markdown")
       const editor = article.getByRole("textbox", { name: "Message text" })
       const open = async () => {
-        const point = await wordPoint(body, message.word, "into" in message ? message.into : 1)
+        const point = await wordPoint(body, message.word, 0, "into" in message ? message.into : 1)
         await page.mouse.move(point.x, point.y)
         const before = await settledLayout(page, article)
         await page.mouse.dblclick(point.x, point.y)

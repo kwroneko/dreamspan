@@ -23,7 +23,10 @@ test("a binned locked preset can be replaced or unlocked from either picker", as
   const label = "Preset made by the workshop"
   const reply = "I made the requested preset."
   const scripted = await startWorkshopProvider({
-    calls: [{ name: "create_preset", arguments: { label } }],
+    calls: [
+      { name: "load_skill", arguments: { name: "presets-lorebooks" } },
+      { name: "call_tool", arguments: { name: "create_preset", arguments: { label } } }
+    ],
     answer: reply
   })
   try {
@@ -57,7 +60,8 @@ test("a binned locked preset can be replaced or unlocked from either picker", as
     await page.getByLabel("Message", { exact: true }).fill("Create a test preset.")
     await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
     await expect(page.getByRole("article").filter({ hasText: reply })).toHaveCount(1)
-    const preset = (await rpc((api) => api.ListLibrary({ kind: "preset" }))).find((p) => p.label === label)!
+    const preset = (await rpc((api) => api.ListLibrary({ kind: "preset" }))).find((p) => p.label === label)
+    if (!preset) throw new Error(`The workshop did not create the preset: ${scripted.toolResults().join("\n")}`)
     await rpc((api) =>
       Effect.gen(function* () {
         for (const story of [replaceStory, unlockStory]) {

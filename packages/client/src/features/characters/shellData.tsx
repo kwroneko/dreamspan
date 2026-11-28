@@ -158,7 +158,8 @@ export function useShellForks(view: ShellForksView) {
   return {
     atom,
     loading: data === null,
-    waiting: !AsyncResult.isSuccess(result) || result.waiting,
+    // A live stream stays waiting for more updates after its first answer.
+    waiting: !AsyncResult.isSuccess(result),
     failure: AsyncResult.isFailure(result) ? result : null,
     filterCounts: data?.filterCounts ?? null,
     /**

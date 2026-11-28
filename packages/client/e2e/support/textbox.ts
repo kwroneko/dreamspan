@@ -24,6 +24,7 @@ export const expectTextBox = async (box: Locator, value: string | RegExp, option
  * including text virtualized out of the DOM.
  */
 export const replaceEditorText = async (box: Locator, value: string) => {
+  await expect(box).toBeEditable()
   await box.focus()
   await box.press("ControlOrMeta+a")
   await box.page().keyboard.insertText(value)

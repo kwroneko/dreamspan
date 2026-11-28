@@ -349,7 +349,10 @@ export function MessageList({
     if (!beforeComposerSubmit) return
     beforeComposerSubmit.current = () => {
       const list = parent.current
-      if (list === null || !settled.current || session.snapshot().newer !== null || !atNativeEnd(list)) return
+      const current = session.snapshot()
+      // The destination is positioned in the layout effect. The deferred offset correction
+      // can still be queued when the user submits from the end of a short branch.
+      if (list === null || positioned.current !== current.opened || current.newer !== null || !atNativeEnd(list)) return
       stopLinkReveal.current?.()
       flushInput.current?.()
       finishScrollInput(true, true)
@@ -1074,7 +1077,12 @@ function ChatSurface({
     },
     [session, navigate, withPanel, slot, reopen]
   )
-  const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
+  // Panel navigation changes where the action navigates without replacing a timeline prop.
+  const branchAction = useRef(onBranch)
+  useLayoutEffect(() => {
+    branchAction.current = onBranch
+  }, [onBranch])
+  const switchBranch = useCallback((entry: PathEntry, index: number) => void branchAction.current(entry, index), [])
   // A summary's range opens the window at its first message, as a link to that message does.
   const branchFork = view.forkId
   // Beside the chat the panel stays open; a phone's sheet closes to show the message.

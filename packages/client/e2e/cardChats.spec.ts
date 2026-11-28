@@ -141,7 +141,7 @@ const chatLinks = (page: Page) => {
   return list.getByRole("link").or(list.getByRole("link", { name: /^Open chat / }))
 }
 
-test("a first message typed before the chat exists survives leaving it, and goes once sent", async ({ browser }) => {
+test("a first message stays in its pending chat when switching tabs and goes once sent", async ({ browser }) => {
   const { context, page } = await phone(browser)
   const box = page.getByRole("textbox", { name: "Message", exact: true })
   const text = "Unsent: the first message, which must survive navigation"
@@ -150,10 +150,10 @@ test("a first message typed before the chat exists survives leaving it, and goes
   // A pending chat has the chat's header on a phone, as any chat: its ← opens the menu.
   await page.getByRole("button", { name: "Chats and menu" }).click()
   await page.locator(".fixed.inset-0").getByRole("link", { name: "Home", exact: true }).last().click()
-  await page.getByRole("main").getByRole("link", { name: "Open Fen", exact: true }).click()
-  await page.getByRole("button", { name: "Close", exact: true }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/")
+  await page.getByRole("tab", { name: /^Fen,/ }).click()
   await expectTextBox(box, text)
-  // A reload, too: it's kept in the browser, not the page.
+  // Reloading the named pending chat restores its composer draft.
   await page.reload()
   await expectTextBox(box, text)
 
@@ -162,8 +162,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   await expect(page).toHaveURL(/\/chats\//)
   await expect(page.getByRole("article", { name: "Your message", exact: true }).getByText(text)).toBeVisible()
   await page.goto(`${server().url}/cards/${fen}/chat`)
-  await expect(page.getByRole("heading", { name: "Fen" })).toBeVisible()
-  await page.waitForTimeout(500)
+  await expect(box).toBeEditable()
   await expectTextBox(box, "")
   await context.close()
 })

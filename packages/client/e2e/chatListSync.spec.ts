@@ -1,8 +1,7 @@
 import { logoutFromSettings } from "./support/appMenu.ts"
 // The paged chat list agrees with the server after a delete or an Undo, whichever page the
-// chat was on; and a first message kept in this browser for a chat not made yet doesn't hold
-// up logout (it waits for the next login). Since the independent shell (8e20190) the paged
-// list is the Chats page's; a card's page lists its forks from the shell.
+// chat was on, and a pending first message survives signing out. The paged list belongs to the
+// Chats page; a card's page lists its forks from the shell.
 import { expect, test } from "@playwright/test"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
@@ -28,7 +27,7 @@ test.beforeAll(async () => {
       {
         sql: `INSERT INTO chats(id,owner_user_id,kind,status,title,created_at,last_message_at)
           WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<${COUNT - 1})
-          SELECT printf('paged-c-%03d',i),?,'rp','active',printf('Paged chat %03d',i),?,?+i FROM n`,
+          SELECT printf('paged-c-%03d',i),?,'rp','active',printf('Paged chat %03d',i),?+i,?+i FROM n`,
         params: [me.id, now, now]
       },
       {
@@ -51,11 +50,12 @@ test("deleting a chat from a later page removes it from the list", async ({ page
   const main = page.getByRole("main")
   const links = main.getByRole("list", { name: "Chats" }).getByRole("link")
   await expect(links).toHaveCount(50)
+  const target = '[data-chat-id="paged-c-010"]'
+  await expect(main.locator(target)).toHaveCount(0)
   for (const count of [100, 150]) {
     await main.getByRole("button", { name: "Load more", exact: true }).click()
     await expect(links).toHaveCount(count)
   }
-  const target = 'a[href="/chats/paged-c-010"]'
   const row = main.getByRole("listitem").filter({ has: page.locator(target) })
   await row.hover()
   await row.getByRole("button", { name: "Delete Paged chat 010", exact: true }).click()
@@ -68,7 +68,7 @@ test("Undo shows the restored chat again in the list it was deleted from", async
   await page.goto(`${server().url}/chats`)
   const main = page.getByRole("main")
   await expect(main.getByRole("list", { name: "Chats" }).getByRole("link")).toHaveCount(50)
-  const target = 'a[href="/chats/paged-c-153"]'
+  const target = '[data-chat-id="paged-c-153"]'
   const row = main.getByRole("listitem").filter({ has: page.locator(target) })
   await row.hover()
   await row.getByRole("button", { name: "Delete Paged chat 153", exact: true }).click()
@@ -81,10 +81,14 @@ test("an unsent first message doesn't hold up logout, and is there after the nex
   const made = await admin((api) => api.CreateCard({ label: "Before logout", name: "Before logout" }))
   const text = "Typed before logging out, never sent"
   await page.goto(`${server().url}/cards/${made.entityId}/chat`)
-  await page.getByRole("textbox", { name: "Message", exact: true }).fill(text)
+  const message = page.getByRole("textbox", { name: "Message", exact: true })
+  await expect(message).toBeEditable()
+  await expect(page).toHaveURL(/[?&]draft=/)
+  const pending = page.url()
+  await message.fill(text)
   await logoutFromSettings(page)
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/cards/${made.entityId}/chat`)
-  await expectTextBox(page.getByRole("textbox", { name: "Message", exact: true }), text)
+  await page.goto(pending)
+  await expectTextBox(message, text)
 })

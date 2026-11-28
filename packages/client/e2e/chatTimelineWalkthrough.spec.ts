@@ -37,7 +37,7 @@ test.beforeAll(async ({ browser }) => {
       .getByRole("link")
       .filter({ hasText: "The Lantern Inn" })
       .filter({ hasText: "380 messages" })
-    chatId = (await link.getAttribute("href"))!.split("/").at(-1)! as ChatId
+    chatId = new URL((await link.getAttribute("href"))!, server().url).pathname.split("/").at(-1)! as ChatId
     await admin((api) =>
       Effect.gen(function* () {
         const connection = yield* api.CreateConnection({

@@ -7,11 +7,16 @@ import { Effect } from "effect"
 import { addToCast } from "./support/cast.ts"
 import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let adminCookie: string
+test.beforeAll(async () => {
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+// Polls open their own connection but reuse the fixture's login.
+const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => withCookie(server(), adminCookie, use)
 
 const importCard = async (page: Page, data: Record<string, unknown>) => {
   const response = await page.request.post(`${server().url}/library/import?name=fixture.json`, {
@@ -363,7 +368,7 @@ test("a reload before the start card's title reached the new chat still names it
   await page.reload()
   await expect(composer(page)).toBeEditable()
   await composer(page).fill("The first words.")
-  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await page.getByRole("button", { name: /^Send(?: as .+)?$/ }).click()
   await expect(page).toHaveURL(chatUrl(draft))
   await expect
     .poll(() => admin((api) => api.GetChat({ chatId: draft as never })).then((chat) => chat.title))
@@ -742,7 +747,14 @@ test("a first turn sent before the start card's title was read still names the c
   await page.goto(`${server().url}/chats`)
   const card = page.getByRole("textbox", { name: "Title of the new chat", exact: true })
   await card.fill("Alpha")
-  await page.waitForTimeout(1500)
+  const { id: ownerId } = await admin((api) => api.Whoami())
+  await expect
+    .poll(() =>
+      admin((api) =>
+        Effect.map(api.GetUserDraft({ ownerId, targetId: "chat:new", field: "Title" }), (draft) => draft?.content)
+      )
+    )
+    .toBe("Alpha")
   // The start card's title read is slow on the new chat's page.
   const release = await holdAnswers(
     page,
@@ -753,7 +765,7 @@ test("a first turn sent before the start card's title was read still names the c
   const draft = draftOf(page)!
   await expect(composer(page)).toBeEditable()
   await composer(page).fill("The first words.")
-  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await page.getByRole("button", { name: /^Send(?: as .+)?$/ }).click()
   await expect(page).toHaveURL(chatUrl(draft))
   release()
   await expect

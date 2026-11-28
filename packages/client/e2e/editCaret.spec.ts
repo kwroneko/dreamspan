@@ -5,7 +5,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { showActions } from "./support/message.ts"
+import { showActions, wordPoint } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { replaceEditorText, textBoxValue } from "./support/textbox.ts"
@@ -30,46 +30,6 @@ const MESSAGE = [
   ...Array.from({ length: 5 }, (_, i) => paragraph(i + 10)),
   "Last of all, the rope again: the rope that held the skiff."
 ].join("\n\n")
-
-/**
- * The place in the viewport of letter `into` of the `nth` rendered occurrence of `word` in `body`,
- * scrolled to the middle of the screen. Read once the list has stopped moving, and on the word: the
- * list measures the rows that came into view and adjusts its scroll over the next frames (after a
- * reply, back to its end), so a place read at once is where the word no longer is, and a
- * double-click there lands a line or more away, or off the message.
- */
-const wordPoint = (body: Locator, word: string, nth: number, into: number) =>
-  body.evaluate(
-    async (node, { word, nth, into }) => {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
-      let seen = 0
-      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
-        const content = text.textContent!
-        for (let at = content.indexOf(word); at >= 0; at = content.indexOf(word, at + 1)) {
-          if (seen++ !== nth) continue
-          const letter = document.createRange()
-          letter.setStart(text, at + into)
-          letter.setEnd(text, at + into + 1)
-          const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
-          for (let attempt = 0; attempt < 10; attempt++) {
-            ;(text.parentElement as HTMLElement).scrollIntoView({ block: "center" })
-            let rect = letter.getBoundingClientRect()
-            for (let still = 0; still < 6;) {
-              await frame()
-              const next = letter.getBoundingClientRect()
-              still = next.top === rect.top && next.left === rect.left ? still + 1 : 0
-              rect = next
-            }
-            const point = { x: rect.left + 1, y: rect.top + rect.height / 2, top: rect.top }
-            if (document.caretPositionFromPoint(point.x, point.y)?.offsetNode === text) return point
-          }
-          throw new Error(`${word} #${nth} doesn't stay on screen`)
-        }
-      }
-      throw new Error(`no ${word} #${nth}`)
-    },
-    { word, nth, into }
-  )
 
 /** The editor's caret: its offset, and its line's box and the box of the editor's scroller, in the viewport. */
 const caretOf = (editor: Locator) =>

@@ -14,7 +14,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { filesOf, PIXEL } from "./support/files.ts"
 import { openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
+import { asPage, asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const shots = process.env.SCREENSHOT_DIR
@@ -337,7 +337,9 @@ test.describe("files", () => {
         if (audit) await expectLayout(page, info, `files-quota-${width}-${theme}`, { scope: "main" })
 
         // Near the quota the line turns to a warning, after the Refresh button.
-        await files.put("/files/most.bin", Buffer.alloc(60 * 1024))
+        // Include the space the filesystem already allocated to the account's directories.
+        const { usedBytes, quotaBytes } = await asPage(page, server(), (api) => api.GetFilesUsage({ fresh: true }))
+        await files.put("/files/most.bin", Buffer.alloc(Math.ceil(quotaBytes * 0.94) - usedBytes))
         await browser.getByRole("button", { name: "Refresh" }).click()
         await expect(line).toHaveAttribute("data-warn", "")
       })
