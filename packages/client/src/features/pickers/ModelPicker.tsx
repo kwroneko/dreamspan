@@ -174,8 +174,8 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
         />
       </Field>
       {/* Each in its own Field: inside a settings field's popover, the outer Field's label would name them. */}
-      <div className="flex shrink-0 items-center gap-2">
-        <Field label="Connection" labelHidden className="min-w-0 flex-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Field label="Connection" labelHidden className="min-w-[11rem] flex-1">
           <Select<string>
             className="max-w-none!"
             value={connection}

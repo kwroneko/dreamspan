@@ -531,10 +531,17 @@ export class EditorStore {
     const at = ["prompts", `identifier=${prompt.identifier}`]
     if (getAt(this.liveDoc, at) === undefined) this.setValue(at, prompt)
     const held = this.held() ?? NO_HELD
+    // A prompt still in the live order (only marked deleted behind the bar) stays live instead of
+    // joining `added`, which would strip it from the live order and create a bogus live draft.
+    const live = ((getAt(this.liveDoc, ["order"]) as ReadonlyArray<PromptOrderEntry> | undefined) ?? []).some(
+      (e) => e.identifier === entry.identifier
+    )
     this.setHeld({
       ...held,
       deleted: held.deleted.filter((id) => id !== entry.identifier),
-      added: [...held.added.filter((e) => e.identifier !== entry.identifier), entry]
+      added: live
+        ? held.added.filter((e) => e.identifier !== entry.identifier)
+        : [...held.added.filter((e) => e.identifier !== entry.identifier), entry]
     })
     this.setValue(["order"], order)
   }

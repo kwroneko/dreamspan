@@ -307,7 +307,7 @@ export function stateMarkerTests() {
         await expect(marker(page, slots[0]!)).toHaveText(/Tobin muted/)
         const settings = await openPanel(page, "Display")
         const shown = settings.getByRole("group", { name: "Changes shown in the chat" })
-        await expect(shown.getByRole("switch")).toHaveCount(7)
+        await expect(shown.getByRole("switch")).toHaveCount(8)
         await shown.getByRole("switch", { name: "Who was muted", exact: true }).click()
         await expect(marker(page, slots[0]!)).toHaveCount(0)
         await expectLayout(page, info, `markers-settings-${width}-${theme}`, {

@@ -328,7 +328,7 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
   await mine.getByLabel("Message text").fill("The road washed out.")
   await mine.getByRole("button", { name: "Save" }).click()
   await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ of [\d,]+ tokens uncached on the next reply/)
-  await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
+  await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
   await chip.click()
   const cold = page.getByRole("dialog", { name: "Not cached", exact: true })
   await expect(cold).toContainText(/Your next reply re-sends about [\d,]+ of its [\d,]+ tokens at full price/)
@@ -338,7 +338,7 @@ test("the cache indicator is warm after a reply, and cold once an earlier messag
     await page.keyboard.press("Escape")
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 })
-      await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
+      await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
       await expectLayout(page, info, `cache-cold-composer-${width}`, {
         scope: ".chat-column:has([data-composer-text])"
       })

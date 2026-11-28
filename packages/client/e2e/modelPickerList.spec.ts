@@ -129,13 +129,14 @@ test("pins that load after the picker opens, or change in another tab, join Pinn
   await pinRow(page, label, false).click()
   await expect(pinRow(page, label, true)).toHaveAttribute("aria-pressed", "true")
   // Reopened on a fresh page whose pins arrive only after the picker shows.
-  let release: (() => void) | undefined
+  let holding = true
+  const held: Array<() => void> = []
   await page.routeWebSocket(/\/rpc$/, (socket) => {
     const upstream = socket.connectToServer()
     socket.onMessage((data) => {
       const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
-      if (request?.tag === "GetDisplayPrefs" && !release) {
-        release = () => upstream.send(data)
+      if (request?.tag === "GetDisplayPrefs" && holding) {
+        held.push(() => upstream.send(data))
         return
       }
       upstream.send(data)
@@ -145,9 +146,10 @@ test("pins that load after the picker opens, or change in another tab, join Pinn
   await page.goto(`${server().url}/chats/${seeded.chat.id}`)
   await modelChip(page).click()
   await expect(list(page)).toBeVisible()
-  await expect.poll(() => release !== undefined).toBe(true)
+  await expect.poll(() => held.length).toBeGreaterThan(0)
   await expect(heading(page, "Pinned")).toHaveCount(0)
-  release!()
+  holding = false
+  for (const send of held.splice(0)) send()
   await expect(heading(page, "Pinned")).toBeVisible()
   await expect.poll(async () => (await names(page)).slice(0, 4)).toContain(label)
   // Pinned in another tab while this picker stays open, its search unchanged.

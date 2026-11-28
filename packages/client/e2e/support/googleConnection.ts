@@ -64,7 +64,8 @@ export const googleConnectionTests = () => {
           page.getByText("Caching is automatic; cache reads are counted apart from other input.")
         ).toBeVisible()
         await expect(page.getByText("Cache lifetime is unknown. This app doesn’t create saved caches.")).toBeVisible()
-        await expect(page.getByText(/Gemini 4 Carbon and Argon:/)).toBeVisible()
+        await expect(page.getByText(/Gemini 4 except Neon and Hydrogen:/)).toBeVisible()
+        await expect(page.getByText(/Gemini 4 Neon and Hydrogen:/)).toBeVisible()
         await expect(page.getByRole("combobox", { name: "Cache markers", exact: true })).toHaveCount(0)
         await expectLayout(page, info, `google-new-${width}-${theme}`, { scope: "main" })
         const name = `Google ${width} ${theme}`

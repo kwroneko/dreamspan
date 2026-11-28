@@ -156,7 +156,10 @@ test.describe("first replies", () => {
       const edited = "Check the tally in the newly updated ledger."
       await replaceEditorText(field, edited)
       const before = provider().bodies.length
-      await page.getByRole("button", { name: action === "Send" ? /^Send$/ : /^Generate/ }).click()
+      await page
+        .getByTestId("composer-controls")
+        .getByRole("button", { name: action === "Send" ? /^Send$/ : /^Generate/ })
+        .click()
       await expect(page).toHaveURL(/\/chats\/[^/?]+/)
       await expect.poll(() => provider().bodies.length).toBeGreaterThan(before)
       expect(JSON.stringify(provider().bodies[before])).toContain(edited)

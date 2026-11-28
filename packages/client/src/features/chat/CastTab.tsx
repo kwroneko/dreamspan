@@ -1,5 +1,6 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDefaultPersona } from "../characters/defaultPersona.tsx"
+import { isPendingChat } from "./chatStarted.ts"
 import { CardVersion } from "./CardVersion.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
@@ -281,6 +282,8 @@ function ReplySettingsRow({ session }: { session: ChatSession }) {
 export function CastTab({ session }: { session: ChatSession }) {
   // Only the cast: the tab doesn't re-render as messages arrive.
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const chat = useSyncExternalStore(session.subscribe, () => session.snapshot().chat)
+  const defaultPersona = useDefaultPersona()
   const view = useMemo(() => castView(cast), [cast])
   // Who the model is writing as at the end of the chat, if anyone (after Speak now, say): no one
   // yet while the decision model is choosing who replies.
@@ -323,7 +326,10 @@ export function CastTab({ session }: { session: ChatSession }) {
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
     <div className="flex flex-col gap-4">
-      <You card={persona === null ? undefined : view.cards.get(persona)}>
+      <You
+        card={persona === null ? undefined : view.cards.get(persona)}
+        isDefault={isPendingChat(chat) && persona !== null && persona === defaultPersona}
+      >
         <PersonaSwitch session={session} trigger="Switch" place="cast" />
         {persona !== null && view.cards.has(persona) && (
           <MemberMore

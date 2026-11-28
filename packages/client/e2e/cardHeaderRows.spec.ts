@@ -46,15 +46,24 @@ test.beforeAll(async () => {
   )
 })
 
-async function countsOrder(usage: Locator, hasChats: boolean) {
-  await expect(usage).toHaveText(hasChats ? /^.+ tokens · .+ permanent1 chat$/ : /^.+ tokens · .+ permanent$/)
+async function countsOrder(usage: Locator, hasChats: boolean, panel: boolean) {
+  await expect(usage).toHaveText(
+    !hasChats
+      ? /^.+ tokens · .+ permanent$/
+      : panel
+        ? /^.+ tokens · .+ permanent1 chat$/
+        : /^1 chat.+ tokens · .+ permanent$/
+  )
   expect(await usage.locator(":scope > *").evaluateAll((children) => children.map((child) => child.tagName))).toEqual(
-    hasChats ? ["SPAN", "A"] : ["SPAN"]
+    !hasChats ? ["SPAN"] : panel ? ["SPAN", "A"] : ["A", "SPAN"]
   )
   const separators = await usage
     .locator(":scope > *")
-    .evaluateAll((children) => children.map((child) => getComputedStyle(child, "::after").content))
-  expect(separators).toEqual(hasChats ? ['"·"', "none"] : ["none"])
+    .evaluateAll(
+      (children, isPanel) => children.map((child) => getComputedStyle(child, isPanel ? "::after" : "::before").content),
+      panel
+    )
+  expect(separators).toEqual(!hasChats ? ["none"] : panel ? ['"·"', "none"] : ["none", '"·"'])
 }
 
 async function structure(header: Locator, panel = true, allowWrap = false) {
@@ -197,7 +206,7 @@ for (const width of [390, 1024, 1440])
           expect(row.x + row.width - end.x - end.width).toBeLessThanOrEqual(1)
           const usage = header.locator('[data-card-header-row="usage"]')
           await expect(usage.getByRole("link", { name: "1 chat", exact: true })).toBeVisible()
-          await countsOrder(usage, true)
+          await countsOrder(usage, true, view === "panel")
           await expect(scope.getByRole("button", { name: "Switch persona", exact: true })).toHaveCount(0)
           const toggle = header.getByRole("button", { name: "Persona", exact: true })
           await expect(toggle).toHaveAttribute("aria-pressed", "false")
@@ -443,7 +452,7 @@ for (const width of [1440, 390])
           const toggle = header.getByRole("button", { name: "Persona", exact: true })
           if ((await toggle.getAttribute("aria-pressed")) !== String(persona)) await toggle.click()
           await expect(toggle).toHaveAttribute("aria-pressed", String(persona))
-          await countsOrder(usage, hasChats)
+          await countsOrder(usage, hasChats, view === "panel")
           await page.mouse.move(0, 0)
           if (work) {
             mkdirSync(work, { recursive: true })

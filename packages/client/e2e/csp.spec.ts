@@ -76,7 +76,7 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   // A select's list: Base UI would add an inline <style> for its scrollbar.
   await page.goto(`${server().url}/settings/users`)
   await page.getByRole("button", { name: "New user" }).click()
-  await page.getByLabel("Role").click()
+  await page.getByLabel("Role", { exact: true }).click()
   await expect(page.getByRole("option").first()).toBeVisible()
   await page.keyboard.press("Escape")
 

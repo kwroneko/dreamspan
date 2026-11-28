@@ -209,7 +209,7 @@ const check = async (page: Page, root: Locator, name: string) => {
   ])
     await expect(root.locator(`[data-prompt="${id}"] [data-prompt-kind-tag]`)).toHaveText(label!)
   const noteLink = noteSource.getByRole("link", { name: "Character's Note", exact: true })
-  await expect(noteLink).toHaveAttribute("href", /\/library\/.+focus=note/)
+  await expect(noteLink).toHaveAttribute("href", /\/chats\/.+[?&]editor=.+&focus=note/)
 
   for (const [id, label, explanation] of [
     ["charDescription", "Description", "Edit Description in each character's card, Definition tab."],

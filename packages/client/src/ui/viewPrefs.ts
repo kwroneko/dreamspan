@@ -24,11 +24,21 @@ export const onDisplayPrefsChanged = (refresh: () => void) => {
     listeners.delete(refresh)
   }
 }
+// Deduplicate prefs refreshes per userId across all mounted `useViewPrefs()` callers.
+const refreshers = new Map<string, { refresh: () => void; count: number }>()
+const refreshAllPrefs = () => {
+  for (const { refresh } of refreshers.values()) refresh()
+}
+channel?.addEventListener("message", refreshAllPrefs)
+if (typeof window !== "undefined") window.addEventListener("focus", refreshAllPrefs)
+
 export const displayNoticeReceiver = {
   id: "display.live",
   receive: (notice: Notice) => {
-    if (notice._tag === "DisplayPrefsChanged" || notice._tag === "UserDraftSync")
+    if (notice._tag === "DisplayPrefsChanged" || notice._tag === "UserDraftSync") {
+      refreshAllPrefs()
       for (const refresh of listeners) refresh()
+    }
   }
 }
 
@@ -52,15 +62,18 @@ export function useViewPrefs() {
   const result = useAtomValue(prefsFor(userId))
   const refresh = useAtomRefresh(prefsFor(userId))
   useEffect(() => {
-    const stop = onDisplayPrefsChanged(refresh)
-    channel?.addEventListener("message", refresh)
-    window.addEventListener("focus", refresh)
+    const existing = refreshers.get(userId)
+    if (existing) {
+      existing.count++
+      existing.refresh = refresh
+    } else refreshers.set(userId, { refresh, count: 1 })
     return () => {
-      stop()
-      channel?.removeEventListener("message", refresh)
-      window.removeEventListener("focus", refresh)
+      const current = refreshers.get(userId)
+      if (!current) return
+      current.count--
+      if (current.count <= 0) refreshers.delete(userId)
     }
-  }, [refresh])
+  }, [userId, refresh])
   const action = useAction()
   const writes = useAtomValue(writesFor(userId))
   const optimistic = useSyncExternalStore(writes.subscribe, writes.snapshot)

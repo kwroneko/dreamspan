@@ -55,7 +55,7 @@ export function FieldFrame({
           className={
             side === "bottom"
               ? "@container/field-strip flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-2 max-sm:h-9"
-              : "@container/field-strip flex h-full w-[5.5rem] shrink-0 items-center justify-end gap-0.5 overflow-hidden pr-1"
+              : "@container/field-strip flex h-full w-24 shrink-0 items-center justify-end gap-0.5 overflow-hidden pr-1 max-sm:w-28"
           }
         >
           {status && (

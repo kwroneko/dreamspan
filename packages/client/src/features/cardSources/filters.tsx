@@ -1163,19 +1163,21 @@ function CreatorsPanel({ browse, set, popover }: { browse: SourceBrowse; set: Se
                   creatorNames.set(item.value, item.label)
                   set(creatorPatch(c, mode, on ? chosen.filter((v) => v !== item.value) : [...chosen, item.value]))
                 }}
-                className={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-4" : "px-3"}`}
+                className={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-50 pointer-coarse:h-11 ${popover ? "pr-1 pl-4" : "px-2"}`}
               >
                 {/* One line. The site badge sits just before the count, its right edge in line
                     down the list. Short of room, the badge gives way first (its shrink weighs far
                     more than the name's), down to a few letters with an ellipsis; only then is the
                     name cut. Each says its full text on hover. */}
                 <span
+                  data-layout-name
                   title={item.label}
                   className={`min-w-0 truncate ${on ? `font-medium ${tone} ${mode === "not" ? "line-through decoration-1" : ""}` : ""}`}
                 >
                   {item.label}
                 </span>
                 <span
+                  data-layout-name
                   title={siteName(item.value.slice(0, item.value.indexOf("/")))}
                   className="ml-auto min-w-10 shrink-[1000] truncate rounded border border-border px-1.5 text-xs leading-5 text-muted"
                 >

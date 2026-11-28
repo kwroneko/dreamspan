@@ -185,10 +185,10 @@ for (const width of [1440, 390]) {
     // at 390 and moves the whole box; the toggle must not move within it.
     await checkToggle(page, page.getByTestId("composer-box"))
     const actions = actionsOf(page)
-    const generate = actions.getByRole("button", { name: /^Generate / })
+    const generate = actions.getByRole("button", { name: /^Generate(?:\s|$)/ })
     const send = actions.getByRole("button", { name: /^Send/ })
     const sendName = (await send.getAttribute("aria-label"))!
-    await hover(page, send, `${sendName}. (Enter)`)
+    await hover(page, send, `${sendName}, then Wren ${width} replies. (Enter)`)
     // Whose turn it is depends on the account's persona: read it from the hover, then check its shape.
     await page.mouse.move(0, 0)
     await generate.hover()

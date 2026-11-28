@@ -48,8 +48,10 @@ for (const width of [1440, 390]) {
     )
     await page.goto(`${server().url}/library/${refId}`)
     const missing = page.locator("[data-agent-instructions-missing]")
-    await missing.scrollIntoViewIfNeeded()
     await expect(missing).toContainText("the app's default text at the very end of the request")
+    // Wait for lazy CodeMirror prompt editors above to settle so scrolling/hovering isn't shifted away.
+    await expect(page.getByText("Loading editor…")).toHaveCount(0)
+    await missing.scrollIntoViewIfNeeded()
     const add = missing.getByRole("button", { name: "Add to preset" })
     await add.hover()
     await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(

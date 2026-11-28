@@ -36,7 +36,7 @@ export function dispatcherConnectionTests() {
           await expectLayout(page, info, `dispatcher-connection-options-${width}-${theme}`)
           await page
             .getByRole("option")
-            .filter({ has: page.getByText("Try dispatcher (untested)", { exact: true }) })
+            .filter({ has: page.getByText("Load tools as needed", { exact: true }) })
             .click()
           await expect(
             page.getByText(/Changing the tool list makes the next request read the chat again once/)
@@ -54,7 +54,7 @@ export function dispatcherConnectionTests() {
             .toBe("dispatcher")
           await page.reload()
           await page.getByText("Advanced", { exact: true }).click()
-          await expect(select).toContainText("Try dispatcher (untested)")
+          await expect(select).toContainText("Load tools as needed")
           await expectLayout(page, info, `dispatcher-connection-saved-${width}-${theme}`)
         })
       }

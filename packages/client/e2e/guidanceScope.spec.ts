@@ -104,7 +104,7 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: "Chat actions", exact: true }).click()
       await page.getByRole("menuitem", { name: "New chat with this cast", exact: true }).click()
       await expect(toggle).toBeChecked()
-      await expect(box).toHaveAttribute("placeholder", "Guidance for the next message…")
+      await expect(box).toHaveAttribute("aria-placeholder", "Guidance for the next message…")
       // With no source composer, a pending chat starts off even though the last chat was on.
       await page.goto(`${server().url}/cards/${setup.card}/chat`)
       await expect(toggle).not.toBeChecked()

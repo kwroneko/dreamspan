@@ -206,7 +206,7 @@ function ArchiveDialog({ close, trigger }: { close: () => void; trigger: RefObje
               className="flex flex-wrap items-center gap-x-2 gap-y-1"
               data-archive-criterion={entry.id}
             >
-              <div className="-mr-6.5 min-w-0">
+              <div className="-mr-6.5 max-w-full min-w-0">
                 <Checkbox
                   checked={on}
                   hint={`Click to ${on ? "stop matching" : "match"} this rule${entry.explain ? `. ${entry.explain}` : ""}`}

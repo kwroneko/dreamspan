@@ -123,7 +123,7 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
   )
   const chip = cacheChip(page)
   await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ of [\d,]+ tokens uncached on the next reply/)
-  await expect(chip).toHaveText(/^↻ [\d.]+k? of [\d.]+k? uncached$/)
+  await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
   await chip.click()
   const estimate = page.getByRole("dialog", { name: "Not cached", exact: true })
   await expect(estimate).toContainText(/Your next reply re-sends about [\d,]+ of its [\d,]+ tokens at full price/)
