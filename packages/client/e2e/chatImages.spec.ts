@@ -170,8 +170,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(attached).toHaveCount(0)
       // Sent, a click opens it in the image column (full screen on a phone), as a portrait opens.
       const sent = page.getByRole("button", { name: "View image 1" })
-      await sent.hover()
-      await expect(tooltip(page)).toContainText("Opens this image in the image viewer.")
+      await sent.locator("img").evaluate((image: HTMLImageElement) => image.decode())
+      await expect(async () => {
+        await page.mouse.move(0, 0)
+        await sent.hover()
+        await expect(tooltip(page)).toContainText("Opens this image in the image viewer.", { timeout: 2000 })
+      }).toPass({ timeout: 10_000 })
       await sent.click()
       const viewer = await expectViewerOpen(page, width, "costume.png")
       await expectZoomControls(page, viewer)
@@ -579,14 +583,17 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(limited).toHaveAttribute("aria-pressed", "true")
       await expect(limited).toHaveAttribute("aria-disabled", "true")
       await expect(message.getByRole("button", { name: /^View image 1 \(not sent/ })).toBeVisible()
-      // Re-enter until the tooltip opens: a pointer already resting over the tile fires no enter.
-      await expect(async () => {
-        await page.mouse.move(0, 0)
-        await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
-        await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible({
-          timeout: 2000
-        })
-      }).toPass({ timeout: 15000 })
+      // On touch the exclusion is in the visible toggle's accessible name, checked above.
+      // A mouse can also hover the image for the explanation.
+      if (width !== 390) {
+        await expect(async () => {
+          await page.mouse.move(0, 0)
+          await message.getByRole("button", { name: /^View image 1 \(not sent/ }).hover()
+          await expect(tooltip(page)).toHaveText("Not sent to the model: Only the last image is sent to this model", {
+            timeout: 2000
+          })
+        }).toPass({ timeout: 15_000 })
+      }
       const screenshots = process.env.SCREENSHOT_DIR
       if (screenshots) await page.screenshot({ path: join(screenshots, `image-rule-${width}-${colorScheme}.png`) })
 
@@ -615,8 +622,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       const back = message.getByRole("button", { name: "Put image 2 back into the context" })
       await expect(back).toHaveAttribute("aria-pressed", "true")
       await page.mouse.move(0, 0)
-      await back.hover()
-      await expect(page.getByText("Click to put image 2 back into the context")).toBeVisible()
+      if (width !== 390) {
+        await back.hover()
+        await expect(page.getByText("Click to put image 2 back into the context")).toBeVisible()
+      }
       // The limit counts only what's sent: the first image is sent now.
       await expect(message.getByRole("button", { name: "Take image 1 out of the context" })).toBeEnabled()
       await page.mouse.move(0, 0)

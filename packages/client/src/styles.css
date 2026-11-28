@@ -1070,7 +1070,9 @@ main:has(> [data-fill]) {
   width: auto;
   min-width: 2rem;
   margin-inline-start: calc(-1rem - 0.125rem);
-  padding-inline: 1rem 0.25rem;
+  padding-inline: 1rem 0.125rem;
+  font-size: 0.625rem;
+  letter-spacing: -0.05em;
   box-shadow: 0 0 0 2px var(--fork-row-background);
 }
 @container fork-row (width < 17.8125rem) {

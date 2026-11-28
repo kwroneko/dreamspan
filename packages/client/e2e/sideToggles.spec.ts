@@ -135,8 +135,10 @@ for (const theme of ["light", "dark"] as const) {
     await show.click()
     await expect(sidebar(page)).toBeVisible()
     await expect(showSidebar(page)).toHaveCount(0)
-    const stripBox = (await strip.boundingBox())!
-    expect(Math.round((await strip.locator("[data-tab]").first().boundingBox())!.x)).toBe(Math.round(stripBox.x))
+    const history = (await strip.locator("[data-strip-history]").boundingBox())!
+    expect(Math.round((await strip.locator("[data-tab]").first().boundingBox())!.x)).toBe(
+      Math.round(history.x + history.width)
+    )
 
     // No chat open at all: the toggle goes (nothing to show), Show stays in the strip.
     await page.getByRole("button", { name: "Close Harbour walk" }).click()
@@ -180,9 +182,8 @@ for (const theme of ["light", "dark"] as const) {
     await expect(sidebar(page)).toBeVisible()
   })
 
-  // Review of sidetoggles (2026-11-07): with four frames at 1024 and both bars open, the top-right
-  // strip's buttons overflowed into the panel, which covered its toggle. The tabs give way first,
-  // then Maximize (the ⋯ menu has it); the ⋯ menu and the toggle stay inside the frame.
+  // With four frames and both bars open, an overflowed top-right strip used to put its
+  // toggle under the panel. Narrowing the workbench keeps the strip controls inside their frame.
   test(`narrow split frames keep the frame menu and the panel's toggle inside the frame (${theme})`, async ({
     page
   }) => {
@@ -190,12 +191,17 @@ for (const theme of ["light", "dark"] as const) {
     await fresh(page, theme)
     await page.getByRole("button", { name: "Split right", exact: true }).click()
     await hideSidebar(page)
-    await page.setViewportSize({ width: 1024, height: 900 })
-    for (let i = 0; i < 2; i++) {
-      await page.locator("[data-frame]").last().getByRole("button", { name: "Tab and frame actions" }).click()
-      await page.getByRole("menuitem", { name: "Split right", exact: true }).click()
+    await page.setViewportSize({ width: 1920, height: 900 })
+    // Each split needs room for two 344 px frames. Split the two original halves first.
+    const frames = page.locator("[data-frame]")
+    for (const frame of [frames.first(), frames.last()]) {
+      await frame.getByRole("button", { name: "Tab and frame actions" }).click()
+      const split = page.getByRole("menuitem", { name: "Split right", exact: true })
+      await expect(split).toBeEnabled()
+      await split.click()
     }
-    await expect(page.locator("[data-frame]")).toHaveCount(4)
+    await expect(frames).toHaveCount(4)
+    await page.setViewportSize({ width: 1024, height: 900 })
     await panelToggle(page).click()
     await expect(chatPanel(page)).toBeVisible()
     await panelToggle(page).click()
@@ -210,8 +216,7 @@ for (const theme of ["light", "dark"] as const) {
     const menu = strip.getByRole("button", { name: "Tab and frame actions" })
     const toggle = strip.getByRole("button", { name: "Hide panel" })
     for (const control of [menu, toggle]) await expectInside(control, last)
-    // Maximize has left the strip for the ⋯ menu, under the same name.
-    await expect(strip.getByRole("button", { name: "Maximize frame" })).toBeHidden()
+    await expectInside(strip.getByRole("button", { name: "Maximize frame" }), last)
     await menu.click()
     await expect(page.getByRole("menuitem", { name: "Maximize frame" })).toBeVisible()
     await page.keyboard.press("Escape")

@@ -75,7 +75,9 @@ for (const width of [1440, 390]) {
       expect(imported.ok()).toBeTruthy()
       await page.goto(`${server().url}/library`)
       await page.getByRole("link", { name: `Start a chat with ${name}`, exact: true }).click()
-      const greeting = page.getByRole("article", { name: `Greeting from ${name}`, exact: true })
+      const greeting = page
+        .getByRole("article", { name: "Reply", exact: true })
+        .filter({ hasText: `${name} looks up.` })
       const pendingPortrait = greeting.getByRole("button", { name: `View ${name}'s portrait`, exact: true })
       await expect(pendingPortrait.locator("img")).toBeVisible()
       await captureHeader(page, `${width}-${theme}-pending`)

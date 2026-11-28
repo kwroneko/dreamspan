@@ -17,8 +17,8 @@ async function geometry(page: Page, text: string, help: Locator, name: string) {
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   )
   await expect(help).toBeVisible()
-  const glyphs = await page.evaluate((text) => {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  const glyphs = await help.evaluate((button, text) => {
+    const walker = document.createTreeWalker(button.parentElement!, NodeFilter.SHOW_TEXT)
     let node: Node | null
     while ((node = walker.nextNode())) {
       if (node.textContent?.trim() !== text || !node.parentElement?.checkVisibility()) continue

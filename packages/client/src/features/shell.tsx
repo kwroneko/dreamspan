@@ -147,7 +147,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 px-3 pb-3">
-      <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-5 py-2">
+      <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-3 py-2">
         <Tooltip label="Opens the home page.">
           <Link to="/" className="mr-auto shrink-0 font-semibold" onClick={onNavigate}>
             Dreamspan

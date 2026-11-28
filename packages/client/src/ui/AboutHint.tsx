@@ -28,7 +28,8 @@ export function LabelWithHelp({ children, help }: { children: ReactNode; help: R
       {children}
       {help && (
         <>
-          {"\u00a0"}
+          {/* Keep the inline-flex trigger attached when its label wraps. */}
+          {"\u00a0\u2060"}
           {help}
         </>
       )}

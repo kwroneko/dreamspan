@@ -179,10 +179,18 @@ test("the preset tab clears More tools as the panel's close appears", async ({ p
   await page.goto(`${url}/chats/${chat.id}?panel=preset&cpw=260`)
   const preset = panel(page).getByRole("tab", { name: "Prompt preset", exact: true })
   await expect(preset).toBeVisible()
-  await expect(preset).not.toHaveAttribute("data-tab-guest", "true")
-  await page.evaluate(async () => {
+  // Find the width where the preset first fits with this browser's fonts. The added close
+  // button then takes enough space to move it under More.
+  await panel(page).evaluate(async (aside) => {
     await document.fonts.ready
+    for (let width = 240; width <= 320; width += 4) {
+      aside.style.width = `${width}px`
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      if (aside.querySelector('[role="tab"][data-tab-value="preset"]:not([data-tab-guest])')) return
+    }
+    throw new Error("The preset did not fit at any measured width")
   })
+  await expect(preset).not.toHaveAttribute("data-tab-guest", "true")
 
   const maxOverlap = await page.evaluate(async () => {
     const path = "/src/features/chat/presentation.tsx"

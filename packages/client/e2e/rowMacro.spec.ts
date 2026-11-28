@@ -1,13 +1,14 @@
 // A chat row's preview of a greeting shows its macros replaced, as the chat shows them:
 // `{{user}}` is the persona's name, `{{char}}` the greeter's. The sidebar and the Chats page.
 import { expect, test } from "@playwright/test"
-import type { ChatId } from "@dreamspan/shared/chat.ts"
+import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 let chatId: ChatId
+let greetingFork: ForkId
 
 test.beforeAll(async ({ request }) => {
   await apiLogin(request, server(), ADMIN.handle, ADMIN.password)
@@ -46,7 +47,8 @@ test.beforeAll(async ({ request }) => {
         limit: 10
       })
       // A branch that ends at the greeting: the row's last message is the greeting.
-      yield* api.CreateFork({ chatId, fromForkId: null, atSlotId: path.entries[0]!.slotId })
+      const fork = yield* api.CreateFork({ chatId, fromForkId: null, atSlotId: path.entries[0]!.slotId })
+      greetingFork = fork.fork.id
     })
   )
 })
@@ -60,7 +62,8 @@ for (const width of [1440, 390])
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     // The Chats page.
     await page.goto(`${server().url}/chats`)
-    const row = page.getByRole("main").locator(`a[href="/chats/${chatId}"]`)
+    const greetingRow = `[data-chat-id="${chatId}"][data-fork-id="${greetingFork}"]`
+    const row = page.getByRole("main").locator(`a[href^="/chats/${chatId}?"][href*="fork=${greetingFork}"]`)
     await expect(row).toContainText(WELCOME, { timeout: 90_000 })
     await expect(row).not.toContainText("{{")
     // The sidebar's rows.
@@ -69,6 +72,7 @@ for (const width of [1440, 390])
     const panel =
       width === 390 ? page.locator(".fixed.inset-0") : page.getByRole("complementary", { name: "Sidebar", exact: true })
     const chats = panel.getByRole("region", { name: "Chats", exact: true })
-    await expect(chats).toContainText(WELCOME, { timeout: 90_000 })
-    await expect(chats).not.toContainText("{{")
+    const sidebarRow = chats.locator(greetingRow)
+    await expect(sidebarRow).toContainText(WELCOME)
+    await expect(sidebarRow).not.toContainText("{{")
   })

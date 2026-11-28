@@ -35,10 +35,13 @@ const shoot = async (page: Page, name: string) => {
 
 test("phone sheets close immediately and after changing image privacy", async ({ page }) => {
   await openChat(page, 390)
-  await page.goto(`${server().url}${lantern}?panel=cast`)
-  await expect(page.getByRole("dialog")).toBeVisible()
+  const castUrl = new URL(lantern, server().url)
+  castUrl.searchParams.set("panel", "cast")
+  await page.goto(castUrl.href)
+  const castSheet = page.getByRole("dialog").filter({ has: page.getByRole("tabpanel", { name: "Cast" }) })
+  await expect(castSheet).toBeVisible()
   await shoot(page, "cast-390")
-  await page.getByRole("button", { name: "Close", exact: true }).click({ timeout: 3000 })
+  await castSheet.getByRole("button", { name: "Close", exact: true }).click({ timeout: 3000 })
   await expect(page.getByRole("dialog")).toHaveCount(0)
   for (const mode of ["Blur", "Hide"]) {
     await openPanel(page, "This chat")

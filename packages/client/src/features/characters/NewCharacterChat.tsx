@@ -92,7 +92,7 @@ export function SidebarStartLink({
         {...linkMenuProps}
         aria-label={name === undefined ? label : `${label} with ${name}`}
         onClick={() => picked()}
-        className="relative flex min-w-max flex-[1_1_0] items-center justify-center gap-1.5 overflow-hidden rounded-md border border-border bg-surface px-2 py-3 text-sm font-medium text-accent outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+        className="relative flex min-w-max flex-[1_1_0] items-center justify-center gap-1 overflow-hidden rounded-md border border-border bg-surface px-1.5 py-3 text-sm font-medium text-accent outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
       >
         <Icon name={icon} size={16} className="shrink-0" />
         <span className="whitespace-nowrap">

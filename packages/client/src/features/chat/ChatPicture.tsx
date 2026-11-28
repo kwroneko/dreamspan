@@ -67,11 +67,11 @@ export function ChatPictureSetting({ session }: { session: ChatSession }) {
     setPending(false)
   }
   return (
-    <section aria-label="Chat cover image" className="flex flex-col gap-2">
+    <section aria-label="Chat cover image" className="@container flex flex-col gap-2">
       <div
         role="group"
         aria-label="Chat cover image"
-        className="flex max-w-controls flex-wrap items-center gap-x-3 gap-y-2"
+        className="grid max-w-controls grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 @min-[24rem]:grid-cols-[auto_minmax(0,1fr)_10rem]"
       >
         {picture !== null && chatId !== null ? (
           <Avatar id={chatId} name={name} mediaId={picture} size="lg" preview />
@@ -84,34 +84,36 @@ export function ChatPictureSetting({ session }: { session: ChatSession }) {
             <Icon name="image" size={16} />
           </span>
         )}
-        <div className="flex min-w-28 flex-1 flex-col">
+        <div className="flex min-w-0 flex-col">
           <span className="text-xs text-muted">Cover Image for this chat</span>
           <span className="leading-5 font-medium [overflow-wrap:anywhere]">
             {picture !== null ? "Custom image" : `The ${portraits}`}
           </span>
         </div>
-        <Button
-          hint={
-            picture !== null
-              ? "Picks another cover image for this chat. PNG, JPEG, GIF or WebP, up to 16 MB."
-              : `Picks a cover image shown for this chat in lists and its header, on every branch, in place of the ${portraits}. PNG, JPEG, GIF or WebP, up to 16 MB.`
-          }
-          disabled={chatId === null}
-          pending={pending}
-          onClick={() => picker.current?.click()}
-        >
-          {picture !== null ? "Change" : "Pick custom image"}
-        </Button>
-        {picture !== null && (
+        <div className="col-span-2 flex h-9 justify-end gap-1 @min-[24rem]:col-span-1">
           <Button
-            variant="ghost"
-            hint={`Goes back to the ${portraits}. The image stays in the chat’s messages if it was used there.`}
-            disabled={pending}
-            onClick={() => void set(null, true)}
+            hint={
+              picture !== null
+                ? "Picks another cover image for this chat. PNG, JPEG, GIF or WebP, up to 16 MB."
+                : `Picks a cover image shown for this chat in lists and its header, on every branch, in place of the ${portraits}. PNG, JPEG, GIF or WebP, up to 16 MB.`
+            }
+            disabled={chatId === null}
+            pending={pending}
+            onClick={() => picker.current?.click()}
           >
-            Remove
+            {picture !== null ? "Change" : "Pick custom image"}
           </Button>
-        )}
+          {picture !== null && (
+            <Button
+              variant="ghost"
+              hint={`Goes back to the ${portraits}. The image stays in the chat’s messages if it was used there.`}
+              disabled={pending}
+              onClick={() => void set(null, true)}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
         <input
           ref={picker}
           type="file"

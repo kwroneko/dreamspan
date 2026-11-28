@@ -191,7 +191,7 @@ test("header portrait clicks toggle open then closed, shared with messages, the 
 
   // A pending greeting uses the stock avatar toggle too, before a chat has been saved.
   await page.goto(`${server().url}/cards/${refs.Tall!.entityId}/chat?panel=card:${refs.Tall!.entityId}`)
-  const greeting = page.getByRole("article", { name: "Greeting from Tall", exact: true })
+  const greeting = page.getByRole("article", { name: "Reply", exact: true }).filter({ hasText: "Tall looks up." })
   await twice(greeting.getByRole("button", { name: "View Tall's portrait", exact: true }))
   const pendingHeader = page
     .getByRole("tabpanel", { name: "Tall" })
@@ -365,13 +365,15 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   expect(await positions()).toEqual(initialPositions)
 
   await single.click()
-  const keep = page.getByRole("menuitemcheckbox", { name: "Keep one image open", exact: true })
+  const options = page.getByRole("menu", { name: "Viewer options", exact: true })
+  const keep = options.getByRole("menuitemcheckbox", { name: "Keep one image open", exact: true })
   await expect(keep).toHaveAttribute("aria-checked", "false")
   await keep.hover()
   await expect(
     page.getByText("Click to keep only one image open at a time.", { exact: true }).filter({ visible: true })
   ).toBeVisible()
   await keep.click()
+  await expect(options).toHaveCount(0)
   expect(await positions()).toEqual(initialPositions)
   await single.click()
   await expect(keep).toHaveAttribute("aria-checked", "true")
@@ -380,9 +382,13 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
     page.getByText("Click to allow multiple images open at a time.", { exact: true }).filter({ visible: true })
   ).toBeVisible()
   await keep.click()
+  await expect(options).toHaveCount(0)
   await single.click()
+  await expect(single).toHaveAttribute("aria-expanded", "true")
   await expect(keep).toHaveAttribute("aria-checked", "false")
   await page.keyboard.press("Escape")
+  await expect(options).toHaveCount(0)
+  await expect(viewer).toBeVisible()
 
   // Double click: to 100% at the pointer, and back to the fit.
   const box = (await viewer.boundingBox())!

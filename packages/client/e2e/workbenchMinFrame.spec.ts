@@ -252,15 +252,18 @@ test("an edge drop fits when moving the tab closes its source frame", async ({ p
   await fresh(page, 1340)
   await gotoWithLayout(page, server().url, "/", ["r", [0.5, 0.5], [0, "="], [0, "/library"]])
   const left = frames(page).first()
-  const from = (await frames(page)
+  const source = frames(page)
     .last()
     .getByRole("tab", { name: /Library/ })
-    .boundingBox())!
-  const target = (await left.locator("[data-frame-body]").boundingBox())!
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await source.hover()
+  const from = (await source.boundingBox())!
   await page.mouse.down()
-  await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 12 })
-  await expect(left.locator('[data-drop-zone="left"]')).toBeVisible()
+  await page.mouse.move(from.x + from.width / 2 - 12, from.y + from.height / 2, { steps: 3 })
+  const target = (await left.locator("[data-frame-body]").boundingBox())!
+  const y = target.y + target.height / 2
+  await page.mouse.move(target.x + 24, y, { steps: 12 })
+  await page.mouse.move(target.x + 20, y)
+  await expect(left.locator('[data-drop-zone="left"]:not([data-drop-blocked])')).toBeVisible()
   await page.mouse.up()
 
   await expect(frames(page)).toHaveCount(2)

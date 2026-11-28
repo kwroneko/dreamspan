@@ -174,6 +174,7 @@ test("dragging onto More sends a tool to the end; More's tools drag among themse
   expect(inMore.length).toBeGreaterThanOrEqual(2)
   const last = inMore.at(-1)!
   const top = moreMenu(page).locator(`[data-tab-value="${inMore[0]}"]`)
+  await top.click({ trial: true })
   const topBox = (await top.boundingBox())!
   await drag(page, moreMenu(page).locator(`[data-tab-value="${last}"]`), { x: topBox.x + 20, y: topBox.y + 3 })
   await expect.poll(() => moreValues(page).then((values) => values[0])).toBe(last)
@@ -187,6 +188,7 @@ test("dragging onto More sends a tool to the end; More's tools drag among themse
   await drag(page, tool(page, second), await center(more(page)), async () => {
     await expect(moreMenu(page)).toBeVisible()
     const target = moreMenu(page).locator('[role="menuitem"][data-tab-value]').first()
+    await expect(target).toBeVisible()
     const box = (await target.boundingBox())!
     await page.mouse.move(box.x + 20, box.y + 3, { steps: 6 })
   })

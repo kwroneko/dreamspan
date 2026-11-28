@@ -2,6 +2,7 @@
 // deleting a named branch must navigate through a surviving sibling, then Undo restores it.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
+import { showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -98,22 +99,33 @@ for (const width of [1440, 390]) {
     await dialog.getByLabel("Name", { exact: true }).fill(`Side story ${width}`)
     await dialog.getByRole("button", { name: "Rename", exact: true }).click()
     await page.goto(`${server().url}/groups/${started.first}/new`)
-    const greetings = page.getByRole("article", { name: /^Greeting from / })
-    await expect(greetings).toHaveCount(4)
-    // Select the alternate of each member explicitly, and keep the previews after sending.
-    for (let i = 0; i < names.length; i++) {
-      const next = greetings.nth(i).getByRole("button", { name: `Next greeting from ${names[i]}` })
-      if (await next.isEnabled()) await next.click()
+    const messages = page.getByTestId("messages")
+    const replies = messages.getByRole("article", { name: "Reply", exact: true })
+    await expect(replies.last()).toContainText("#4")
+    // Pending greetings use the same swipe controls as saved messages. Visit each mounted row
+    // from the top and make sure its alternate is the one that survives the first send.
+    await messages.evaluate((list) => list.scrollTo({ top: 0 }))
+    const previews: string[] = []
+    for (const name of names) {
+      const greeting = replies.filter({ hasText: new RegExp(`${name} (greets|waves)`) })
+      await expect(greeting).toBeVisible()
+      const preview = greeting.locator(".markdown")
+      if (!(await preview.textContent())?.includes(" waves ")) {
+        await showActions(greeting)
+        await greeting.getByRole("button", { name: "Next swipe", exact: true }).click()
+        await expect(preview).toContainText(`${name} waves`)
+      }
+      previews.push(await preview.innerText())
     }
-    const previews = await greetings.locator(".markdown").allTextContents()
     await page.getByLabel("Message", { exact: true }).fill("Hello everyone.")
     await page.getByRole("button", { name: "Send", exact: true }).click()
     await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
-    const replies = page.getByRole("article", { name: "Reply" })
     // Four greetings, the message and the reply to it. A phone mounts only the messages in view
     // and two beyond (clientperf): the reply is read at the end, the greetings from the top.
     await expect(replies.last()).toContainText("#6")
-    await page.getByTestId("messages").evaluate((list) => list.scrollTo({ top: 0 }))
+    await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
+    await messages.hover()
+    await page.mouse.wheel(0, -10_000)
     for (let i = 0; i < previews.length; i++) await expect(replies.nth(i)).toContainText(previews[i]!)
     await page.goto(`${server().url}/chats`)
     const row = page

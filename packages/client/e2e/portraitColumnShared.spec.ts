@@ -11,7 +11,8 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { addToCast } from "./support/cast.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { openPanel, panelTab } from "./support/panel.ts"
+import { closePanel, openPanel, panelTab } from "./support/panel.ts"
+import { asPage } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { removeAttachment } from "./support/attachments.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
@@ -45,7 +46,7 @@ const openChat = async (page: Page, width = 1440) => {
     const cast = await openPanel(page, "Cast")
     await addToCast(page, STANDARD.name)
     await expect(cast.getByRole("button", { name: `View ${STANDARD.name}'s portrait` })).toBeVisible()
-    await page.getByRole("button", { name: "Hide panel" }).click()
+    await closePanel(page)
     return new URL(page.url()).pathname
   })())
   // Logging in starts the account's layouts over at one tab.
@@ -595,11 +596,20 @@ for (const theme of ["light", "dark"] as const)
     await expect(attachmentTab(page)).toHaveCount(0)
   })
 
+// A short timeline keeps the drag and touch tests on their own image, even when
+// earlier tests have scrolled, split or attached another image in the shared cast chat.
+const openAttachmentChat = async (page: Page, width: number) => {
+  await page.setViewportSize({ width, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await asPage(page, server(), (api) => api.CreateChat({ title: "Harbor sketches" }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await withAttachment(page)
+}
+
 test("a message's attached image dragged onto a frame opens there as a tab; onto the composer it never attaches", async ({
   page
 }) => {
-  await openChat(page)
-  await withAttachment(page)
+  await openAttachmentChat(page, 1440)
   await page.getByRole("button", { name: "Split right" }).click()
   await expect(frames(page)).toHaveCount(2)
   const [a, b] = [frames(page).nth(0), frames(page).nth(1)]
@@ -608,7 +618,8 @@ test("a message's attached image dragged onto a frame opens there as a tab; onto
   // Onto the other frame's body: a tab there, and no attachment anywhere.
   const body = (await b.locator("[data-frame-body]").boundingBox())!
   await messageImage(a).dragTo(b.locator("[data-frame-body]"), {
-    targetPosition: { x: body.width / 2, y: body.height / 3 }
+    targetPosition: { x: body.width / 2, y: body.height / 3 },
+    timeout: 10_000
   })
   await expect(attachmentTab(b)).toBeVisible()
   await expect(b.getByRole("region", { name: `${ATTACHMENT}'s picture`, exact: true })).toBeVisible()
@@ -618,7 +629,7 @@ test("a message's attached image dragged onto a frame opens there as a tab; onto
 
   // Onto its own frame's composer: it opens as a tab as on any part of a frame, never in the message.
   const message = a.getByLabel("Message", { exact: true })
-  await messageImage(a).dragTo(message)
+  await messageImage(a).dragTo(message, { timeout: 10_000 })
   await expect(attachmentTab(page)).toHaveCount(1)
   await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: `Remove ${ATTACHMENT}` })).toHaveCount(0)
@@ -633,8 +644,7 @@ test("a message's attached image dragged onto a frame opens there as a tab; onto
 for (const theme of ["light", "dark"] as const)
   test(`a message's attached image on a phone opens the full-screen viewer ${theme}`, async ({ page }, info) => {
     await page.emulateMedia({ colorScheme: theme })
-    await openChat(page, 390)
-    await withAttachment(page)
+    await openAttachmentChat(page, 390)
     await messageImage(page).click()
     const screen = page.locator('[data-layout-overlay="The full-screen viewer covers the page"]')
     await expect(screen.getByRole("heading", { name: ATTACHMENT, exact: true })).toBeVisible()
