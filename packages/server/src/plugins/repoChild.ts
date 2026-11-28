@@ -13,13 +13,24 @@ import {
   commitFiles
 } from "./repo.ts"
 import { authorRepo, createAuthorRepo } from "./authorRepo.ts"
-import type { RepoRequest } from "./repoTask.ts"
+import { REPO_INFO_BATCH, type RepoRequest } from "./repoTask.ts"
 const [dataDir, folder] = process.argv.slice(2) as [string, string]
 try {
   const request = JSON.parse(await readFile(join(folder, "request.json"), "utf8")) as RepoRequest
-  const repo = pluginFolder(dataDir, request.owner, request.id)
   let result: unknown = null
-  if (request.op === "copyBuiltin") {
+  if (request.op === "infoBatch") {
+    if (request.entries.length > REPO_INFO_BATCH) throw new Error("Too many plugin repositories")
+    const batch = []
+    for (const { id, selected } of request.entries) {
+      try {
+        const repo = await confined(dataDir, pluginFolder(dataDir, request.owner, id))
+        batch.push(await repoInfo(repo, selected))
+      } catch {
+        batch.push(null)
+      }
+    }
+    result = batch
+  } else if (request.op === "copyBuiltin") {
     const { copyBuiltin } = await import("./copy.ts")
     result = await copyBuiltin(dataDir, request.registry, request.partId, request.id, request.owner, request.key)
   } else if (request.op === "authorCreate")
@@ -27,7 +38,7 @@ try {
   else if (request.op === "save")
     result = await saveFiles(dataDir, request.owner, request.id, request.files, request.initial, request.message)
   else {
-    await confined(dataDir, repo)
+    const repo = await confined(dataDir, pluginFolder(dataDir, request.owner, request.id))
     switch (request.op) {
       case "compareBuiltin": {
         const { compareBuiltin } = await import("./copy.ts")

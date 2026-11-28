@@ -19,6 +19,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { appBanners, useTitle } from "../shell.tsx"
 import { settingsGroups } from "../settings/groups.ts"
+import { usePlaceValue } from "../../usePlaceParam.ts"
 import { uuid } from "../../uuid.ts"
 import { openWithoutPlugins } from "../../plugins.tsx"
 
@@ -94,30 +95,24 @@ function PluginsPage() {
   )
 }
 const builtinPartsAtom = AppClient.query("ListBuiltinParts", undefined, { reactivityKeys: [KEY] })
+const builtinQueries = (raw: unknown): Record<string, string> =>
+  raw && typeof raw === "object" && !Array.isArray(raw)
+    ? Object.fromEntries(Object.entries(raw).filter((entry) => typeof entry[1] === "string"))
+    : {}
+
 function BuiltinParts() {
   const admin = useSession().user.role === "admin"
   const action = useAction()
   const navigate = useNavigate()
-  const search: { builtinSearch?: unknown } = useSearch({ strict: false })
-  const queries =
-    search.builtinSearch && typeof search.builtinSearch === "object" && !Array.isArray(search.builtinSearch)
-      ? (Object.fromEntries(
-          Object.entries(search.builtinSearch).filter((entry) => typeof entry[1] === "string")
-        ) as Record<string, string>)
-      : {}
-  const setQuery = (registry: string, value: string) => {
-    const next = { ...queries }
-    if (value) next[registry] = value
-    else delete next[registry]
-    void navigate({
-      to: ".",
-      search: (previous: Record<string, unknown>) => ({
-        ...previous,
-        builtinSearch: Object.keys(next).length ? next : undefined
-      }),
-      replace: true
+  const [storedSearch, setStoredSearch] = usePlaceValue("builtinSearch")
+  const queries = builtinQueries(storedSearch)
+  const setQuery = (registry: string, value: string) =>
+    setStoredSearch((previous) => {
+      const next = builtinQueries(previous)
+      if (value) next[registry] = value
+      else delete next[registry]
+      return Object.keys(next).length ? next : undefined
     })
-  }
   const busy = useRef(false)
   const copy = async (part: typeof BuiltinPart.Type) => {
     if (busy.current) return

@@ -67,6 +67,7 @@ test.describe("workshop plugin consent and dice", () => {
         const conn = yield* api.CreateConnection({
           kind: "openai-chat",
           settings: {
+            providerSettings: { toolLoading: "every" },
             name: "Scripted dice",
             baseUrl: provider.baseUrl,
             compat: {},

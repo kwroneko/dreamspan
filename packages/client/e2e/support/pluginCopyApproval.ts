@@ -35,6 +35,7 @@ export const pluginCopyApprovalTests = () =>
           const connection = yield* api.CreateConnection({
             kind: "openai-chat",
             settings: {
+              providerSettings: { toolLoading: "every" },
               name: "Synthetic copy approvals",
               baseUrl: provider.baseUrl,
               compat: {},

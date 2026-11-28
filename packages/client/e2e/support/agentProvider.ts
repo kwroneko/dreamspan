@@ -32,10 +32,8 @@ export const THINKING = "The traveler asked about the bridge; check what was sai
 
 const QUERIES = ["bridge", "lantern"]
 
-/** Whether the request offers the send tool: then the reply goes through it. */
-const sends = (body: { readonly tools?: unknown }) =>
-  Array.isArray(body.tools) &&
-  body.tools.some((t: { function?: { name?: string } }) => t.function?.name === "send_message")
+const offers = (body: { readonly tools?: unknown }, name: string) =>
+  Array.isArray(body.tools) && body.tools.some((t: { function?: { name?: string } }) => t.function?.name === name)
 
 export const startAgentProvider = async () => {
   /** The tool results a request has when it's held or failed: QUERIES.length is the final answer. */
@@ -81,6 +79,24 @@ export const startAgentProvider = async () => {
       const body = JSON.parse(raw) as (typeof bodies)[number]
       bodies.push(body)
       const usage = { prompt_tokens: 400, completion_tokens: 12 }
+      if (offers(body, "continue_reply")) {
+        // Schema prefill asks for the whole reply, including the text sent before Stop.
+        return stream(res, [
+          chunk({
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "continue_plain",
+                type: "function",
+                function: { name: "continue_reply", arguments: JSON.stringify({ text: PLAIN_REPLY }) }
+              }
+            ]
+          }),
+          chunk({}, "tool_calls"),
+          chunk({}, null, usage)
+        ])
+      }
       if (!body.tools) {
         if (holdingPlain && partialPlain) {
           // Some text first, then nothing until the reply's Stop gives up on it.
@@ -136,7 +152,7 @@ export const startAgentProvider = async () => {
                 chunk({}, "tool_calls"),
                 chunk({}, null, usage)
               ])
-          : sends(body)
+          : offers(body, "send_message")
             ? // The reply through the send tool, where it's offered (spec/REPLY-CONTRACT.md §3.1).
               () =>
                 stream(res, [

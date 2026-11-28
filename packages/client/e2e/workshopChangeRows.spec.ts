@@ -186,10 +186,16 @@ test.describe("workshop change rows", () => {
         await expect(ove.locator("[data-change-action]")).toHaveText("Undo")
         // Each link and action says what it does.
         const tip = page.locator('[data-layout-overlay="Tooltip floats above the page"][data-open]')
-        await mara.locator("[data-change-count]").hover()
-        await expect(tip).toHaveText("Shows what the assistant changed: Description, Scenario.")
-        await mara.locator("[data-change-name]").hover()
-        await expect(tip).toHaveText(`Opens ${name} as it is now.`)
+        for (const [marker, hint] of [
+          ["data-change-count", "Shows what the assistant changed: Description, Scenario."],
+          ["data-change-name", `Opens ${name} as it is now.`]
+        ] as const) {
+          await expect(async () => {
+            await page.mouse.move(0, 0)
+            await mara.locator(`[${marker}]`).hover()
+            await expect(tip).toHaveText(hint, { timeout: 2000 })
+          }).toPass()
+        }
         await page.mouse.move(0, 0)
         await shot("rows")
         await expectLayout(page, info, `change-rows-${width}-${theme}`, { scope: "[data-change-rows]" })

@@ -35,7 +35,7 @@ import { makePluginAuthoring } from "../agent/tools/plugins.ts"
 import { offeredByGrants } from "../agent/approvals.ts"
 import type { ToolContext } from "../agent/tools.ts"
 import type { RolloutEffect } from "@dreamspan/shared/workshopApi.ts"
-import { repoTask } from "./repoTask.ts"
+import { REPO_INFO_BATCH, repoTask, type RepoInfo } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 import { builtinCopies, builtinCopy, missingBuiltinAdapter, unavailableDisplayBodies } from "./builtins.ts"
 
@@ -329,32 +329,43 @@ export class PluginHost extends Context.Service<
           else for (const user of yield* reader.ListUsers()) notify(user.id, target.id, "Plugins changed")
           return report
         })
+      const pluginView = (owner: string, target: Target, pin: PluginPin | null, info: RepoInfo | null) => {
+        const report =
+          reports.get(keyOf(owner, target.id)) ??
+          (pin?.suspended
+            ? {
+                commit: pin.commit,
+                appStamp: pin.suspended.appStamp,
+                ok: false,
+                step: "activate" as const,
+                message: pin.suspended.reason,
+                at: pin.suspended.at
+              }
+            : null)
+        return {
+          ...target,
+          commit: info ? info.commit : (pin?.commit ?? null),
+          manifest: info?.manifest ?? null,
+          pin,
+          report
+        }
+      }
+      const getRepoInfo = (owner: string, id: string, pin: PluginPin | null) =>
+        attempt(() =>
+          repoTask<RepoInfo>(config.dataDir, {
+            op: "info",
+            owner,
+            id,
+            ...(pin && !pin.suspended ? { selected: pin.commit } : {})
+          })
+        ).pipe(Effect.catch(() => Effect.succeed(null)))
       const get = (actor: User, target: Target) =>
         Effect.gen(function* () {
           const owner = target.scope === "instance" ? "" : actor.id
           const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
           const pin: PluginPin | null = pins.value[target.id] ?? null
-          const { commit, manifest } = yield* attempt(() =>
-            repoTask<Pick<typeof PluginView.Type, "commit" | "manifest">>(config.dataDir, {
-              op: "info",
-              owner,
-              id: target.id,
-              ...(pin && !pin.suspended ? { selected: pin.commit } : {})
-            })
-          ).pipe(Effect.catch(() => Effect.succeed({ commit: pin?.commit ?? null, manifest: null })))
-          const report =
-            reports.get(keyOf(owner, target.id)) ??
-            (pin?.suspended
-              ? {
-                  commit: pin.commit,
-                  appStamp: pin.suspended.appStamp,
-                  ok: false,
-                  step: "activate" as const,
-                  message: pin.suspended.reason,
-                  at: pin.suspended.at
-                }
-              : null)
-          return { ...target, commit, manifest, pin, report }
+          const info = yield* getRepoInfo(owner, target.id, pin)
+          return pluginView(owner, target, pin, info)
         })
       const details = (actor: User, target: Target) =>
         Effect.gen(function* () {
@@ -618,6 +629,7 @@ export class PluginHost extends Context.Service<
           Effect.gen(function* () {
             const result: Array<typeof PluginView.Type> = []
             for (const scope of ["instance", "user"] as const) {
+              const owner = scope === "instance" ? "" : actor.id
               const base = join(
                 config.dataDir,
                 "plugins",
@@ -626,16 +638,39 @@ export class PluginHost extends Context.Service<
               const folders = yield* attempt(() => readdir(base)).pipe(Effect.catch(() => Effect.succeed([])))
               const pins = yield* reader.GetPluginPins({
                 userId: actor.id,
-                owner: scope === "instance" ? "" : actor.id
+                owner
               })
-              const ids = new Set([...folders, ...Object.keys(pins.value)])
-              result.push(
-                ...(yield* Effect.forEach(
-                  [...ids].filter((id) => /^[a-z][a-z0-9-]{0,63}$/.test(id)),
-                  (id) => get(actor, { scope, id }),
-                  { concurrency: 4 }
-                ))
+              const ids = [...new Set([...folders, ...Object.keys(pins.value)])].filter((id) =>
+                /^[a-z][a-z0-9-]{0,63}$/.test(id)
               )
+              const batches = []
+              for (let start = 0; start < ids.length; start += REPO_INFO_BATCH)
+                batches.push(ids.slice(start, start + REPO_INFO_BATCH))
+              // The status banner reads this list on every screen. Keep the repository reads in
+              // bounded children, sharing process startup and one pin snapshot across the list.
+              const views = yield* Effect.forEach(
+                batches,
+                (batch) =>
+                  Effect.gen(function* () {
+                    const info = yield* attempt(() =>
+                      repoTask<ReadonlyArray<RepoInfo | null>>(config.dataDir, {
+                        op: "infoBatch",
+                        owner,
+                        entries: batch.map((id) => {
+                          const pin = pins.value[id]
+                          return pin && !pin.suspended ? { id, selected: pin.commit } : { id }
+                        })
+                      })
+                    ).pipe(
+                      Effect.catch(() => Effect.forEach(batch, (id) => getRepoInfo(owner, id, pins.value[id] ?? null)))
+                    )
+                    return batch.map((id, index) =>
+                      pluginView(owner, { scope, id }, pins.value[id] ?? null, info[index] ?? null)
+                    )
+                  }),
+                { concurrency: 4 }
+              )
+              result.push(...views.flat())
             }
             return result
           }),

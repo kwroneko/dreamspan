@@ -38,6 +38,7 @@ export function workshopChangesTests() {
           const connection = yield* api.CreateConnection({
             kind: "openai-chat",
             settings: {
+              providerSettings: { toolLoading: "every" },
               name: "Synthetic workshop",
               baseUrl: provider.baseUrl,
               compat: {},

@@ -61,6 +61,7 @@ export function workshopRewriteTests() {
                 const connection = yield* api.CreateConnection({
                   kind: "openai-chat",
                   settings: {
+                    providerSettings: { toolLoading: "every" },
                     name: "Synthetic rewriting",
                     baseUrl: provider.baseUrl,
                     compat: {},
@@ -200,6 +201,7 @@ function sideWriteTests() {
                 const connection = yield* api.CreateConnection({
                   kind: "openai-chat",
                   settings: {
+                    providerSettings: { toolLoading: "every" },
                     name: "Synthetic tab writer",
                     baseUrl: provider.baseUrl,
                     compat: {},

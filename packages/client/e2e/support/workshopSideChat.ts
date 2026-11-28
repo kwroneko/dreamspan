@@ -49,7 +49,7 @@ export const sideChatId = async (side: ReturnType<Page["locator"]>) => (await si
 export const useSideChatProvider = (
   server: () => Parameters<typeof asUser>[0],
   options: Parameters<typeof startWorkshopProvider>[0] = {},
-  toolLoading: "auto" | "every" = "auto"
+  toolLoading: "auto" | "every" = "every"
 ) => {
   const state: { provider: Awaited<ReturnType<typeof startWorkshopProvider>> | null } = { provider: null }
   test.beforeAll(async () => {
@@ -89,8 +89,7 @@ export function workshopSideChatEffectsTests() {
     const opening = "I'll make a synthetic keeper."
     const provider = useSideChatProvider(server, {
       calls: [
-        { name: "send_message", arguments: { message: opening } },
-        { name: "create_card", arguments: { name: "Side keeper", description: "A synthetic keeper." } }
+        { name: "create_card", arguments: { name: "Side keeper", description: "A synthetic keeper." }, prose: opening }
       ]
     })
     for (const width of [1440, 390])
@@ -119,11 +118,24 @@ export function workshopSideChatEffectsTests() {
           await approval.getByRole("button", { name: "Allow", exact: true }).click()
           const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
           await expect(answer).toHaveCount(1)
-          const badge = answer.locator("[data-steps-badge]")
-          if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+          const toggle = answer.locator("[data-workshop-trace]").getByRole("button", { name: /^1 step/ })
+          if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
           const changed = side.locator('[data-effect-kind="library.create"]')
           await expect(changed.getByRole("button", { name: "Undo", exact: true })).toBeVisible()
           await expectLayout(page, info, `side-change-undo-${width}-${theme}`, { scope: "[data-side-chat]" })
+          const later = "A later workshop message."
+          await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.GetChat({ chatId: workshop.id })
+              yield* api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: chat.activeLeafSlotId,
+                branch: false,
+                content: later
+              })
+            })
+          )
+          await expect(side.getByRole("article").filter({ hasText: later })).toBeVisible()
           const first = side.getByRole("article").filter({ hasText: opening })
           await showActions(first)
           await first.getByRole("button", { name: "Generate another swipe", exact: true }).click()
@@ -133,7 +145,12 @@ export function workshopSideChatEffectsTests() {
           const before = provider().bodies.length
           await warning.getByRole("button", { name: "Cancel", exact: true }).click()
           expect(provider().bodies.length).toBe(before)
-          await changed.getByRole("button", { name: "Undo", exact: true }).click()
+          const undo = changed.getByRole("button", { name: "Undo", exact: true })
+          await expect(async () => {
+            if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+            await expect(undo).toBeVisible({ timeout: 1000 })
+          }).toPass({ timeout: 10_000 })
+          await undo.click()
           await expect(changed).toContainText("Undone")
           const effects = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.ListRolloutEffects({ chatId: workshop.id })

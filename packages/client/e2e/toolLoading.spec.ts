@@ -285,7 +285,7 @@ for (const transport of ["native", "dispatcher"] as const)
         }
         await expect(first.locator("details").first()).toHaveJSProperty("open", false)
         await first.locator("summary").click()
-        expect(await first.getByRole("region").all()).toHaveLength(sentFromStart.length)
+        await expect(first.getByRole("region")).toHaveCount(sentFromStart.length)
         expect(sentFromStart).toContain("list_library")
         for (const name of sentFromStart) await expect(first.getByRole("region", { name, exact: true })).toBeVisible()
         await expect(first.getByRole("region", { name: "read_card", exact: true })).toHaveCount(0)

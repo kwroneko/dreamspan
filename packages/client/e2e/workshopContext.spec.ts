@@ -7,13 +7,27 @@ import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { modelChip } from "./support/strip.ts"
 import { startWorkshopProvider } from "./support/workshopProvider.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let cookie: Promise<string> | undefined
+const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
+  withCookie(server(), await (cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
+const conversionDraft = (refId: string) =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const user = yield* api.Whoami()
+      const draft = yield* api.GetUserDraft({
+        ownerId: user.id,
+        targetId: `workshop-convert:${refId}`,
+        field: "Workshop preset"
+      })
+      return draft?.status === "active" ? (JSON.parse(draft.content) as { name: string; instructions: string }) : null
+    })
+  )
 const shots = process.env.SCREENSHOT_DIR
 let provider: Awaited<ReturnType<typeof startWorkshopProvider>>
 let seeded: { chatId: string; presetId: string }
@@ -107,6 +121,9 @@ for (const width of [1440, 390])
       await expect(name).toHaveValue("Harbor preset (workshop)")
       const label = `Harbor workshop ${width} ${theme}`
       await name.fill(label)
+      await expect.poll(() => conversionDraft(seeded.presetId)).toMatchObject({ name: label })
+      await page.reload()
+      await expect(name).toHaveValue(label)
       await dialog.getByLabel("Workspace instructions").fill("Ask before renaming cards.")
       await page.reload()
       await expect(dialog).toBeVisible()
@@ -134,6 +151,7 @@ for (const width of [1440, 390])
       await expect(dialog).toBeVisible()
       await expect(dialog.getByLabel("Workspace instructions")).toHaveValue("Ask before renaming cards.")
       await dialog.getByLabel("Workspace instructions").fill("Keep a short change log.")
+      await expect.poll(() => conversionDraft(workshop.id)).toMatchObject({ instructions: "Keep a short change log." })
       await page.reload()
       await expect(dialog).toBeVisible()
       await expect(dialog.getByLabel("Workspace instructions")).toHaveValue("Keep a short change log.")

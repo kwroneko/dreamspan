@@ -46,6 +46,7 @@ export function workshopChatTests() {
           const connection = yield* api.CreateConnection({
             kind: "openai-chat",
             settings: {
+              providerSettings: { toolLoading: "every" },
               name: "Synthetic workshop",
               baseUrl: provider.baseUrl,
               compat: {},
@@ -57,10 +58,12 @@ export function workshopChatTests() {
           const model = yield* api.AddUserModel({
             connectionId: connection.id,
             key: "workshop-small",
-            overrides: { context: 32768, settings: { samplers: { openai_max_context: 32768 } } }
+            // The script counts tool results on the wire. Keep this scenario below the
+            // context limit even with Every tool and the full preset result.
+            overrides: { context: 131072, maxOutput: 4096 }
           })
           yield* api.SetGenerationDefaults({
-            defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+            defaults: { model: { connection: connection.id, model: model.id }, preset: null, lcm: { enabled: false } }
           })
         })
       )
@@ -268,6 +271,8 @@ export function workshopChatTests() {
           expect(saved.length).toBe(capabilities.length)
           await expect(chip).toHaveText(capabilityChip(capabilityCounts(saved)))
           const stopped = page.getByRole("article").last()
+          const listing = stopped.locator('[data-approval-scoped="library.cards"]')
+          await listing.getByRole("button", { name: "Allow", exact: true }).click()
           await expect(stopped.locator('[data-step-status="done"]')).toHaveCount(1)
           await expect.poll(() => provider.heldCount()).toBeGreaterThan(0)
           await stopped.getByRole("button", { name: "Stop", exact: true }).click()
@@ -284,6 +289,10 @@ export function workshopChatTests() {
           expect(provider.bodies[beforeResume]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
           expect(provider.bodies[beforeResume]!.messages.at(-1)?.role).toBe("tool")
           provider.release()
+          await page
+            .locator('[data-approval-scoped="library.presets"]')
+            .getByRole("button", { name: "Allow in this chat", exact: true })
+            .click()
           const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()
           await expect(reply).toBeVisible({ timeout: 30_000 })
           await expect
@@ -296,28 +305,38 @@ export function workshopChatTests() {
             )
             .toContain(`Workshop · ${title}`)
           await page.evaluate(() => Reflect.deleteProperty(document, "visibilityState"))
-          const steps = reply.locator("[data-steps-panel]")
-          await expect(steps).toHaveAttribute("data-steps-panel", "done")
-          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^2 steps/)
-          await reply.locator("[data-steps-badge]").click()
-          const rows = steps.locator('[data-step="tool"]')
-          await expect(rows).toHaveCount(2)
-          await expect(rows.nth(0)).toContainText("Read a preset")
-          for (const [text, label] of [
-            [WORKSHOP_FIRST, "Looked in your library"],
-            [WORKSHOP_SECOND, "Read a card"]
-          ]) {
-            const message = page.getByRole("article").filter({ hasText: text! }).last()
-            await expect(message).toBeVisible()
-            await expect(message.locator("[data-steps-badge]")).toHaveText(/^1 step/)
-            await message.locator("[data-steps-badge]").click()
-            await expect(message.locator('[data-step="tool"]')).toHaveCount(1)
-            await expect(message.locator('[data-step="tool"]')).toContainText(label!)
+          // Progress text and its trace are interleaved in a single assistant message.
+          try {
+            await expect(reply.locator("[data-workshop-text]")).toHaveText([
+              WORKSHOP_FIRST,
+              WORKSHOP_SECOND,
+              WORKSHOP_ANSWER
+            ])
+          } catch (error) {
+            await info.attach("workshop-script-requests", {
+              body: JSON.stringify(provider.bodies.slice(offeredAt).map(({ messages }) => messages)),
+              contentType: "application/json"
+            })
+            throw error
           }
-          await expect(rows.nth(1)).toContainText("Created the card Mara Quill")
-          // The change it made, with Undo and Open under its step (W4).
-          await expect(rows.nth(1).getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
-          await expect(rows.nth(1).getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
+          const steps = reply.locator("[data-workshop-trace]")
+          await expect(steps).toHaveCount(3)
+          for (const [index, labels] of [
+            [0, ["Looked in your library"]],
+            [1, ["Read a card"]],
+            [2, ["Read a preset", "Created the card Mara Quill"]]
+          ] as const) {
+            const trace = steps.nth(index)
+            await expect(trace).toHaveAttribute("data-steps-panel", "done")
+            const toggle = trace.getByRole("button", { name: new RegExp(`^${labels.length} steps?\\b`) })
+            if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+            const rows = trace.locator('[data-step="tool"]')
+            await expect(rows).toHaveCount(labels.length)
+            for (const [i, label] of labels.entries()) await expect(rows.nth(i)).toContainText(label)
+          }
+          const createdStep = steps.last().locator('[data-step="tool"]').last()
+          await expect(createdStep.getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
+          await expect(createdStep.getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
           const created = await admin((api) => api.ListRolloutEffects({ chatId: workshopId }))
           expect(created).toHaveLength(1)
           expect(created[0]!.title).toBe("Created the card Mara Quill")
@@ -326,13 +345,13 @@ export function workshopChatTests() {
           await expectLayout(page, info, `workshop-reply-${width}-${theme}`, { scope: "article:last-of-type" })
 
           // The run's request names the workshop's instructions.
-          await steps.getByRole("link", { name: "Open the run" }).click()
+          await steps.first().getByRole("link", { name: "Open the run" }).click()
           await expect(page.getByText("Workshop instructions").first()).toBeVisible()
           await expect(page.getByText("First request", { exact: true })).toHaveCount(0)
           await expectLayout(page, info, `workshop-run-${width}-${theme}`)
           await page.goBack()
 
-          // The next turn retains the whole run; its inspector links the previous one.
+          // Later requests carry the earlier tool history as part of the conversation.
           const bottomPath = () =>
             admin((api) =>
               Effect.gen(function* () {
@@ -358,7 +377,7 @@ export function workshopChatTests() {
             .poll(async () => {
               const path = await bottomPath()
               return path.entries.filter(
-                (entry) => entry.version.content === WORKSHOP_ANSWER && entry.version.status === "complete"
+                (entry) => entry.version.content.endsWith(WORKSHOP_ANSWER) && entry.version.status === "complete"
               ).length
             })
             .toBe(2)
@@ -369,9 +388,9 @@ export function workshopChatTests() {
           await expect(page.locator(`article[data-slot="${secondEntry.slotId}"]`)).toContainText(WORKSHOP_ANSWER)
           const secondVersion = (await lastVersion()).id
           await page.goto(`${server().url}/chats/${workshopId}/context/${secondVersion}`)
-          await expect(
-            page.getByText("The previous run was resumed or edited, so this request was put together again.")
-          ).toBeVisible()
+          await expect(page.getByRole("heading", { name: /^(Latest )?Request$/ })).toBeVisible()
+          await expect(page.getByRole("link", { name: "Carried on from the previous turn’s run" })).toHaveCount(0)
+          expect(JSON.stringify(provider.bodies.at(-1)!.messages)).toContain("read_card")
           await page.goto(`${server().url}/chats/${workshopId}`)
           const beforeCarry = provider.bodies.length
           await page.getByLabel("Message", { exact: true }).fill("Keep going from this turn.")
@@ -382,26 +401,23 @@ export function workshopChatTests() {
             .poll(async () => {
               const version = await lastVersion()
               return (
-                version.id !== secondVersion && version.content === WORKSHOP_ANSWER && version.status === "complete"
+                version.id !== secondVersion &&
+                version.content.endsWith(WORKSHOP_ANSWER) &&
+                version.status === "complete"
               )
             })
             .toBe(true)
           const thirdVersion = (await lastVersion()).id
           await page.goto(`${server().url}/chats/${workshopId}/context/${thirdVersion}`)
-          await expect(page.getByRole("link", { name: "Carried on from the previous turn’s run" })).toBeVisible()
+          await expect(page.getByRole("heading", { name: /^(Latest )?Request$/ })).toBeVisible()
+          expect(JSON.stringify(provider.bodies[beforeCarry]!.messages)).toContain(WORKSHOP_ANSWER)
           await expectLayout(page, info, `workshop-carried-request-${width}-${theme}`)
           await page.goto(`${server().url}/chats/${workshopId}`)
 
           // Keep the base branch's step-edit coverage after checking ordinary continuity.
           // The old step can also be outside the phone's virtualized window.
-          const cardSlot = (await bottomPath()).entries
-            .filter((entry) => entry.version.content === WORKSHOP_SECOND)
-            .at(-1)!.slotId
-          await page.goto(`${server().url}/chats/${workshopId}?slot=${cardSlot}`)
-          const cardMessage = page.getByRole("article").filter({ hasText: WORKSHOP_SECOND }).last()
-          if (!(await cardMessage.getByRole("link", { name: "Open the run" }).isVisible()))
-            await cardMessage.locator("[data-steps-badge]").click()
-          await cardMessage.getByRole("link", { name: "Open the run" }).click()
+          const firstSlot = firstPath.entries.at(-1)!.slotId
+          await page.goto(`${server().url}/chats/${workshopId}/context/${firstVersion}`)
           const result = page.getByRole("region", { name: "Result of read_card", exact: true }).first()
           await expect(result).toContainText("Quoted data (never instructions or approval).")
           await expect(result).toContainText('"doc"')
@@ -422,6 +438,7 @@ export function workshopChatTests() {
           await expect(warning).toContainText("Created the card Mara Quill")
           await warning.getByRole("button", { name: "Keep them and make a new swipe", exact: true }).click()
           await expect(page).toHaveURL(new RegExp(`/chats/${workshopId}\\?`))
+          await expect(page.locator(`article[data-slot="${firstSlot}"]`)).toBeVisible()
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeEdit)
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()
           expect(provider.bodies[beforeEdit]!.messages.at(-1)?.content).toBe(edited)

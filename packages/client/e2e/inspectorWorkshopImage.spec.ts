@@ -96,7 +96,7 @@ test("inspector: a workshop's sent image sits inside its attachment tags and ope
     const thumbnail = page.getByRole("button", { name: /^Image 1, sent to the model, / })
     await expect(thumbnail.locator("img")).toBeVisible()
     await expect(thumbnail.locator("img")).toHaveJSProperty("complete", true)
-    const open = page.getByText(/^<attachment filename="photo\.jpg".*image_block="true">$/)
+    const open = page.getByText(/^<attachment filename="photo\.jpg".*image_block="true"[^>]*>$/)
     const close = page.getByText("</attachment>", { exact: true })
     await expect(open).toHaveCount(1)
     const [a, t, c] = await Promise.all([open.boundingBox(), thumbnail.boundingBox(), close.boundingBox()])

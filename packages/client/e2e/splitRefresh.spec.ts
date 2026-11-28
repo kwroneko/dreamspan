@@ -20,6 +20,7 @@ test.beforeAll(async () => {
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
+          providerSettings: { toolLoading: "every" },
           name: "Synthetic split regression",
           baseUrl: provider.baseUrl,
           compat: {},
@@ -88,23 +89,41 @@ const steady = async (page: Page, stats: Awaited<ReturnType<typeof readFuse>>) =
   }
 }
 
-test("a workshop's first-message split has bounded reads, heap and DOM at 1440", async ({ page }) => {
+test("swiping an earlier workshop reply keeps bounded reads, heap and DOM at 1440", async ({ page }) => {
   test.setTimeout(120_000)
   const stats = await readFuse(page)
-  const workshop = await admin((api) => api.CreateWorkshop({ title: "Synthetic split regression" }))
+  const workshop = await admin((api) =>
+    api.CreateWorkshop({
+      title: "Synthetic split regression",
+      grants: [
+        { capability: "library.cards", mode: "allow" },
+        { capability: "library.presets", mode: "allow" }
+      ]
+    })
+  )
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${workshop.id}`)
   await page.getByLabel("Message", { exact: true }).fill("Make me a lighthouse keeper.")
   await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
   await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(1, { timeout: 60_000 })
-  const opening = page.getByRole("article").filter({ hasText: WORKSHOP_FIRST }).first()
+  const opening = page.getByRole("article").filter({ hasText: WORKSHOP_FIRST })
+  // Clean changes on the newest reply are reverted automatically. Make this reply earlier
+  // in the chat so the swipe can keep its changes and branch from its parent.
+  const later = "A later workshop message."
+  await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId: workshop.id })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: chat.activeLeafSlotId, branch: false, content: later })
+    })
+  )
+  await expect(page.getByRole("article").filter({ hasText: later })).toBeVisible()
   await showActions(opening)
   stats.armed = true
   await opening.getByRole("button", { name: "Generate another swipe", exact: true }).click()
   const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
   await expect(warning).toBeVisible()
-  await warning.getByRole("button", { name: "Keep them and make a new swipe", exact: true }).click()
+  await warning.getByRole("button", { name: "Keep & swipe", exact: true }).click()
   await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
   await steady(page, stats)
   await page.getByRole("button", { name: "Chat panel", exact: true }).first().click()

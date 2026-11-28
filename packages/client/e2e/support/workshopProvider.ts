@@ -1,7 +1,7 @@
 // A scripted, tool-calling OpenAI-compatible provider on loopback for workshop browser tests: a
-// request offering the library tools gets list_library, then read_card of the Assistant, then the
-// answer; one without tools (a story chat's reply) gets a plain reply. Synthetic text only; no real
-// provider or key is ever used.
+// request offering the library tools gets a script of calls and prose; a story request gets
+// a plain reply. Scripts that call deferred tools directly use the Every tool connection setting.
+// Synthetic text only; no real provider or key is ever used.
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
@@ -12,10 +12,8 @@ export const STORY_REPLY = "The harbor bell rings twice."
 
 const CALLS = [
   { name: "list_library", arguments: { kind: "card" } },
-  { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
-  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } },
-  { name: "send_message", arguments: { message: WORKSHOP_SECOND } },
-  { name: "read_preset", arguments: { preset: "Workshop" } },
+  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] }, prose: WORKSHOP_FIRST },
+  { name: "read_preset", arguments: { preset: "Workshop" }, prose: WORKSHOP_SECOND },
   { name: "create_card", arguments: { name: "Mara Quill", description: "A synthetic lighthouse keeper." } }
 ]
 
@@ -33,7 +31,7 @@ interface Script {
 /**
  * `calls`: the tool calls a request offering the library tools gets, one a request, then the
  * answer. `perTask`: count them from the latest user message, so every task runs them again
- * (a carried turn holds the earlier ones too); by default from the start of the request.
+ * (the request also holds prior turns); by default from the start of the request.
  */
 export const startWorkshopProvider = async (
   options: {

@@ -65,6 +65,7 @@ export function workshopDocumentTests() {
                 const connection = yield* api.CreateConnection({
                   kind: "openai-chat",
                   settings: {
+                    providerSettings: { toolLoading: "every" },
                     name: `Synthetic ${suffix}`,
                     baseUrl: provider.baseUrl,
                     compat: {},
@@ -81,9 +82,14 @@ export function workshopDocumentTests() {
                 yield* api.SetGenerationDefaults({
                   defaults: { model: { connection: connection.id, model: model.id }, preset: null }
                 })
-                const chat = yield* api.CreateWorkshop({ title: `Draft edits ${suffix}` })
-                yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
-                return chat
+                return yield* api.CreateWorkshop({
+                  title: `Draft edits ${suffix}`,
+                  grants: [
+                    { capability: "library.presets", mode: "allow" },
+                    { capability: "library.lorebooks", mode: "allow" },
+                    { capability: "library.write", mode: "ask" }
+                  ]
+                })
               })
             )
             const presetTab = await context.newPage()

@@ -19,6 +19,7 @@ export function workshopSummaryTests() {
           const connection = yield* api.CreateConnection({
             kind: "openai-chat",
             settings: {
+              providerSettings: { toolLoading: "every" },
               name: "Synthetic workshop",
               baseUrl: provider.url + "/v1",
               compat: {},
@@ -56,7 +57,10 @@ export function workshopSummaryTests() {
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const chat = await admin((api) =>
             Effect.gen(function* () {
-              const chat = yield* api.CreateWorkshop({ title: `Summary workshop ${width} ${theme}` })
+              const chat = yield* api.CreateWorkshop({
+                title: `Summary workshop ${width} ${theme}`,
+                grants: [{ capability: "library.cards", mode: "allow" }]
+              })
               return chat
             })
           )

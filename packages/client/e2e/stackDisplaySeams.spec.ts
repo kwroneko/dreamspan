@@ -8,7 +8,7 @@ import { pluginFolder } from "../../server/src/plugins/repo.ts"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
-import { closePanel, openPanel } from "./support/panel.ts"
+import { openPanel } from "./support/panel.ts"
 import { startProvider } from "./support/provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -159,8 +159,8 @@ for (const width of [1440, 390])
         await expectLayout(page, info, "copied rules with auto dialog")
         await auto.getByRole("button", { name: "Start", exact: true }).click()
         await expect(auto).toHaveCount(0)
-        // A phone's panel is a sheet over the chat; beside it, the panel stays open.
-        if (width === 390) await closePanel(page)
+        // Starting Auto closes the phone's sheet and exposes the composer.
+        if (width === 390) await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeHidden()
         const strip = page.getByRole("group", { name: "Auto replies", exact: true })
         await expect(strip.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
         await expect(strip).not.toContainText("DISPLAYONLY")

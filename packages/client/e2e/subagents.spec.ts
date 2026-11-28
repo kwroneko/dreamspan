@@ -36,6 +36,7 @@ test.beforeAll(async () => {
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
+          providerSettings: { toolLoading: "every" },
           name: "Synthetic subagents",
           baseUrl: provider.baseUrl,
           compat: {},
@@ -193,10 +194,8 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `subagents-resumed-${width}-${theme}`, { scope: "article:last-of-type" })
     })
 
-// SA5 (spec/SUBAGENTS.md §3.2, §4): a background subagent. The reply goes on and writes, its text
-// becomes a message of its own, and the next one says "Waiting for 1 subagent" while the row,
-// marked "In the background", shows the subagent's progress line; its report then reaches the
-// reply, which sums up.
+// SA5 (spec/SUBAGENTS.md §3.2, §4): the workshop reply keeps its progress text, wait indicator
+// and subagent trace together, then adds the final answer when the report arrives.
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`a background subagent's wait, progress and report at ${width} ${theme}`, async ({ page }, info) => {
@@ -213,7 +212,7 @@ for (const width of [1440, 390])
       await page.getByLabel("Message", { exact: true }).fill("Look for the keeper while we talk.")
       await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
 
-      // What it wrote before waiting is a message of its own, holding the subagent's row.
+      // The reply already shows its progress text while its subagent works.
       const first = page.getByRole("article").filter({ hasText: BACKGROUND_WAITING })
       await expect(first).toHaveCount(1, { timeout: 30_000 })
       const waiting = page.locator("[data-waiting-subagents]")
@@ -230,12 +229,18 @@ for (const width of [1440, 390])
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       await expectLayout(page, info, `subagents-background-${width}-${theme}`, { scope: "main" })
 
-      // Its report reaches the reply, which sums up in the message after.
       provider.release()
-      const done = page.getByRole("article").filter({ hasText: BACKGROUND_ANSWER })
-      await expect(done).toHaveCount(1, { timeout: 30_000 })
-      await expect(page.locator("[data-waiting-subagents]")).toHaveCount(0)
-      await expect(row).toHaveAttribute("data-subagent-status", "done", { timeout: 30_000 })
+      await expect(first.locator("[data-workshop-text]")).toHaveText([BACKGROUND_WAITING, BACKGROUND_ANSWER], {
+        timeout: 30_000
+      })
+      await expect(waiting).toHaveCount(0)
+      // Completion can fold the finished trace. Open it to check the recorded status.
+      const trace = first.locator("[data-workshop-trace]").first()
+      const toggle = trace.getByRole("button", { name: /^1 step/ })
+      await expect(async () => {
+        if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+        await expect(row).toHaveAttribute("data-subagent-status", "done", { timeout: 1000 })
+      }).toPass({ timeout: 15_000 })
       expect(JSON.stringify(provider.bodies.at(-1)?.messages ?? [])).toContain("finished:")
       await expectLayout(page, info, `subagents-background-done-${width}-${theme}`, { scope: "main" })
     })

@@ -52,6 +52,16 @@ export function agentResumeTests() {
     else await messageMenu(reply, /^Resume/)
   }
 
+  const openRun = async (reply: Locator) => {
+    const badge = reply.locator("[data-steps-badge]")
+    const link = reply.locator("[data-steps-panel]").getByRole("link", { name: "Open the run" })
+    await expect(async () => {
+      if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+      await expect(link).toBeVisible({ timeout: 1000 })
+    }).toPass({ timeout: 10_000 })
+    await link.click()
+  }
+
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {
       test(`resume and step edits at ${width} ${theme}`, async ({ page }, info) => {
@@ -178,8 +188,7 @@ export function agentResumeTests() {
         await expect(failed.getByText(/^Failed \(/)).toHaveCount(0)
 
         // The run inspector: what the resume cut is folded; a call's result is edited and resumed from.
-        await failed.locator("[data-steps-badge]").click()
-        await failed.locator("[data-steps-panel]").getByRole("link", { name: "Open the run" }).click()
+        await openRun(failed)
         const steps = page.getByRole("region", { name: "Steps", exact: true })
         await expect(steps.locator('[data-run-cut="resume"]')).toContainText("Cut when this reply was resumed")
         const result = steps.getByRole("region", { name: "Result of search_chat" }).first()
@@ -219,8 +228,7 @@ export function agentResumeTests() {
         expect(JSON.stringify(editedSent[0]!.messages.at(-1))).toContain(EDITED)
 
         // Its inspector: the edited result, and what the edit cut, folded until opened.
-        await latest.locator("[data-steps-badge]").click()
-        await latest.locator("[data-steps-panel]").getByRole("link", { name: "Open the run" }).click()
+        await openRun(latest)
         await expect(steps.getByRole("region", { name: "Result of search_chat" }).first()).toContainText(EDITED)
         const cut = steps.locator('[data-run-cut="edit"]')
         await expect(cut).toContainText("Cut when this step was edited")

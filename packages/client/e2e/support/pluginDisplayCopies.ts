@@ -193,6 +193,12 @@ export const pluginDisplayCopyTests = (options: { readonly layoutOnly?: boolean 
         await page.goto(`${server().url}/settings/plugins`)
         for (const group of ["Display rules", "Display script lists", "Timeline rules"])
           await page.getByRole("region", { name: group, exact: true }).getByRole("searchbox").fill("display")
+        await expect
+          .poll(() => {
+            const value = new URL(page.url()).searchParams.get("builtinSearch")
+            return value ? JSON.parse(value) : null
+          })
+          .toEqual({ displayTransforms: "display", displayScriptLists: "display", timelineTransforms: "display" })
         await page.reload()
         for (const group of ["Display rules", "Display script lists", "Timeline rules"])
           await expect(page.getByRole("region", { name: group, exact: true }).getByRole("searchbox")).toHaveValue(

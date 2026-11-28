@@ -27,14 +27,14 @@ export function ConvertPresetButton({ store, compact }: { store: EditorStore; co
     <>
       <Button
         // With only its icon showing, the 32 px square of the toolbar's icon buttons.
-        className="h-8! px-2! @max-[60rem]:w-8 @max-[60rem]:px-0!"
+        className="h-8! px-2! @max-[68rem]:w-8 @max-[68rem]:px-0!"
         aria-label="Convert to workshop"
         hint={HINT}
         onClick={() => setPlace(target)}
       >
         <Icon name="tool" />
-        {/* The toolbar's longest label goes first: with it, the row needs 59rem (presetMarkers.spec.ts). */}
-        <span className="@max-[60rem]:hidden">Convert to workshop</span>
+        {/* The conversion label collapses before the rest of the preset toolbar. */}
+        <span className="@max-[68rem]:hidden">Convert to workshop</span>
       </Button>
       {place === target && (
         <ConvertDialog

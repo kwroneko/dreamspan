@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { confined, limits, validPath } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
 import type { AuthorRequest } from "./authorRepo.ts"
+export const REPO_INFO_BATCH = 8
+export type RepoInfo = Pick<typeof import("@dreamspan/shared/plugins.ts").PluginView.Type, "commit" | "manifest">
 export type RepoRequest =
   | {
       readonly op: "copyBuiltin"
@@ -32,6 +34,11 @@ export type RepoRequest =
       readonly message: string
     }
   | { readonly op: "info"; readonly owner: string; readonly id: string; readonly selected?: string }
+  | {
+      readonly op: "infoBatch"
+      readonly owner: string
+      readonly entries: ReadonlyArray<{ readonly id: string; readonly selected?: string }>
+    }
   | {
       readonly op: "verify"
       readonly owner: string

@@ -104,20 +104,18 @@ for (const mode of ["every", "dispatcher", "stale", "declined", "resume", "histo
           Effect.promise(() =>
             startMockProvider((r: Recorded, res) => {
               const b = r.body as unknown as Body
-              if (!JSON.stringify(b.messages).includes("DICE TASK")) return sse(res, completionChunks(["Ready."], {}))
-              requests.push(b)
-              const historical = b.messages.some(
-                (m) => m.role === "user" && JSON.stringify(m.content).includes("HISTORY TASK")
+              const from = b.messages.findLastIndex(
+                (m) => m.role === "user" && (m.content?.includes("HISTORY TASK") || m.content?.includes("DICE TASK"))
               )
+              if (from < 0) return sse(res, completionChunks(["Ready."], {}))
+              requests.push(b)
+              const historical = b.messages[from]!.content?.includes("HISTORY TASK")
               const phaseSteps: typeof steps = historical
                 ? [
                     ["plugin_check", { plugin: "dice-roller", commit: historicalTarget }],
                     ["plugin_enable", { plugin: "dice-roller", commit: historicalTarget }]
                   ]
                 : steps
-              const from = b.messages.findLastIndex(
-                (m) => m.role === "user" && (m.content?.includes("HISTORY TASK") || m.content?.includes("DICE TASK"))
-              )
               const done = b.messages.slice(from).filter((m) => m.role === "tool").length
               const step = phaseSteps[done]
               if (!step) return sse(res, completionChunks(["The dice button is on."], {}))
@@ -128,7 +126,7 @@ for (const mode of ["every", "dispatcher", "stale", "declined", "resume", "histo
                 chunk(
                   wrapped ? "call_tool" : step[0],
                   wrapped ? { name: step[0], arguments: args } : args,
-                  "dice_" + done
+                  `${historical ? "history" : "dice"}_${done}`
                 )
               )
             })
