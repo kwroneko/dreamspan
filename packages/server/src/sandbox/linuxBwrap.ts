@@ -113,6 +113,14 @@ export const sandboxPath = () =>
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 /**
+ * Closes any non-CLOEXEC descriptor above stderr that the host or parent launcher left open
+ * across `bwrap`, before starting the proxy bridge or the untrusted command/program. Uses no
+ * braces or external commands so cgroup wrappers pass it verbatim and nothing else inherits it.
+ */
+const CLOSE_INHERITED_FDS =
+  'if cd /proc/self/fd 2>/dev/null; then for __rp_fd in *; do case "$__rp_fd" in 0|1|2|*[!0-9]*|"") ;; *) eval "exec $__rp_fd>&-" 2>/dev/null ;; esac; done; unset __rp_fd; cd /; fi'
+
+/**
  * The sandbox's first shell: limits that can't be raised again, then the bridge to the proxy,
  * then the command, with the directory it ended in after a random marker. The marker comes in
  * the environment (`RP_END`, set through bubblewrap's argument descriptor), not on a command
@@ -124,6 +132,7 @@ const prelude = (spec: RunSpec) => {
   const limit = (flag: string, value: number) =>
     `ulimit ${flag} ${value} || { echo "The sandbox couldn't set its limits." >&2; exit 125; }`
   return [
+    CLOSE_INHERITED_FDS,
     // Out of memory, the kernel picks a command before the server (a command can lower it back
     // to the server's own value, never below).
     "echo 1000 > /proc/self/oom_score_adj 2>/dev/null",
@@ -517,6 +526,7 @@ const spawnPrelude = (spec: SpawnSpec) => {
   const limit = (flag: string, value: number) =>
     `ulimit ${flag} ${value} || { echo "The sandbox couldn't set its limits." >&2; exit 125; }`
   return [
+    CLOSE_INHERITED_FDS,
     "echo 1000 > /proc/self/oom_score_adj 2>/dev/null",
     limit("-u", spec.limits.processes),
     limit("-d", kib(spec.limits.memoryBytes)),
