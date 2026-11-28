@@ -5,13 +5,16 @@
 // refuse background commands without a sandbox). When the cgroup can't be opened for a command,
 // its PID namespace is used instead; with neither, a command that must be held is refused.
 import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { vi } from "vitest"
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { makeNoSandbox, noSandbox } from "../src/sandbox/none.ts"
 import { selectLimiter, type CgroupLimiter } from "../src/sandbox/cgroupLimits.ts"
 import type { CommandSandbox, RunSpec } from "../src/sandbox/registry.ts"
 import { CommandRefused } from "../src/sandbox/refused.ts"
+import { tempDir } from "./support/tempDir.ts"
 
 const alive = (marker: string) =>
   readdirSync("/proc")
@@ -35,31 +38,38 @@ const spec = (command: string): RunSpec => ({
 
 const escapes = (sandbox: CommandSandbox) =>
   Effect.promise(async () => {
+    const command = (shell: string) => ({ ...spec(shell), requireContainment: true })
     const contained = await sandbox.containment!()
     assert.isTrue(contained.ok, JSON.stringify(contained))
     // Ends by itself, leaving a process outside its group.
     const ended = `ended${Date.now()}`
     const result = await sandbox.run(
-      spec(`setsid sh -c 'sleep 300; :' ${ended} >/dev/null 2>&1 & echo started`),
+      {
+        ...command(
+          `setsid sh -c 'touch "$RUN_READY"; sleep 300; :' ${ended} >/dev/null 2>&1 & ` +
+            'until [[ -e "$RUN_READY" ]]; do sleep 0.01; done; echo started'
+        ),
+        env: { HOME: "/tmp", RUN_READY: join(tempDir("no-sandbox"), "ready") }
+      },
       new AbortController().signal
     )
     assert.strictEqual(result.exitCode, 0)
     assert.include(result.head, "started")
-    await new Promise((done) => setTimeout(done, 300))
-    assert.deepStrictEqual(alive(ended), [])
+    await vi.waitFor(() => assert.deepStrictEqual(alive(ended), []), { timeout: 5000 })
     // Stopped while it runs.
     const stopped = `stopped${Date.now()}`
     const controller = new AbortController()
     const running = sandbox.run(
-      spec(`setsid sh -c 'sleep 300; :' ${stopped} >/dev/null 2>&1 & sleep 300`),
+      command(`setsid sh -c 'sleep 300; :' ${stopped} >/dev/null 2>&1 & sleep 300`),
       controller.signal
     )
-    await new Promise((done) => setTimeout(done, 500))
-    assert.isNotEmpty(alive(stopped))
-    controller.abort()
-    await running
-    await new Promise((done) => setTimeout(done, 300))
-    assert.deepStrictEqual(alive(stopped), [])
+    try {
+      await vi.waitFor(() => assert.isNotEmpty(alive(stopped)), { timeout: 5000 })
+    } finally {
+      controller.abort()
+      await running
+    }
+    await vi.waitFor(() => assert.deepStrictEqual(alive(stopped), []), { timeout: 5000 })
   })
 
 const linux = process.platform === "linux"

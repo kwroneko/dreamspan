@@ -386,12 +386,20 @@ sandboxed("the Linux sandbox, further attempts", () => {
   )
 
   it("sees no /sys, /var or Docker socket, only its own runtime folder, and inherits no descriptors", async () => {
+    // Listing /proc/self/fd can include the directory handle used to enumerate it. Check
+    // each entry after that handle is closed, in the same process that did the listing.
+    const listFds = [
+      "import os",
+      'path = "/proc/self/fd"',
+      "for fd in sorted(os.listdir(path)):",
+      '    if os.path.lexists(os.path.join(path, fd)): print("fd=" + fd)'
+    ].join("\n")
     const result = await run(
       [
         "ls /sys 2>&1 | head -1",
         "ls /var/run/docker.sock /run/docker.sock /var 2>&1",
         "ls /run",
-        "ls /proc/self/fd | wc -l",
+        `python3 -c '${listFds}'`,
         "cat /dev/tty 2>&1 | head -1"
       ].join("; ")
     )
@@ -401,8 +409,7 @@ sandboxed("the Linux sandbox, further attempts", () => {
     expect(text).toContain("cannot access '/var/run/docker.sock'")
     expect(text).toContain("cannot access '/var'")
     expect(lines).toContain("rp")
-    // 0, 1, 2 and the one ls opens to list them.
-    expect(lines).toContain("4")
+    expect(lines.filter((line) => line.startsWith("fd="))).toEqual(["fd=0", "fd=1", "fd=2"])
     // No controlling terminal to push input into (TIOCSTI): a new session without one.
     expect(text).toMatch(/No such device or address/)
   })

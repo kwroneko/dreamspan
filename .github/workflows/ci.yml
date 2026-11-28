@@ -9,8 +9,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  MIMALLOC_ALLOW_THP: "0"
+
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,16 +28,60 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm run knip
-      - run: npm test
-      - run: npm run test:slow
       - run: npm run build
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [1/4, 2/4, 3/4, 4/4, slow]
+    env:
+      VITEST_MAX_WORKERS: "2"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Enable PID namespaces for the test runner's unshare
+        run: |
+          args=(--user --map-current-user --pid --fork --kill-child -- /bin/true)
+          if unshare "${args[@]}"; then exit 0; fi
+
+          # Give the test executable a profile on AppArmor runners that restrict user namespaces.
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
+          ci_bin=/usr/local/lib/dreamspan-ci
+          sudo install -D -m 0755 "$(command -v unshare)" "$ci_bin/unshare"
+          sudo apparmor_parser -r <<'PROFILE'
+          abi <abi/4.0>,
+          profile dreamspan-ci-unshare /usr/local/lib/dreamspan-ci/unshare flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          "$ci_bin/unshare" "${args[@]}"
+          echo "$ci_bin" >> "$GITHUB_PATH"
+      - run: npm ci
+      - if: matrix.suite != 'slow'
+        run: npm test -- --shard=${{ matrix.suite }}
+      - if: matrix.suite == 'slow'
+        run: npm run test:slow
+
+  check:
+    runs-on: ubuntu-latest
+    needs: [static, test]
+    if: always()
+    steps:
+      - run: test "${{ needs.static.result }}" = success && test "${{ needs.test.result }}" = success
 
   browser:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      PLAYWRIGHT_WORKERS: "2"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -42,9 +89,24 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: node node_modules/@playwright/test/cli.js install --with-deps --only-shell chromium
+      # Persistent contexts use full Chromium. The other tests use the headless shell.
+      - run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Set the browser layout tests' system font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fontconfig fonts-freefont-otf
+          mkdir -p ~/.config/fontconfig/conf.d
+          cat > ~/.config/fontconfig/conf.d/99-dreamspan-ci.conf <<'FONTCONFIG'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>FreeSans</family></prefer></alias>
+            <alias binding="strong"><family>system-ui</family><prefer><family>FreeSans</family></prefer></alias>
+          </fontconfig>
+          FONTCONFIG
+          test "$(fc-match -f '%{family}' system-ui)" = FreeSans
       - run: npm run build
-      - run: npx playwright test -c packages/client/playwright.config.ts --project=chromium --shard=${{ matrix.shard }}/4
+      - run: npx playwright test -c packages/client/playwright.config.ts --project=chromium --shard=${{ matrix.shard }}/6
         env:
           CI: "true"
       - if: failure()

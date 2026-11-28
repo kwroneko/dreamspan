@@ -11,7 +11,7 @@ import type { RefId } from "@dreamspan/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { expectTextBox, textBoxValue } from "./support/textbox.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { urlOpenedInNewTab } from "./support/browserTab.ts"
 
 const server = serverPerFile(withAdmin)
@@ -588,13 +588,9 @@ test("new preset approval cannot execute a previous preset's pending display tex
   await expect(page.locator("html")).not.toHaveAttribute("data-stale-panel-ran")
 })
 
-// A panel's script can focus its own document at any time. The app sends focus back, so the
-// typing stays in the composer, but a key typed in that moment can still reach the panel (its
-// frame runs in another process): the bridge never acts on keys, only on a press in the panel.
-// A press in the panel still gives it focus, and then its copy works.
-test("a panel that takes focus gets neither the typing nor the bridge, and a click in it still works", async ({
-  page
-}) => {
+// A panel can take focus briefly. The app restores it to the composer, and a key handled in
+// the panel during that window can't use the bridge. A click in the panel permits its copy.
+test("a panel that takes focus gives it back, and its copy requires a click in the panel", async ({ page }) => {
   test.setTimeout(180_000)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: server().url })
@@ -609,8 +605,14 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
             "Focus",
             [
               '<input id="field">',
-              "<script>setInterval(() => document.getElementById('field').focus(), 30)",
+              "<script>const field = document.getElementById('field')",
               "addEventListener('keydown', () => dreamspan.copy('Panel text'), true)",
+              "field.addEventListener('focus', () => { document.body.dataset.focusAttempted = 'yes' }, { once: true })",
+              "addEventListener('message', ({ data }) => {",
+              "  if (data !== 'test:focus') return",
+              "  field.focus()",
+              "  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))",
+              "})",
               "document.body.dataset.focusReady = 'yes'</script>"
             ].join("\n")
           )
@@ -644,23 +646,23 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
     })
   )
   await page.goto(`${server().url}/chats/${started.chat.id}`)
-  const inside = page.frameLocator('iframe[title="Panel"]')
+  const frame = page.locator('iframe[title="Panel"]')
+  const inside = frame.contentFrame()
   await expect(inside.locator("body")).toHaveAttribute("data-focus-ready", "yes")
   await page.evaluate(() => navigator.clipboard.writeText("Unchanged"))
   const composer = page.getByTestId("composer")
   await composer.click()
-  await page.keyboard.type("Good evening to you", { delay: 60 })
-  // Focus went back: most of the typing is the composer's (without the guard, none of it is).
-  // A few keys typed while focus was away may reach the panel, more on a loaded host.
-  expect((await textBoxValue(composer)).length).toBeGreaterThan(9)
-  // Whatever key reached the panel gave it nothing to act on.
+  await page.keyboard.type("Good evening")
+  await frame.evaluate((iframe: HTMLIFrameElement) => iframe.contentWindow!.postMessage("test:focus", "*"))
+  await expect(inside.locator("body")).toHaveAttribute("data-focus-attempted", "yes")
+  await expect(composer).toBeFocused()
+  await page.keyboard.type(" to you")
+  await expectTextBox(composer, "Good evening to you")
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Unchanged")
-  // A press in the panel gives it focus, and its copy then works. (Its field may already hold
-  // the key or two it caught above.) The user stops typing first, as one does to reach for it.
-  await page.waitForTimeout(700)
   await inside.locator("#field").click()
-  await page.keyboard.type("Room 4", { delay: 60 })
-  await expect(inside.locator("#field")).toHaveValue(/Room 4$/)
+  await expect(inside.locator("#field")).toBeFocused()
+  await page.keyboard.type("Room 4")
+  await expect(inside.locator("#field")).toHaveValue("Room 4")
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Panel text")
 })
 
